@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import JsBarcode from "jsbarcode";
+import QRCode from "qrcode";
 
 type Location = {
   code: string;
@@ -12,16 +12,14 @@ type Location = {
 };
 
 export default function PrintLocationLabel({ location }: { location: Location }) {
-  const svgRef = useRef<SVGSVGElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (svgRef.current) {
-      JsBarcode(svgRef.current, location.code, {
-        format: "CODE128",
-        width: 3,
-        height: 80,
-        displayValue: false,
-        margin: 0,
+    if (canvasRef.current) {
+      QRCode.toCanvas(canvasRef.current, location.code, {
+        width: 260,
+        margin: 1,
+        color: { dark: "#000000", light: "#ffffff" },
       });
     }
   }, [location.code]);
@@ -42,7 +40,7 @@ export default function PrintLocationLabel({ location }: { location: Location })
 
         <div className="code">{location.code}</div>
 
-        <svg ref={svgRef} className="barcode" />
+        <canvas ref={canvasRef} className="qrcode" />
 
         {location.type === "RACK" && (
           <div className="coords">
@@ -90,8 +88,7 @@ export default function PrintLocationLabel({ location }: { location: Location })
           margin-bottom: 24px;
         }
 
-        .barcode {
-          width: 90%;
+        .qrcode {
           margin-bottom: 16px;
         }
 

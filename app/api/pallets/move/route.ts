@@ -4,17 +4,21 @@ import { pallets, palletEvents, locations, items, settings } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
 function parseRealLabel(raw: string) {
-  const cleaned = raw.trim().replace(/^\*/, "");
+  const cleaned = raw.replace(/^\*/, "");
   const parts = cleaned.split("*");
   if (parts.length !== 4) return null;
-  const [sku, palletSeq, , workOrderNumber] = parts; // middle segment (qty) is unreliable, ignored
+  const [sku, palletSeq, , workOrderNumber] = parts;
   if (!sku || !palletSeq || !workOrderNumber) return null;
   return { sku, workOrderNumber };
 }
 
 function extractSku(label: string): string | null {
-  const cleaned = label.trim().replace(/^\*/, "");
+  const cleaned = label.replace(/^\*/, "");
   const parts = cleaned.split("*");
   return parts[0]?.trim() || null;
 }
@@ -28,7 +32,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { label, currentLocationCode, newLocationCode, quantity } = body;
+  const label = sanitize(body.label ?? "");
+  const currentLocationCode = sanitize(body.currentLocationCode ?? "");
+  const newLocationCode = sanitize(body.newLocationCode ?? "");
+  const { quantity } = body;
 
   if (!label || !currentLocationCode || !newLocationCode) {
     return NextResponse.json(
@@ -53,7 +60,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unknown destination location code" }, { status: 404 });
   }
 
-  // 1. Exact match: this specific label already individually tracked here.
+  // 1. Exact match.
   const [exactPallet] = await db
     .select()
     .from(pallets)
@@ -98,7 +105,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ...result, matchType: "exact" });
   }
 
-  // Check if this exact label already exists (active) somewhere else.
   const [alreadyExistsElsewhere] = await db
     .select({ label: pallets.label, locationCode: locations.code })
     .from(pallets)
@@ -116,7 +122,7 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // 2. Fall back to the default-code bucket for this item at the current location.
+  // 2. Fall back to the default-code bucket.
   const sku = extractSku(label);
   const [item] = sku ? await db.select().from(items).where(eq(items.sku, sku)) : [];
 
@@ -158,7 +164,7 @@ export async function PATCH(req: NextRequest) {
           .update(pallets)
           .set({
             quantity: remainingAtSource,
-            status: remainingAtSource === 0 ? "REMOVED" : "ACTIVE",
+            status: remainingAtSource === 0 ? "OUTBOUND" : "ACTIVE",
             updatedAt: new Date(),
           })
           .where(eq(pallets.id, sourceBucket.id));
@@ -175,7 +181,7 @@ export async function PATCH(req: NextRequest) {
             .set({ quantity: existingRealPallet.quantity + quantity, updatedAt: new Date() })
             .where(eq(pallets.id, existingRealPallet.id))
             .returning();
-        } else if (existingRealPallet && existingRealPallet.status === "REMOVED") {
+        } else if (existingRealPallet && existingRealPallet.status === "OUTBOUND") {
           [destinationPallet] = await tx
             .update(pallets)
             .set({
@@ -217,18 +223,15 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  // 3. Nothing exists at all for this label — no exact pallet, no default
-  // bucket. If Automatic Inbound is on AND we're moving off a FLOOR location,
-  // treat this as pre-existing floor stock: create the inbound record and
-  // immediately move it, in one transaction.
-{
-  const [settingsRow] = await db.select().from(settings).limit(1);
+  // 3. Nothing exists at all — automatic inbound fallback.
+  {
+    const [settingsRow] = await db.select().from(settings).limit(1);
 
-  const autoInboundAllowed =
-    (currentLocation.type === "FLOOR" && settingsRow?.automaticInbound) ||
-    (currentLocation.type === "RACK" && settingsRow?.automaticInboundFromRack);
+    const autoInboundAllowed =
+      (currentLocation.type === "FLOOR" && settingsRow?.automaticInbound) ||
+      (currentLocation.type === "RACK" && settingsRow?.automaticInboundFromRack);
 
-  if (autoInboundAllowed) {
+    if (autoInboundAllowed) {
       const parsed = parseRealLabel(label);
       if (!parsed) {
         return NextResponse.json(

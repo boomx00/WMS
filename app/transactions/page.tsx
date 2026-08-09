@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { palletEvents, pallets, items, locations, users } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 import MovementTable from "./MovementTable";
+import MovementSummary from "./MovementSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -39,8 +40,9 @@ export default async function TransactionsPage() {
           Every inbound, move, and removal scan — most recent first.
         </p>
       </header>
-
-      <MovementTable rows={rows} />
+<MovementSummary />
+<MovementTable rows={rows} />
+      {/* <MovementTable rows={rows} /> */}
     </div>
   );
 }

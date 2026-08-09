@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import JsBarcode from "jsbarcode";
+import QRCode from "qrcode";
 
 type Pallet = {
   label: string;
@@ -15,23 +15,20 @@ type Pallet = {
 };
 
 export default function PrintLabel({ pallet }: { pallet: Pallet }) {
-  const svgRef = useRef<SVGSVGElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (svgRef.current) {
-      JsBarcode(svgRef.current, pallet.label, {
-        format: "CODE128",
-        width: 2,
-        height: 60,
-        displayValue: false,
-        margin: 0,
+    if (canvasRef.current) {
+      QRCode.toCanvas(canvasRef.current, pallet.label, {
+        width: 220,
+        margin: 1,
+        color: { dark: "#000000", light: "#ffffff" },
       });
     }
   }, [pallet.label]);
 
   return (
     <div>
-      {/* Screen-only controls, hidden when actually printing */}
       <div className="p-4 print:hidden">
         <button
           onClick={() => window.print()}
@@ -46,7 +43,7 @@ export default function PrintLabel({ pallet }: { pallet: Pallet }) {
         <div className="sku">{pallet.itemSku}</div>
         <div className="name">{pallet.itemName}</div>
 
-        <svg ref={svgRef} className="barcode" />
+        <canvas ref={canvasRef} className="qrcode" />
         <div className="label-text">{pallet.label}</div>
 
         <div className="details">
@@ -56,73 +53,75 @@ export default function PrintLabel({ pallet }: { pallet: Pallet }) {
         </div>
       </div>
 
- <style>{`
-  @page {
-    size: 10cm 15cm;
-    margin: 0;
-  }
+      <style>{`
+        @page {
+          size: 10cm 15cm;
+          margin: 0;
+        }
 
-  body {
-    background: white;
-    color: black;
-  }
+        body {
+          background: white;
+          color: black;
+        }
 
-  .label-sheet {
-    width: 10cm;
-    height: 15cm;
-    padding: 0.5cm;
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-family: monospace;
-    color: black;
-  }
+        .label-sheet {
+          width: 10cm;
+          height: 15cm;
+          padding: 0.5cm;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          font-family: monospace;
+          color: black;
+        }
 
-  .tag {
-    font-size: 24pt;
-    font-weight: bold;
-    letter-spacing: 2px;
-    border: 3px solid black;
-    padding: 4px 16px;
-    margin-bottom: 16px;
-  }
+        .tag {
+          font-size: 24pt;
+          font-weight: bold;
+          letter-spacing: 2px;
+          border: 3px solid black;
+          padding: 4px 16px;
+          margin-bottom: 16px;
+        }
 
-  .sku {
-    font-size: 20pt;
-    font-weight: bold;
-  }
+        .sku {
+          font-size: 20pt;
+          font-weight: bold;
+        }
 
-  .name {
-    font-size: 12pt;
-    margin-bottom: 16px;
-    text-align: center;
-  }
+        .name {
+          font-size: 12pt;
+          margin-bottom: 16px;
+          text-align: center;
+        }
 
-  .barcode {
-    width: 90%;
-    margin-bottom: 4px;
-  }
+        .qrcode {
+          margin-bottom: 12px;
+        }
 
-  .label-text {
-    font-size: 10pt;
-    letter-spacing: 1px;
-    margin-bottom: 16px;
-  }
+        .label-text {
+          font-size: 9pt;
+          letter-spacing: 0.5px;
+          margin-bottom: 16px;
+          text-align: center;
+          word-break: break-all;
+          max-width: 80%;
+        }
 
-  .details {
-    font-size: 11pt;
-    text-align: center;
-  }
+        .details {
+          font-size: 11pt;
+          text-align: center;
+        }
 
-  @media screen {
-    .label-sheet {
-      border: 1px dashed #999;
-      margin: 16px;
-    }
-  }
-`}</style>
+        @media screen {
+          .label-sheet {
+            border: 1px dashed #999;
+            margin: 16px;
+          }
+        }
+      `}</style>
     </div>
   );
 }

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { pallets, palletEvents, locations, items } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
 
 // GET /api/pallets - list all pallets (current state)
 export async function GET() {
@@ -19,12 +23,35 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { label, sku, workOrderNumber, quantity } = body;
+  const label = sanitize(body.label ?? "");
+  const sku = sanitize(body.sku ?? "");
+  const workOrderNumber = sanitize(body.workOrderNumber ?? "");
+  const { quantity } = body;
 
   if (!label || !sku || !workOrderNumber || !quantity) {
     return NextResponse.json(
       { error: "label, sku, workOrderNumber, and quantity are required" },
       { status: 400 }
+    );
+  }
+
+  const [existingElsewhere] = await db
+    .select({
+      label: pallets.label,
+      locationCode: locations.code,
+    })
+    .from(pallets)
+    .innerJoin(locations, eq(pallets.locationId, locations.id))
+    .where(and(eq(pallets.label, label), eq(pallets.status, "ACTIVE")));
+
+  if (existingElsewhere) {
+    return NextResponse.json(
+      {
+        error: `This pallet has already been inbounded — it's currently at ${existingElsewhere.locationCode}.`,
+        matchType: "already_exists_elsewhere",
+        actualLocationCode: existingElsewhere.locationCode,
+      },
+      { status: 409 }
     );
   }
 

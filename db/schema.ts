@@ -109,8 +109,8 @@ export const itemsRelations = relations(items, ({ many }) => ({
 
 export const palletStatusEnum = pgEnum("pallet_status", [
   "ACTIVE",
-  "PENDING", // created by a split, not yet scanned in by an operator
-  "REMOVED",
+  "PENDING",
+  "OUTBOUND",
 ]);
 
 export const pallets = pgTable(
@@ -185,9 +185,9 @@ export const palletEventTypeEnum = pgEnum("pallet_event_type", [
   "INBOUND",
   "MOVED",
   "SPLIT",
-  "CONFIRMED", // operator scanned a pending pallet in, activating it
-  "REMOVED",
-  "NEVER_INBOUNDED",
+  "CONFIRMED",
+  "OUTBOUND",
+  "DEFAULT_OUTBOUND",
 ]);
 export const palletEvents = pgTable("pallet_events", {
   id: serial("id").primaryKey(),

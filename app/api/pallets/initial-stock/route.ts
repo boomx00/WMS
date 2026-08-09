@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         .set({ quantity: existing.quantity + quantity, updatedAt: new Date() })
         .where(eq(pallets.id, existing.id))
         .returning();
-    } else if (existing && existing.status === "REMOVED") {
+    } else if (existing && existing.status === "OUTBOUND") {
       // Revive a previously-emptied bucket rather than inserting a duplicate
       // (label, locationId) row, which the unique index would reject.
       [pallet] = await tx

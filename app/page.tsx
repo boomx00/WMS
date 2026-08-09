@@ -21,7 +21,7 @@ async function getActiveInventory() {
     .from(pallets)
     .innerJoin(items, eq(pallets.itemId, items.id))
     .innerJoin(locations, eq(pallets.locationId, locations.id))
-    .where(ne(pallets.status, "REMOVED"))
+    .where(eq(pallets.status, "ACTIVE"))
     .orderBy(locations.code);
 }
 
@@ -50,7 +50,7 @@ export default async function InventoryPage() {
         <StatCard label="Racked" value={onRack.toString()} />
       </div>
 
-      {rows.length === 0 ? (
+      {/* {rows.length === 0 ? (
         <EmptyState />
       ) : (
         <div className="border border-zinc-800 rounded-lg overflow-hidden">
@@ -100,7 +100,7 @@ export default async function InventoryPage() {
             </tbody>
           </table>
         </div>
-      )}
+      )} */}
       </div>
 
       <section className="mt-10">

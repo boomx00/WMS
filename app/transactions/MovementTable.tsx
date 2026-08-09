@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { EVENT_TYPE_STYLES, EVENT_TYPE_LABELS } from "@/lib/eventTypes";
 
 type Row = {
   eventId: number;
@@ -15,19 +16,6 @@ type Row = {
   username: string;
 };
 
-const TYPE_STYLES: Record<string, string> = {
-  INBOUND: "bg-blue-950 text-blue-300",
-  MOVED: "bg-amber-950 text-amber-300",
-  REMOVED: "bg-red-950 text-red-300",
-  NEVER_INBOUNDED: "bg-purple-950 text-purple-300",
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  INBOUND: "INBOUND",
-  MOVED: "MOVED",
-  REMOVED: "OUTBOUND",
-  NEVER_INBOUNDED: "OUTBOUND · NEVER INBOUNDED",
-};
 
 export default function MovementTable({ rows }: { rows: Row[] }) {
   const [search, setSearch] = useState("");
@@ -70,8 +58,8 @@ export default function MovementTable({ rows }: { rows: Row[] }) {
   <option value="ALL">All types</option>
   <option value="INBOUND">Inbound</option>
   <option value="MOVED">Moved</option>
-  <option value="REMOVED">Removed</option>
-  <option value="NEVER_INBOUNDED">Never Inbounded</option>
+  <option value="OUTBOUND">Outbound</option>
+<option value="DEFAULT_OUTBOUND">Default Outbound</option>
 </select>
       </div>
 
@@ -109,10 +97,10 @@ export default function MovementTable({ rows }: { rows: Row[] }) {
                   <td className="px-4 py-3">
                     <span
                       className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
-                        TYPE_STYLES[row.type] ?? "bg-zinc-800 text-zinc-400"
+                        EVENT_TYPE_STYLES[row.type] ?? "bg-zinc-800 text-zinc-400"
                       }`}
                     >
-                      {TYPE_LABELS[row.type] ?? row.type}
+                      {EVENT_TYPE_LABELS[row.type] ?? row.type}
                     </span>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-zinc-400">

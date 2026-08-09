@@ -4,8 +4,12 @@ import { pallets, palletEvents, locations, items, settings } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
 function extractSku(label: string): string | null {
-  const cleaned = label.trim().replace(/^\*/, "");
+  const cleaned = label.replace(/^\*/, "");
   const parts = cleaned.split("*");
   return parts[0]?.trim() || null;
 }
@@ -19,7 +23,9 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { label, locationCode, quantity } = body;
+  const label = sanitize(body.label ?? "");
+  const locationCode = sanitize(body.locationCode ?? "");
+  const { quantity } = body;
 
   if (!label || !locationCode) {
     return NextResponse.json({ error: "label and locationCode are required" }, { status: 400 });
@@ -37,7 +43,7 @@ export async function PATCH(req: NextRequest) {
     .where(and(eq(pallets.label, label), eq(pallets.locationId, location.id)));
 
   if (exactPallet) {
-    if (exactPallet.status === "REMOVED") {
+    if (exactPallet.status === "OUTBOUND") {
       return NextResponse.json({ error: "Pallet has already been removed" }, { status: 409 });
     }
 
@@ -45,7 +51,7 @@ export async function PATCH(req: NextRequest) {
       const [updated] = await tx
         .update(pallets)
         .set({
-          status: "REMOVED",
+          status: "OUTBOUND",
           outForkliftUserId: session.userId,
           removedAt: new Date(),
           updatedAt: new Date(),
@@ -55,7 +61,7 @@ export async function PATCH(req: NextRequest) {
 
       await tx.insert(palletEvents).values({
         palletId: updated.id,
-        type: "REMOVED",
+        type: "OUTBOUND",
         locationId: location.id,
         userId: session.userId,
         quantity: exactPallet.quantity,
@@ -67,7 +73,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ...result, matchType: "exact" });
   }
 
-  // Check if this label already exists (active) somewhere else.
   const [alreadyExistsElsewhere] = await db
     .select({ label: pallets.label, locationCode: locations.code })
     .from(pallets)
@@ -127,7 +132,7 @@ export async function PATCH(req: NextRequest) {
           .update(pallets)
           .set({
             quantity: remaining,
-            status: remaining === 0 ? "REMOVED" : "ACTIVE",
+            status: remaining === 0 ? "OUTBOUND" : "ACTIVE",
             outForkliftUserId: remaining === 0 ? session.userId : defaultPallet.outForkliftUserId,
             removedAt: remaining === 0 ? new Date() : defaultPallet.removedAt,
             updatedAt: new Date(),
@@ -137,7 +142,7 @@ export async function PATCH(req: NextRequest) {
 
         await tx.insert(palletEvents).values({
           palletId: updated.id,
-          type: "REMOVED",
+          type: "OUTBOUND",
           locationId: location.id,
           userId: session.userId,
           quantity,
@@ -150,9 +155,7 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  // 3. Nothing at all — no exact pallet, no default bucket. If Allow
-  // Untracked Outbound is on, record this activity without touching any
-  // stock numbers.
+  // 3. Nothing at all — untracked outbound fallback.
   const [settingsRow] = await db.select().from(settings).limit(1);
 
   if (settingsRow?.allowUntrackedOutbound) {
@@ -181,7 +184,7 @@ export async function PATCH(req: NextRequest) {
           workOrderNumber: "UNTRACKED",
           quantity,
           locationId: location.id,
-          status: "REMOVED",
+          status: "OUTBOUND",
           inboundUserId: session.userId,
           outForkliftUserId: session.userId,
           removedAt: new Date(),
@@ -190,7 +193,7 @@ export async function PATCH(req: NextRequest) {
 
       await tx.insert(palletEvents).values({
         palletId: newPallet.id,
-        type: "NEVER_INBOUNDED",
+        type: "DEFAULT_OUTBOUND",
         locationId: location.id,
         userId: session.userId,
         quantity,

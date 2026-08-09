@@ -4,7 +4,11 @@ import { pallets, palletEvents, locations } from "@/db/schema";
 import { eq, like, desc, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
-// POST /api/pallets/split - split a portion of a pallet's quantity off to a new location
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
+// POST /api/pallets/split
 // body: { label, splitQuantity, newLocationCode }
 export async function POST(req: NextRequest) {
   const session = await getSession();
@@ -13,7 +17,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { label, splitQuantity, newLocationCode } = body;
+  const label = sanitize(body.label ?? "");
+  const newLocationCode = sanitize(body.newLocationCode ?? "");
+  const { splitQuantity } = body;
 
   if (!label || !splitQuantity || !newLocationCode) {
     return NextResponse.json(
@@ -29,8 +35,6 @@ export async function POST(req: NextRequest) {
 
   let pallet;
   if (matches.length === 0) {
-    // Fall back to checking any status, in case they're splitting from a
-    // REMOVED pallet (post-shipment leftover discovery).
     const anyMatches = await db.select().from(pallets).where(eq(pallets.label, label));
     if (anyMatches.length === 0) {
       return NextResponse.json({ error: "Pallet not found" }, { status: 404 });
@@ -105,20 +109,19 @@ export async function POST(req: NextRequest) {
       updatedOriginal = updated;
     }
 
-const [newPallet] = await tx
-  .insert(pallets)
-  .values({
-    label: newLabel,
-    itemId: pallet.itemId,
-    workOrderNumber: pallet.workOrderNumber,
-    quantity: splitQuantity,
-    locationId: newLocation.id, // the admin's intended destination
-    status: "PENDING", // not counted as active stock until an operator confirms it
-    splitFromPalletId: pallet.id,
-    inboundUserId: session.userId,
-    // firstRackedAt intentionally NOT set yet — that only happens on confirmation
-  })
-  .returning();
+    const [newPallet] = await tx
+      .insert(pallets)
+      .values({
+        label: newLabel,
+        itemId: pallet.itemId,
+        workOrderNumber: pallet.workOrderNumber,
+        quantity: splitQuantity,
+        locationId: newLocation.id,
+        status: "PENDING",
+        splitFromPalletId: pallet.id,
+        inboundUserId: session.userId,
+      })
+      .returning();
 
     await tx.insert(palletEvents).values([
       {

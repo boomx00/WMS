@@ -133,7 +133,7 @@ export default function SettingsForm({
             <p className="text-xs text-zinc-500 mt-1 max-w-sm">
               Lets staff record an outbound scan for a cell that was never
               stock-counted at all (no exact pallet, no default stock).
-              Logged in History as &quot;Never Inbounded&quot; and does not
+              Logged in History as &quot;Default Outbound&quot; and does not
               affect any stock numbers, since there&apos;s nothing tracked to
               reduce.
             </p>

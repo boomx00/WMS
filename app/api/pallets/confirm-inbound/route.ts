@@ -4,10 +4,12 @@ import { pallets, palletEvents, locations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
 // PATCH /api/pallets/confirm-inbound
 // body: { label, locationCode }
-// An operator scans a PENDING pallet's label and the location it's actually
-// being placed at, activating it as real stock.
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -15,7 +17,8 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { label, locationCode } = body;
+  const label = sanitize(body.label ?? "");
+  const locationCode = sanitize(body.locationCode ?? "");
 
   if (!label || !locationCode) {
     return NextResponse.json({ error: "label and locationCode are required" }, { status: 400 });
@@ -43,7 +46,7 @@ export async function PATCH(req: NextRequest) {
       .update(pallets)
       .set({
         status: "ACTIVE",
-        locationId: location.id, // use where it was actually scanned, not just the admin's original plan
+        locationId: location.id,
         firstRackedAt: location.type === "RACK" ? new Date() : null,
         updatedAt: new Date(),
       })
