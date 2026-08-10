@@ -20,8 +20,8 @@ const STATUS_STYLES: Record<string, string> = {
 type Order = {
   id: number;
   soNumber: string;
-  orderDate: string;
-  createdAt: string;
+  orderDate: string | Date;
+  createdAt: string | Date;
   items: OrderLine[];
 };
 
