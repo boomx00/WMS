@@ -19,6 +19,7 @@ export const locationTypeEnum = pgEnum("location_type", [
   "FLOOR",
   "DESTROY",
   "LEFTOVER",
+  "OUTBOUND_WH",
 ]);
 
 export const locations = pgTable(
@@ -201,7 +202,8 @@ export const palletEvents = pgTable("pallet_events", {
   userId: integer("user_id")
     .notNull()
     .references(() => users.id),
-  quantity: integer("quantity").notNull(), // frozen snapshot — never changes after the fact
+  quantity: integer("quantity").notNull(),
+  salesOrderId: integer("sales_order_id").references(() => salesOrders.id), // nullable — only set for Ship events
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -227,3 +229,40 @@ export const settings = pgTable("settings", {
   automaticInboundFromRack: boolean("automatic_inbound_from_rack").notNull().default(false),
   allowUntrackedOutbound: boolean("allow_untracked_outbound").notNull().default(false),
 });
+
+export const salesOrders = pgTable(
+  "sales_orders",
+  {
+    id: serial("id").primaryKey(),
+    soNumber: text("so_number").notNull(),
+    orderDate: timestamp("order_date").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("sales_orders_so_number_idx").on(table.soNumber)]
+);
+
+export const salesOrderItems = pgTable("sales_order_items", {
+  id: serial("id").primaryKey(),
+  salesOrderId: integer("sales_order_id")
+    .notNull()
+    .references(() => salesOrders.id),
+  itemId: integer("item_id")
+    .notNull()
+    .references(() => items.id),
+  quantity: integer("quantity").notNull(),
+});
+
+export const salesOrdersRelations = relations(salesOrders, ({ many }) => ({
+  items: many(salesOrderItems),
+}));
+
+export const salesOrderItemsRelations = relations(salesOrderItems, ({ one }) => ({
+  salesOrder: one(salesOrders, {
+    fields: [salesOrderItems.salesOrderId],
+    references: [salesOrders.id],
+  }),
+  item: one(items, {
+    fields: [salesOrderItems.itemId],
+    references: [items.id],
+  }),
+}));

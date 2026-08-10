@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Tab = "INBOUND" | "MOVE" | "REMOVE" | "SPLIT" | "INITIAL_STOCK" | "CONFIRM";
+type Tab = "INBOUND" | "TO_OUTBOUND" | "SHIP" | "SPLIT" | "INITIAL_STOCK" | "CONFIRM";
 // Parses "SKU*palletSeq*qty*workOrder" into its parts.
 function parseLabel(raw: string) {
   const parts = raw.trim().split("*");
@@ -20,24 +20,24 @@ export default function ScanForms() {
   return (
     <div>
       <div className="flex gap-1 mb-6 border border-zinc-800 rounded-lg p-1 w-fit">
-{(["INBOUND", "MOVE", "REMOVE", "SPLIT", "INITIAL_STOCK", "CONFIRM"] as Tab[]).map((t) => (
-      <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-              tab === t
-                ? "bg-amber-500 text-zinc-950"
-                : "text-zinc-400 hover:text-zinc-100"
-            }`}
-          >
-            {t.charAt(0) + t.slice(1).toLowerCase()}
-          </button>
-        ))}
+{(["INBOUND", "TO_OUTBOUND", "SHIP", "SPLIT", "INITIAL_STOCK", "CONFIRM"] as Tab[]).map((t) => (
+  <button
+    key={t}
+    onClick={() => setTab(t)}
+    className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
+      tab === t
+        ? "bg-amber-500 text-zinc-950"
+        : "text-zinc-400 hover:text-zinc-100"
+    }`}
+  >
+    {t.replace(/_/g, " ")}
+  </button>
+))}
       </div>
 
-      {tab === "INBOUND" && <InboundForm />}
-{tab === "MOVE" && <MoveForm />}
-{tab === "REMOVE" && <RemoveForm />}
+{tab === "INBOUND" && <InboundForm />}
+{tab === "TO_OUTBOUND" && <ToOutboundForm />}
+{tab === "SHIP" && <ShipForm />}
 {tab === "SPLIT" && <SplitForm />}
 {tab === "INITIAL_STOCK" && <InitialStockForm />}
 {tab === "CONFIRM" && <ConfirmInboundForm />}
@@ -262,112 +262,7 @@ function MoveForm() {
   );
 }
 
-function RemoveForm() {
-  const router = useRouter();
-  const [label, setLabel] = useState("");
-  const [locationCode, setLocationCode] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [needsQuantity, setNeedsQuantity] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    setLoading(true);
-
-    const res = await fetch("/api/pallets/remove", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        label: label.trim(),
-        locationCode: locationCode.trim(),
-        quantity: quantity ? Number(quantity) : undefined,
-      }),
-    });
-    setLoading(false);
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      if (data.matchType === "default_needs_quantity") {
-  setNeedsQuantity(true);
-  setError(`${data.error} (${data.availableQuantity} available)`);
-} else if (data.matchType === "untracked_outbound_needs_quantity") {
-  setNeedsQuantity(true);
-  setError(data.error);
-} else {
-  setError(data.error ?? "Failed to remove pallet");
-}
-      return;
-    }
-
-    setSuccess(
-      data.matchType === "default_fallback"
-        ? `Removed ${data.quantityRemoved} units from default stock at ${locationCode.trim()}.`
-        : `Pallet ${label.trim()} removed from ${locationCode.trim()}.`
-    );
-    setLabel("");
-    setLocationCode("");
-    setQuantity("");
-    setNeedsQuantity(false);
-    router.refresh();
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
-      <div>
-        <label className="block text-xs text-zinc-500 mb-1">Scan pallet label</label>
-        <input
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          autoFocus
-          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-        />
-      </div>
-
-      <div>
-        <label className="block text-xs text-zinc-500 mb-1">Scan current location</label>
-        <input
-          type="text"
-          value={locationCode}
-          onChange={(e) => setLocationCode(e.target.value)}
-          placeholder="A.1.1"
-          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-        />
-      </div>
-
-      {needsQuantity && (
-        <div>
-          <label className="block text-xs text-zinc-500 mb-1">
-            Quantity (this is default stock, not an individually tracked pallet)
-          </label>
-          <input
-            type="number"
-            min={1}
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            autoFocus
-            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-amber-700 text-sm font-mono focus:outline-none focus:border-amber-500"
-          />
-        </div>
-      )}
-
-      <button
-        type="submit"
-        disabled={loading || !label || !locationCode}
-        className="px-4 py-2 rounded-md bg-red-600 text-zinc-100 text-sm font-medium hover:bg-red-500 disabled:opacity-50 transition-colors"
-      >
-        {loading ? "Removing..." : "Remove pallet"}
-      </button>
-
-      <FeedbackBox error={error} success={success} />
-    </form>
-  );
-}
 
 function SplitForm() {
   const router = useRouter();
@@ -620,6 +515,195 @@ function ConfirmInboundForm() {
         className="px-4 py-2 rounded-md bg-emerald-600 text-zinc-100 text-sm font-medium hover:bg-emerald-500 disabled:opacity-50 transition-colors"
       >
         {loading ? "Confirming..." : "Confirm Inbound"}
+      </button>
+
+      <FeedbackBox error={error} success={success} />
+    </form>
+  );
+}
+function ToOutboundForm() {
+  const router = useRouter();
+  const [label, setLabel] = useState("");
+  const [currentLocationCode, setCurrentLocationCode] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [needsQuantity, setNeedsQuantity] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    const res = await fetch("/api/pallets/move", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: label.trim(),
+        currentLocationCode: currentLocationCode.trim(),
+        newLocationCode: "OUTBOUND_WH",
+        quantity: quantity ? Number(quantity) : undefined,
+      }),
+    });
+    setLoading(false);
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (data.matchType === "default_needs_quantity" || data.matchType === "auto_inbound_needs_quantity") {
+        setNeedsQuantity(true);
+        setError(data.availableQuantity ? `${data.error} (${data.availableQuantity} available)` : data.error);
+      } else {
+        setError(data.error ?? "Failed to move to Outbound Warehouse");
+      }
+      return;
+    }
+
+    setSuccess(`Moved ${label.trim()} to Outbound Warehouse.`);
+    setLabel("");
+    setCurrentLocationCode("");
+    setQuantity("");
+    setNeedsQuantity(false);
+    router.refresh();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Scan pallet label</label>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          autoFocus
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Scan current location</label>
+        <input
+          type="text"
+          value={currentLocationCode}
+          onChange={(e) => setCurrentLocationCode(e.target.value)}
+          placeholder="A.1.1 or FLOOR"
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      {needsQuantity && (
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Quantity</label>
+          <input
+            type="number"
+            min={1}
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+            autoFocus
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-amber-700 text-sm font-mono focus:outline-none focus:border-amber-500"
+          />
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={loading || !label || !currentLocationCode}
+        className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+      >
+        {loading ? "Moving..." : "Move to Outbound"}
+      </button>
+
+      <FeedbackBox error={error} success={success} />
+    </form>
+  );
+}
+
+function ShipForm() {
+  const router = useRouter();
+  const [soNumber, setSoNumber] = useState("");
+  const [label, setLabel] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    const res = await fetch("/api/pallets/ship", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        soNumber: soNumber.trim(),
+        label: label.trim(),
+        quantity: Number(quantity),
+      }),
+    });
+    setLoading(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to ship pallet");
+      return;
+    }
+
+    const data = await res.json();
+    setSuccess(`Shipped ${quantity} units. ${data.remainingOnOrder} remaining on ${soNumber.trim()} for this item.`);
+    setLabel("");
+    setQuantity("");
+    router.refresh();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
+      <p className="text-xs text-zinc-500">
+        Scan the sales order barcode, then the pallet in Outbound Warehouse,
+        then enter the quantity per the picking list.
+      </p>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Scan sales order barcode</label>
+        <input
+          type="text"
+          value={soNumber}
+          onChange={(e) => setSoNumber(e.target.value)}
+          autoFocus
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Scan pallet label</label>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Quantity per picking list</label>
+        <input
+          type="number"
+          min={1}
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading || !soNumber || !label || !quantity}
+        className="px-4 py-2 rounded-md bg-red-600 text-zinc-100 text-sm font-medium hover:bg-red-500 disabled:opacity-50 transition-colors"
+      >
+        {loading ? "Shipping..." : "Confirm Ship"}
       </button>
 
       <FeedbackBox error={error} success={success} />
