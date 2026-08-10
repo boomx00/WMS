@@ -43,14 +43,15 @@ async function getSalesOrders() {
     linesByOrder.get(l.salesOrderId)!.push(l);
   }
 
-  return orders.map((o) => ({
-    ...o,
-    items: (linesByOrder.get(o.id) ?? []).map((line) => {
-      const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
-      const status = shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
-      return { ...line, shipped, status };
-    }),
-  }));
+return orders.map((o) => ({
+  ...o,
+  items: (linesByOrder.get(o.id) ?? []).map((line) => {
+    const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
+    const status: "PENDING" | "PICKING" | "SHIPPED" =
+      shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
+    return { ...line, shipped, status };
+  }),
+}));
 }
 
 async function getAllItems() {
