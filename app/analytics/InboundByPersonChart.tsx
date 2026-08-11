@@ -64,10 +64,10 @@ const res = await fetch(
         </div>
         <div>
           <label className="block text-xs text-zinc-500 mb-1">To</label>
-          <input
+       <input
   type="datetime-local"
-  value={start}
-  onChange={(e) => setStart(e.target.value)}
+  value={end}
+  onChange={(e) => setEnd(e.target.value)}
   className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
 />
         </div>
