@@ -91,13 +91,17 @@ export const items = pgTable(
   {
     id: serial("id").primaryKey(),
     sku: text("sku").notNull(),
+    legacySku: text("legacy_sku"), // old MCI code, nullable — for products that changed codes
     name: text("name").notNull(),
-    defaultCode: text("default_code").notNull(), // "{sku}*default" — for initial stock entry
+    defaultCode: text("default_code").notNull(),
     cartonBagQty: integer("carton_bag_qty").notNull(),
     palletCartonQty: integer("pallet_carton_qty").notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("items_sku_idx").on(table.sku)]
+  (table) => [
+    uniqueIndex("items_sku_idx").on(table.sku),
+    uniqueIndex("items_legacy_sku_idx").on(table.legacySku),
+  ]
 );
 
 export const itemsRelations = relations(items, ({ many }) => ({

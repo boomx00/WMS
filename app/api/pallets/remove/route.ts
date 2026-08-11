@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { pallets, palletEvents, locations, items, settings } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { normalizeLabel } from "@/lib/labelNormalize";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -23,7 +24,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json();
-  const label = sanitize(body.label ?? "");
+  const label = await normalizeLabel(db, sanitize(body.label ?? ""));
   const locationCode = sanitize(body.locationCode ?? "");
   const { quantity } = body;
 
@@ -92,7 +93,9 @@ export async function PATCH(req: NextRequest) {
 
   // 2. Fall back to the default-code bucket.
   const sku = extractSku(label);
-  const [item] = sku ? await db.select().from(items).where(eq(items.sku, sku)) : [];
+  const [item] = sku
+    ? await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)))
+    : [];
 
   if (item) {
     const [defaultPallet] = await db
@@ -169,7 +172,9 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const [itemForRecord] = sku ? await db.select().from(items).where(eq(items.sku, sku)) : [];
+    const [itemForRecord] = sku
+      ? await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)))
+      : [];
 
     if (!itemForRecord) {
       return NextResponse.json({ error: "Unknown SKU in scanned label" }, { status: 404 });

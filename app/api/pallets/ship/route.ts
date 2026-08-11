@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { pallets, palletEvents, locations, salesOrders, salesOrderItems } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { normalizeLabel } from "@/lib/labelNormalize";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -18,7 +19,7 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json();
   const soNumber = sanitize(body.soNumber ?? "");
-  const label = sanitize(body.label ?? "");
+  const label = await normalizeLabel(db, sanitize(body.label ?? ""));
   const { quantity } = body;
 
   if (!soNumber || !label || !quantity || quantity <= 0) {
@@ -66,7 +67,6 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // Confirm this SKU is actually on this sales order, and how much was ordered.
   const [orderLine] = await db
     .select()
     .from(salesOrderItems)
@@ -81,7 +81,6 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // Sum how much of this item has already shipped against this SO.
   const [alreadyShippedRow] = await db
     .select({
       total: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int`,

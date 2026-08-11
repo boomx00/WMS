@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { pallets, palletEvents, locations, items } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { normalizeLabel } from "@/lib/labelNormalize";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -23,18 +24,33 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const label = sanitize(body.label ?? "");
-  const sku = sanitize(body.sku ?? "");
+  const rawLabel = sanitize(body.label ?? "");
+  const rawSku = sanitize(body.sku ?? "");
   const workOrderNumber = sanitize(body.workOrderNumber ?? "");
   const { quantity } = body;
 
-  if (!label || !sku || !workOrderNumber || !quantity) {
+  if (!rawLabel || !rawSku || !workOrderNumber || !quantity) {
     return NextResponse.json(
       { error: "label, sku, workOrderNumber, and quantity are required" },
       { status: 400 }
     );
   }
 
+  const label = await normalizeLabel(db, rawLabel);
+
+  // Resolve the item by current sku OR legacy sku, so old printed barcodes
+  // still correctly identify the right product.
+  const [item] = await db
+    .select()
+    .from(items)
+    .where(or(eq(items.sku, rawSku), eq(items.legacySku, rawSku)));
+  if (!item) {
+    return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+  }
+
+  // Check if this exact (normalized) label already exists anywhere as an
+  // active pallet — prevents accidentally double-inbounding the same
+  // physical pallet.
   const [existingElsewhere] = await db
     .select({
       label: pallets.label,
@@ -53,11 +69,6 @@ export async function POST(req: NextRequest) {
       },
       { status: 409 }
     );
-  }
-
-  const [item] = await db.select().from(items).where(eq(items.sku, sku));
-  if (!item) {
-    return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
 
   const [floor] = await db

@@ -31,6 +31,7 @@ const navItems = [
   { href: "/transactions", label: "History" },
   { href: "/scan", label: "Scan" },
   { href: "/pending", label: "Pending" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/settings", label: "Settings" },
 ];
 

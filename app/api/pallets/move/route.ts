@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { pallets, palletEvents, locations, items, settings } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
-
+import { normalizeLabel } from "@/lib/labelNormalize";
+import { checkRackSkuConflict } from "@/lib/rackGuard";
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
@@ -32,7 +33,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json();
-  const label = sanitize(body.label ?? "");
+  const label = await normalizeLabel(db, sanitize(body.label ?? ""));
   const currentLocationCode = sanitize(body.currentLocationCode ?? "");
   const newLocationCode = sanitize(body.newLocationCode ?? "");
   const { quantity } = body;
@@ -72,6 +73,11 @@ export async function PATCH(req: NextRequest) {
     }
     if (exactPallet.locationId === newLocation.id) {
       return NextResponse.json({ error: "Pallet is already at that location" }, { status: 409 });
+    }
+
+    const conflict = await checkRackSkuConflict(db, newLocation, exactPallet.itemId);
+    if (conflict) {
+      return NextResponse.json({ error: conflict }, { status: 409 });
     }
 
     const isFirstRacking = exactPallet.inForkliftUserId === null;
@@ -124,7 +130,9 @@ export async function PATCH(req: NextRequest) {
 
   // 2. Fall back to the default-code bucket.
   const sku = extractSku(label);
-  const [item] = sku ? await db.select().from(items).where(eq(items.sku, sku)) : [];
+  const [item] = sku
+    ? await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)))
+    : [];
 
   if (item) {
     const [sourceBucket] = await db
@@ -155,6 +163,11 @@ export async function PATCH(req: NextRequest) {
           { error: `Only ${sourceBucket.quantity} units available at the source location` },
           { status: 400 }
         );
+      }
+
+      const conflict = await checkRackSkuConflict(db, newLocation, item.id);
+      if (conflict) {
+        return NextResponse.json({ error: conflict }, { status: 409 });
       }
 
       const result = await db.transaction(async (tx) => {
@@ -240,7 +253,10 @@ export async function PATCH(req: NextRequest) {
         );
       }
 
-      const [autoItem] = await db.select().from(items).where(eq(items.sku, parsed.sku));
+      const [autoItem] = await db
+        .select()
+        .from(items)
+        .where(or(eq(items.sku, parsed.sku), eq(items.legacySku, parsed.sku)));
       if (!autoItem) {
         return NextResponse.json({ error: "Unknown SKU in scanned label" }, { status: 404 });
       }
@@ -253,6 +269,11 @@ export async function PATCH(req: NextRequest) {
           },
           { status: 400 }
         );
+      }
+
+      const conflict = await checkRackSkuConflict(db, newLocation, autoItem.id);
+      if (conflict) {
+        return NextResponse.json({ error: conflict }, { status: 409 });
       }
 
       const result = await db.transaction(async (tx) => {

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { pallets, palletEvents, locations } from "@/db/schema";
 import { eq, like, desc, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { normalizeLabel } from "@/lib/labelNormalize";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const label = sanitize(body.label ?? "");
+  const label = await normalizeLabel(db, sanitize(body.label ?? ""));
   const newLocationCode = sanitize(body.newLocationCode ?? "");
   const { splitQuantity } = body;
 
