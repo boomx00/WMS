@@ -133,21 +133,31 @@ export default function RackContentsTable({ rows }: { rows: Row[] }) {
                 </button>
 
                 {isOpen && row.pallets.length > 0 && (
-                  <div className="px-4 pb-3 space-y-1.5 bg-zinc-950/40">
-                    {row.pallets.map((p) => (
-                      <div key={p.palletId} className="text-xs">
-                        <div className="font-mono text-zinc-400">{p.label}</div>
-                        <div>
-                          <span className="font-mono text-zinc-300">{p.itemSku}</span>{" "}
-                          <span className="text-zinc-500">
-                            {p.itemName} · {p.quantity.toLocaleString()} units · WO{" "}
-                            {p.workOrderNumber}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+  <div className="bg-zinc-950/40 border-t border-zinc-800">
+    <table className="w-full text-xs">
+      <thead>
+        <tr className="text-zinc-600 text-left">
+          <th className="px-4 py-2 font-medium">Label</th>
+          <th className="px-4 py-2 font-medium">SKU</th>
+          <th className="px-4 py-2 font-medium">Product</th>
+          <th className="px-4 py-2 font-medium">Work Order</th>
+          <th className="px-4 py-2 font-medium text-right">Qty</th>
+        </tr>
+      </thead>
+      <tbody>
+        {row.pallets.map((p) => (
+          <tr key={p.palletId} className="border-t border-zinc-800/60">
+            <td className="px-4 py-1.5 font-mono text-zinc-400">{p.label}</td>
+            <td className="px-4 py-1.5 font-mono text-zinc-300">{p.itemSku}</td>
+            <td className="px-4 py-1.5 text-zinc-500">{p.itemName}</td>
+            <td className="px-4 py-1.5 font-mono text-zinc-500">{p.workOrderNumber}</td>
+            <td className="px-4 py-1.5 text-right font-mono">{p.quantity.toLocaleString()}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+)}
               </div>
             );
           })
