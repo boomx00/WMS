@@ -24,6 +24,7 @@ type Row = {
 export default function RackContentsTable({ rows }: { rows: Row[] }) {
   const [search, setSearch] = useState("");
   const [occupiedOnly, setOccupiedOnly] = useState(true);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -44,6 +45,15 @@ export default function RackContentsTable({ rows }: { rows: Row[] }) {
       return matchesLocation || matchesProduct;
     });
   }, [rows, search, occupiedOnly]);
+
+  function toggle(locationId: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(locationId)) next.delete(locationId);
+      else next.add(locationId);
+      return next;
+    });
+  }
 
   return (
     <div>
@@ -71,65 +81,77 @@ export default function RackContentsTable({ rows }: { rows: Row[] }) {
       </p>
 
       <div className="border border-zinc-800 rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-zinc-900 text-zinc-500 text-left">
-              <th className="px-4 py-3 font-medium">Location</th>
-              <th className="px-4 py-3 font-medium">Products</th>
-              <th className="px-4 py-3 font-medium text-right">Total Units</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={3} className="px-4 py-8 text-center text-zinc-600">
-                  No matching locations.
-                </td>
-              </tr>
-            ) : (
-              filtered.map((row) => (
-                <tr
-                  key={row.locationId}
-                  className="border-t border-zinc-800 hover:bg-zinc-900/50 align-top"
+        {filtered.length === 0 ? (
+          <div className="px-4 py-8 text-center text-zinc-600 text-sm">
+            No matching locations.
+          </div>
+        ) : (
+          filtered.map((row) => {
+            const isOpen = expanded.has(row.locationId);
+            const totalUnits = row.pallets.reduce((sum, p) => sum + p.quantity, 0);
+
+            return (
+              <div key={row.locationId} className="border-b border-zinc-800 last:border-b-0">
+                <button
+                  onClick={() => toggle(row.locationId)}
+                  disabled={row.pallets.length === 0}
+                  className={`w-full flex items-center justify-between px-4 py-3 text-left transition-colors ${
+                    row.pallets.length > 0 ? "hover:bg-zinc-900/50" : "cursor-default"
+                  }`}
                 >
-                  <td className="px-4 py-3 whitespace-nowrap">
-  <span className="font-mono text-amber-500">{row.code}</span>
-  {row.type !== "RACK" && (
-    <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
-      {row.type}
-    </span>
-  )}
-</td>
-                  <td className="px-4 py-3">
+                  <span className="flex items-center gap-2">
+                    {row.pallets.length > 0 && (
+                      <span
+                        className={`text-zinc-500 text-xs transition-transform ${
+                          isOpen ? "rotate-90" : ""
+                        }`}
+                      >
+                        ▶
+                      </span>
+                    )}
+                    <span className="font-mono text-amber-500">{row.code}</span>
+                    {row.type !== "RACK" && (
+                      <span className="text-[10px] uppercase tracking-wide text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded">
+                        {row.type}
+                      </span>
+                    )}
+                  </span>
+
+                  <span className="text-xs text-zinc-500 whitespace-nowrap">
                     {row.pallets.length === 0 ? (
-  <span className="text-zinc-600 text-xs">Empty</span>
-) : (
-  <div className="space-y-1">
-    {row.pallets.map((p) => (
-      <div key={p.palletId} className="text-xs">
-        <div className="font-mono text-zinc-400">{p.label}</div>
-        <div>
-          <span className="font-mono text-zinc-300">{p.itemSku}</span>{" "}
-          <span className="text-zinc-500">
-            {p.itemName} · {p.quantity.toLocaleString()} units · WO{" "}
-            {p.workOrderNumber}
-          </span>
-        </div>
-      </div>
-    ))}
-  </div>
-)}
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono">
-                    {row.pallets
-                      .reduce((sum, p) => sum + p.quantity, 0)
-                      .toLocaleString()}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                      "Empty"
+                    ) : (
+                      <>
+                        {row.pallets.length} pallet(s) ·{" "}
+                        <span className="font-mono text-zinc-300">
+                          {totalUnits.toLocaleString()}
+                        </span>{" "}
+                        units
+                      </>
+                    )}
+                  </span>
+                </button>
+
+                {isOpen && row.pallets.length > 0 && (
+                  <div className="px-4 pb-3 space-y-1.5 bg-zinc-950/40">
+                    {row.pallets.map((p) => (
+                      <div key={p.palletId} className="text-xs">
+                        <div className="font-mono text-zinc-400">{p.label}</div>
+                        <div>
+                          <span className="font-mono text-zinc-300">{p.itemSku}</span>{" "}
+                          <span className="text-zinc-500">
+                            {p.itemName} · {p.quantity.toLocaleString()} units · WO{" "}
+                            {p.workOrderNumber}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );
