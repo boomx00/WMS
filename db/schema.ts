@@ -281,3 +281,4 @@ export const appVersion = pgTable("app_version", {
   releaseNotes: text("release_notes"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+

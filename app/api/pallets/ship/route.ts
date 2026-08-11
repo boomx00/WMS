@@ -101,7 +101,7 @@ export async function PATCH(req: NextRequest) {
   if (quantity > remaining) {
     return NextResponse.json(
       {
-        error: `This would ship ${quantity}, but only ${remaining} remain on sales order ${soNumber} for this item (${orderLine.quantity} ordered, ${alreadyShipped} already shipped).`,
+        error: `${alreadyShipped} sudah terkirim, sisa ${remaining} di sales order ${soNumber} untuk barang tersebut.`,
       },
       { status: 409 }
     );
