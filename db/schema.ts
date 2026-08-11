@@ -271,3 +271,13 @@ export const salesOrderItemsRelations = relations(salesOrderItems, ({ one }) => 
     references: [items.id],
   }),
 }));
+
+
+export const appVersion = pgTable("app_version", {
+  id: serial("id").primaryKey(),
+  versionCode: integer("version_code").notNull(),
+  versionName: text("version_name").notNull(),
+  apkUrl: text("apk_url").notNull(),
+  releaseNotes: text("release_notes"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
