@@ -10,7 +10,7 @@ function sanitize(input: string): string {
 }
 
 function extractSku(label: string): string | null {
-  const cleaned = label.replace(/^\*/, "");
+  const cleaned = label.replace(/^\*+/, "");
   const parts = cleaned.split("*");
   return parts[0]?.trim() || null;
 }

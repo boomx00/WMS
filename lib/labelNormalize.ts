@@ -7,8 +7,8 @@ import { eq, or } from "drizzle-orm";
 // found under the current code — regardless of which code was printed on
 // the physical label at the time it was made.
 export async function normalizeLabel(db: any, rawLabel: string): Promise<string> {
-  const hadLeadingStar = rawLabel.startsWith("*");
-  const cleaned = rawLabel.replace(/^\*/, "");
+const hadLeadingStar = rawLabel.startsWith("*");
+const cleaned = rawLabel.replace(/^\*+/, "");
   const parts = cleaned.split("*");
 
   // Only real 4-segment printed labels (SKU*seq*qty*WO) can carry a legacy

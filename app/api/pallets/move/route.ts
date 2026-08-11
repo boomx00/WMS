@@ -10,7 +10,7 @@ function sanitize(input: string): string {
 }
 
 function parseRealLabel(raw: string) {
-  const cleaned = raw.replace(/^\*/, "");
+  const cleaned = raw.replace(/^\*+/, "");
   const parts = cleaned.split("*");
   if (parts.length !== 4) return null;
   const [sku, palletSeq, , workOrderNumber] = parts;
@@ -19,7 +19,7 @@ function parseRealLabel(raw: string) {
 }
 
 function extractSku(label: string): string | null {
-  const cleaned = label.replace(/^\*/, "");
+  const cleaned = label.replace(/^\*+/, "");
   const parts = cleaned.split("*");
   return parts[0]?.trim() || null;
 }
