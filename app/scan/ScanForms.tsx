@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Tab = "INBOUND" | "TO_OUTBOUND" | "SHIP" | "SPLIT" | "INITIAL_STOCK" | "CONFIRM";
+type Tab = "INBOUND" | "TO_OUTBOUND" | "SHIP" | "SPLIT" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST";
 // Parses "SKU*palletSeq*qty*workOrder" into its parts.
 function parseLabel(raw: string) {
   const parts = raw.trim().split("*");
@@ -20,7 +20,7 @@ export default function ScanForms() {
   return (
     <div>
       <div className="flex gap-1 mb-6 border border-zinc-800 rounded-lg p-1 w-fit">
-{(["INBOUND", "TO_OUTBOUND", "SHIP", "SPLIT", "INITIAL_STOCK", "CONFIRM"] as Tab[]).map((t) => (
+{(["INBOUND", "TO_OUTBOUND", "SHIP", "SPLIT", "INITIAL_STOCK", "CONFIRM","ADJUST"] as Tab[]).map((t) => (
   <button
     key={t}
     onClick={() => setTab(t)}
@@ -34,7 +34,7 @@ export default function ScanForms() {
   </button>
 ))}
       </div>
-
+{tab === "ADJUST" && <AdjustForm />}
 {tab === "INBOUND" && <InboundForm />}
 {tab === "TO_OUTBOUND" && <ToOutboundForm />}
 {tab === "SHIP" && <ShipForm />}
@@ -704,6 +704,113 @@ function ShipForm() {
         className="px-4 py-2 rounded-md bg-red-600 text-zinc-100 text-sm font-medium hover:bg-red-500 disabled:opacity-50 transition-colors"
       >
         {loading ? "Shipping..." : "Confirm Ship"}
+      </button>
+
+      <FeedbackBox error={error} success={success} />
+    </form>
+  );
+}
+
+function AdjustForm() {
+  const router = useRouter();
+  const [label, setLabel] = useState("");
+  const [locationCode, setLocationCode] = useState("");
+  const [newQuantity, setNewQuantity] = useState("");
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    const res = await fetch("/api/pallets/adjust", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: label.trim(),
+        locationCode: locationCode.trim(),
+        newQuantity: Number(newQuantity),
+        reason: reason.trim(),
+      }),
+    });
+    setLoading(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to adjust quantity");
+      return;
+    }
+
+    const data = await res.json();
+    const sign = data.delta > 0 ? "+" : "";
+    setSuccess(`Adjusted ${label.trim()}: ${data.previousQuantity} → ${data.quantity} (${sign}${data.delta})`);
+    setLabel("");
+    setLocationCode("");
+    setNewQuantity("");
+    setReason("");
+    router.refresh();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
+      <p className="text-xs text-zinc-500">
+        Directly correct a pallet's quantity — for stock-count discrepancies
+        or data entry mistakes. Logged as an ADJUSTMENT event.
+      </p>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Pallet label</label>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Location</label>
+        <input
+          type="text"
+          value={locationCode}
+          onChange={(e) => setLocationCode(e.target.value)}
+          placeholder="A.1.1"
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Corrected quantity</label>
+        <input
+          type="number"
+          min={0}
+          value={newQuantity}
+          onChange={(e) => setNewQuantity(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Reason (optional)</label>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Physical recount, data entry error"
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading || !label || !locationCode || newQuantity === ""}
+        className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+      >
+        {loading ? "Adjusting..." : "Apply Adjustment"}
       </button>
 
       <FeedbackBox error={error} success={success} />

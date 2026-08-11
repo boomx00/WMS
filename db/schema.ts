@@ -193,6 +193,7 @@ export const palletEventTypeEnum = pgEnum("pallet_event_type", [
   "CONFIRMED",
   "OUTBOUND",
   "DEFAULT_OUTBOUND",
+  "ADJUSTMENT",
 ]);
 export const palletEvents = pgTable("pallet_events", {
   id: serial("id").primaryKey(),
