@@ -66,19 +66,37 @@ function FeedbackBox({ error, success }: { error: string | null; success: string
 function InboundForm() {
   const router = useRouter();
   const [labelInput, setLabelInput] = useState("");
+  const [sku, setSku] = useState("");
+  const [workOrderNumber, setWorkOrderNumber] = useState("");
+  const [quantity, setQuantity] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const parsed = parseLabel(labelInput);
+  // Best-effort auto-fill — parses the standard SKU*seq*qty*WO format if it
+  // matches, but never blocks submission if it doesn't. Every field below
+  // stays manually editable regardless.
+  function handleLabelChange(value: string) {
+    setLabelInput(value);
+    setError(null);
+    setSuccess(null);
+
+    const cleaned = value.trim().replace(/^\*+/, "");
+    const parts = cleaned.split("*");
+    if (parts.length === 4) {
+      const [parsedSku, , , parsedWo] = parts;
+      if (parsedSku) setSku(parsedSku);
+      if (parsedWo) setWorkOrderNumber(parsedWo);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    if (!parsed) {
-      setError("Label doesn't match the expected format: SKU*palletSeq*qty*workOrder");
+    if (!labelInput || !sku || !workOrderNumber || !quantity) {
+      setError("Label, SKU, work order, and quantity are all required.");
       return;
     }
 
@@ -88,9 +106,9 @@ function InboundForm() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         label: labelInput.trim(),
-        sku: parsed.sku,
-        workOrderNumber: parsed.workOrderNumber,
-        quantity: parsed.quantity,
+        sku: sku.trim(),
+        workOrderNumber: workOrderNumber.trim(),
+        quantity: Number(quantity),
       }),
     });
     setLoading(false);
@@ -103,35 +121,62 @@ function InboundForm() {
 
     setSuccess(`Pallet ${labelInput.trim()} scanned in at Floor.`);
     setLabelInput("");
+    setSku("");
+    setWorkOrderNumber("");
+    setQuantity("");
     router.refresh();
   }
 
   return (
-    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-      <label className="block text-xs text-zinc-500 mb-1">
-        Scan product label
-      </label>
-      <input
-        type="text"
-        value={labelInput}
-        onChange={(e) => setLabelInput(e.target.value)}
-        placeholder="14013024102*0021*5000*M0006995"
-        autoFocus
-        className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-      />
+    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Scan product label</label>
+        <input
+          type="text"
+          value={labelInput}
+          onChange={(e) => handleLabelChange(e.target.value)}
+          placeholder="*14013024102*0021*5000*M0006995"
+          autoFocus
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
 
-      {parsed && (
-        <div className="mt-3 text-xs text-zinc-500 space-y-0.5">
-          <div>SKU: <span className="text-zinc-300 font-mono">{parsed.sku}</span></div>
-          <div>Quantity: <span className="text-zinc-300 font-mono">{parsed.quantity.toLocaleString()}</span></div>
-          <div>Work Order: <span className="text-zinc-300 font-mono">{parsed.workOrderNumber}</span></div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">SKU</label>
+          <input
+            type="text"
+            value={sku}
+            onChange={(e) => setSku(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+          />
         </div>
-      )}
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Work Order</label>
+          <input
+            type="text"
+            value={workOrderNumber}
+            onChange={(e) => setWorkOrderNumber(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Quantity</label>
+        <input
+          type="number"
+          min={1}
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
 
       <button
         type="submit"
-        disabled={loading || !labelInput}
-        className="mt-4 px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+        disabled={loading || !labelInput || !sku || !workOrderNumber || !quantity}
+        className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
       >
         {loading ? "Scanning in..." : "Scan in at Floor"}
       </button>
