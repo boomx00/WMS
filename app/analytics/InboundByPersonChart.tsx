@@ -8,22 +8,29 @@ type Row = {
   totalUnits: number;
 };
 
+// Formats a Date as "YYYY-MM-DDTHH:mm" in LOCAL time (what datetime-local
+// inputs expect) — toISOString() would incorrectly shift to UTC.
+function toLocalInputValue(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
+}
+
 function nowStr() {
-  const d = new Date();
-  d.setSeconds(0, 0);
-  return d.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:mm"
+  return toLocalInputValue(new Date());
 }
 
 function firstOfMonthStr() {
   const d = new Date();
   d.setDate(1);
   d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 16);
+  return toLocalInputValue(d);
 }
 
 export default function InboundByPersonChart() {
-const [start, setStart] = useState(firstOfMonthStr());
-const [end, setEnd] = useState(nowStr());
+  const [start, setStart] = useState(firstOfMonthStr());
+  const [end, setEnd] = useState(nowStr());
   const [rows, setRows] = useState<Row[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,9 +39,17 @@ const [end, setEnd] = useState(nowStr());
     setLoading(true);
     setError(null);
 
-const res = await fetch(
-  `/api/analytics/inbound-by-person?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
-);
+    // Convert the local wall-clock string to an absolute UTC instant before
+    // sending — the browser correctly interprets a bare "YYYY-MM-DDTHH:mm"
+    // string as local time, so new Date(start) gives the right moment
+    // regardless of what timezone the server itself runs in.
+    const startIso = new Date(start).toISOString();
+    const endIso = new Date(end).toISOString();
+
+    const res = await fetch(
+      `/api/analytics/inbound-by-person?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`
+    );
+
     setLoading(false);
 
     if (!res.ok) {
@@ -56,20 +71,20 @@ const res = await fetch(
         <div>
           <label className="block text-xs text-zinc-500 mb-1">From</label>
           <input
-  type="datetime-local"
-  value={start}
-  onChange={(e) => setStart(e.target.value)}
-  className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-/>
+            type="datetime-local"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+          />
         </div>
         <div>
           <label className="block text-xs text-zinc-500 mb-1">To</label>
-       <input
-  type="datetime-local"
-  value={end}
-  onChange={(e) => setEnd(e.target.value)}
-  className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-/>
+          <input
+            type="datetime-local"
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+          />
         </div>
         <button
           onClick={handleFetch}
