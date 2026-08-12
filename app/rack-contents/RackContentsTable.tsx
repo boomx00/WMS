@@ -35,12 +35,13 @@ export default function RackContentsTable({ rows }: { rows: Row[] }) {
       if (!q) return true;
 
       const matchesLocation = row.code.toLowerCase().includes(q);
-      const matchesProduct = row.pallets.some(
-        (p) =>
-          p.itemSku.toLowerCase().includes(q) ||
-          p.itemName.toLowerCase().includes(q) ||
-          p.workOrderNumber.toLowerCase().includes(q)
-      );
+     const matchesProduct = row.pallets.some(
+  (p) =>
+    p.label.toLowerCase().includes(q) ||
+    p.itemSku.toLowerCase().includes(q) ||
+    p.itemName.toLowerCase().includes(q) ||
+    p.workOrderNumber.toLowerCase().includes(q)
+);
 
       return matchesLocation || matchesProduct;
     });
