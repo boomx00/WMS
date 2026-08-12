@@ -5,6 +5,7 @@ import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { checkRackSkuConflict } from "@/lib/rackGuard";
+
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
@@ -83,29 +84,71 @@ export async function PATCH(req: NextRequest) {
     const isFirstRacking = exactPallet.inForkliftUserId === null;
 
     const result = await db.transaction(async (tx) => {
-      const [updated] = await tx
-        .update(pallets)
-        .set({
-          locationId: newLocation.id,
-          inForkliftUserId: isFirstRacking ? session.userId : exactPallet.inForkliftUserId,
-          firstRackedAt:
-            exactPallet.firstRackedAt === null && newLocation.type === "RACK"
-              ? new Date()
-              : exactPallet.firstRackedAt,
-          updatedAt: new Date(),
-        })
-        .where(eq(pallets.id, exactPallet.id))
-        .returning();
+      // Check whether the destination already has its own row under this
+      // exact label — happens for default-code buckets, which can
+      // legitimately exist at multiple locations at once. If so, merge into
+      // it instead of relocating this row directly, since (label,
+      // locationId) must stay unique.
+      const [existingAtDestination] = await tx
+        .select()
+        .from(pallets)
+        .where(and(eq(pallets.label, label), eq(pallets.locationId, newLocation.id)));
+
+      let destinationPallet;
+
+      if (existingAtDestination && existingAtDestination.id !== exactPallet.id) {
+        if (existingAtDestination.status === "ACTIVE") {
+          [destinationPallet] = await tx
+            .update(pallets)
+            .set({
+              quantity: existingAtDestination.quantity + exactPallet.quantity,
+              updatedAt: new Date(),
+            })
+            .where(eq(pallets.id, existingAtDestination.id))
+            .returning();
+        } else {
+          [destinationPallet] = await tx
+            .update(pallets)
+            .set({
+              status: "ACTIVE",
+              quantity: exactPallet.quantity,
+              removedAt: null,
+              updatedAt: new Date(),
+            })
+            .where(eq(pallets.id, existingAtDestination.id))
+            .returning();
+        }
+
+        // Empty out the source row — its stock has been merged elsewhere.
+        await tx
+          .update(pallets)
+          .set({ quantity: 0, status: "OUTBOUND", updatedAt: new Date() })
+          .where(eq(pallets.id, exactPallet.id));
+      } else {
+        [destinationPallet] = await tx
+          .update(pallets)
+          .set({
+            locationId: newLocation.id,
+            inForkliftUserId: isFirstRacking ? session.userId : exactPallet.inForkliftUserId,
+            firstRackedAt:
+              exactPallet.firstRackedAt === null && newLocation.type === "RACK"
+                ? new Date()
+                : exactPallet.firstRackedAt,
+            updatedAt: new Date(),
+          })
+          .where(eq(pallets.id, exactPallet.id))
+          .returning();
+      }
 
       await tx.insert(palletEvents).values({
-        palletId: updated.id,
+        palletId: destinationPallet.id,
         type: "MOVED",
         locationId: newLocation.id,
         userId: session.userId,
         quantity: exactPallet.quantity,
       });
 
-      return updated;
+      return destinationPallet;
     });
 
     return NextResponse.json({ ...result, matchType: "exact" });
