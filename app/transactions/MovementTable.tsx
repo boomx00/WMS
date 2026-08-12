@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EVENT_TYPE_STYLES, EVENT_TYPE_LABELS } from "@/lib/eventTypes";
 
 type Row = {
@@ -16,29 +16,39 @@ type Row = {
   username: string;
 };
 
-
 export default function MovementTable({ rows }: { rows: Row[] }) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
+  const [searchResults, setSearchResults] = useState<Row[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  // Debounced server-side search — only fires ~300ms after typing stops,
+  // and only when there's actually something to search for. Falls back to
+  // the small initial "recent" list when the box is cleared.
+  useEffect(() => {
+    if (!search.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    const handle = setTimeout(async () => {
+      setSearching(true);
+      const res = await fetch(`/api/transactions/search?q=${encodeURIComponent(search.trim())}`);
+      setSearching(false);
+      if (res.ok) {
+        setSearchResults(await res.json());
+      }
+    }, 300);
+
+    return () => clearTimeout(handle);
+  }, [search]);
+
+  const baseRows = searchResults ?? rows;
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-
-    return rows.filter((row) => {
-      if (typeFilter !== "ALL" && row.type !== typeFilter) return false;
-
-      if (!q) return true;
-
-      return (
-        row.locationCode.toLowerCase().includes(q) ||
-        row.palletLabel.toLowerCase().includes(q) ||
-        row.itemSku.toLowerCase().includes(q) ||
-        row.itemName.toLowerCase().includes(q) ||
-        row.workOrderNumber.toLowerCase().includes(q) ||
-        row.username.toLowerCase().includes(q)
-      );
-    });
-  }, [rows, search, typeFilter]);
+    if (typeFilter === "ALL") return baseRows;
+    return baseRows.filter((row) => row.type === typeFilter);
+  }, [baseRows, typeFilter]);
 
   return (
     <div>
@@ -51,21 +61,24 @@ export default function MovementTable({ rows }: { rows: Row[] }) {
           className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
         />
         <select
-  value={typeFilter}
-  onChange={(e) => setTypeFilter(e.target.value)}
-  className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
->
-  <option value="ALL">All types</option>
-  <option value="INBOUND">Inbound</option>
-  <option value="MOVED">Moved</option>
-  <option value="OUTBOUND">Outbound</option>
-<option value="DEFAULT_OUTBOUND">Default Outbound</option>
-</select>
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        >
+          <option value="ALL">All types</option>
+          <option value="INBOUND">Inbound</option>
+          <option value="MOVED">Moved</option>
+          <option value="OUTBOUND">Outbound</option>
+          <option value="DEFAULT_OUTBOUND">Default Outbound</option>
+        </select>
       </div>
 
       <p className="text-xs text-zinc-600 mb-3">
-        {filtered.length.toLocaleString()} of {rows.length.toLocaleString()} events
-        (most recent 500 shown)
+        {searching
+          ? "Searching..."
+          : searchResults !== null
+          ? `${filtered.length.toLocaleString()} result(s) for "${search.trim()}"`
+          : `Showing ${filtered.length.toLocaleString()} most recent events`}
       </p>
 
       <div className="border border-zinc-800 rounded-lg overflow-hidden">
@@ -84,7 +97,7 @@ export default function MovementTable({ rows }: { rows: Row[] }) {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
                   No matching events.
                 </td>
               </tr>
@@ -104,8 +117,8 @@ export default function MovementTable({ rows }: { rows: Row[] }) {
                     </span>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-zinc-400">
-  {row.palletLabel}
-</td>
+                    {row.palletLabel}
+                  </td>
                   <td className="px-4 py-3 font-mono text-amber-500 whitespace-nowrap">
                     {row.locationCode}
                   </td>

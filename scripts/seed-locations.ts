@@ -13,8 +13,6 @@ const AREA_WIDTHS: Record<string, number> = {
 };
 
 async function main() {
-  // Dynamic import — runs here, after config() has already set DATABASE_URL,
-  // unlike a static top-level import which would get hoisted above config().
   const { db } = await import("../lib/db");
   const { locations } = await import("../db/schema");
 
@@ -48,6 +46,7 @@ async function main() {
       { code: "FLOOR", type: "FLOOR" },
       { code: "DESTROY", type: "DESTROY" },
       { code: "LEFTOVER", type: "LEFTOVER" },
+      { code: "OUTBOUND_WH", type: "OUTBOUND_WH" },
     ])
     .onConflictDoNothing({ target: locations.code });
 
