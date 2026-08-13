@@ -44,8 +44,7 @@ export async function POST(req: NextRequest) {
 
   response.cookies.set("session", token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+secure: false, // TEMP: revert to `process.env.NODE_ENV === "production"` once HTTPS is actually working    sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 8, // 8 hours, matches JWT expiry
   });
