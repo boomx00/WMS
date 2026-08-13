@@ -12,7 +12,7 @@ export async function GET() {
 // body: { sku, name, cartonBagQty, palletCartonQty }
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { sku, name, cartonBagQty, palletCartonQty } = body;
+  const { sku, name, cartonBagQty, palletCartonQty, legacySku } = body;
 
   if (!sku || !name || cartonBagQty === undefined || palletCartonQty === undefined) {
     return NextResponse.json(
@@ -28,7 +28,8 @@ export async function POST(req: NextRequest) {
       name,
       cartonBagQty,
       palletCartonQty,
-      defaultCode: `${sku}*default`, // always derived from SKU, never user-entered
+      defaultCode: `${sku}*default`,
+      legacySku: legacySku && legacySku.trim() ? legacySku.trim() : null,
     })
     .returning();
 

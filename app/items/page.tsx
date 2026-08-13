@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { items } from "@/db/schema";
 import CreateItemForm from "./CreateItemForm";
+import LegacySkuCell from "./LegacySkuCell";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,14 @@ export default async function ItemsPage() {
       <div className="border border-zinc-800 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-zinc-900 text-zinc-500 text-left">
-              <th className="px-4 py-3 font-medium">SKU</th>
-              <th className="px-4 py-3 font-medium">Name</th>
-              <th className="px-4 py-3 font-medium text-right">Bags / Carton</th>
-              <th className="px-4 py-3 font-medium text-right">Cartons / Pallet</th>
-            </tr>
-          </thead>
+  <tr className="bg-zinc-900 text-zinc-500 text-left">
+    <th className="px-4 py-3 font-medium">SKU</th>
+    <th className="px-4 py-3 font-medium">Legacy Code</th>
+    <th className="px-4 py-3 font-medium">Name</th>
+    <th className="px-4 py-3 font-medium text-right">Bags / Carton</th>
+    <th className="px-4 py-3 font-medium text-right">Cartons / Pallet</th>
+  </tr>
+</thead>
           <tbody>
             {itemRows.length === 0 ? (
               <tr>
@@ -57,6 +59,14 @@ export default async function ItemsPage() {
                   <td className="px-4 py-3 text-right font-mono text-zinc-400">
                     {item.palletCartonQty}
                   </td>
+
+<td className="px-4 py-3 font-mono text-amber-500">
+  {item.sku}
+</td>
+<td className="px-4 py-3">
+  <LegacySkuCell itemId={item.id} initialValue={item.legacySku} />
+</td>
+<td className="px-4 py-3">{item.name}</td>
                 </tr>
               ))
             )}

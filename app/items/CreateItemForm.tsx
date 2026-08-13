@@ -11,7 +11,7 @@ export default function CreateItemForm() {
   const [palletCartonQty, setPalletCartonQty] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
+const [legacySku, setLegacySku] = useState("");
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -21,11 +21,12 @@ export default function CreateItemForm() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        sku,
-        name,
-        cartonBagQty: Number(cartonBagQty),
-        palletCartonQty: Number(palletCartonQty),
-      }),
+  sku,
+  name,
+  cartonBagQty: Number(cartonBagQty),
+  palletCartonQty: Number(palletCartonQty),
+  legacySku: legacySku.trim() || undefined,
+}),
     });
 
     setLoading(false);
@@ -36,11 +37,12 @@ export default function CreateItemForm() {
       return;
     }
 
-    setSku("");
-    setName("");
-    setCartonBagQty("");
-    setPalletCartonQty("");
-    router.refresh();
+setSku("");
+setName("");
+setCartonBagQty("");
+setPalletCartonQty("");
+setLegacySku("");
+router.refresh();
   }
 
   return (
@@ -48,7 +50,19 @@ export default function CreateItemForm() {
       onSubmit={handleSubmit}
       className="border border-zinc-800 rounded-lg p-4 bg-zinc-900/30 flex items-end gap-3 flex-wrap"
     >
+
       <div className="flex-1 min-w-[140px]">
+  <label className="block text-xs text-zinc-500 mb-1">Legacy Code (optional)</label>
+  <input
+    type="text"
+    value={legacySku}
+    onChange={(e) => setLegacySku(e.target.value)}
+    className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+  />
+</div>
+
+
+      <div className="flex-1 min-w-[160px]">
         <label className="block text-xs text-zinc-500 mb-1">SKU</label>
         <input
           type="text"
