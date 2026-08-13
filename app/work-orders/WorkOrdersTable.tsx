@@ -125,28 +125,7 @@ export default function WorkOrdersTable({
                   </span>
                 </button>
 
-                <div className="px-4 pb-3 space-y-1">
-                  {wo.lines.map((line) => (
-                    <div
-                      key={line.itemSku}
-                      className="flex items-center justify-between text-xs border-t border-zinc-800/60 pt-1"
-                    >
-                      <div>
-                        <span className="font-mono text-zinc-300">{line.itemSku}</span>{" "}
-                        <span className="text-zinc-500">{line.itemName}</span>
-                      </div>
-                      <div className="text-zinc-400 font-mono text-right">
-                        <div>
-                          {line.totalQuantity.toLocaleString()} units ·{" "}
-                          {line.palletCount} pallet(s)
-                        </div>
-                        <div className="text-zinc-600 text-[10px]">
-                          Originally inbounded: {line.originalInbound.toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+               
 
                 {isOpen && (
                   <div className="border-t border-zinc-800 bg-zinc-950/50">
