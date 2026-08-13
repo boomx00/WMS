@@ -90,19 +90,22 @@ async function getWorkOrderSummary(workOrderNumbers: string[]) {
   }
 
   // Preserve the page's intended order (desc by workOrderNumber)
-  return workOrderNumbers.map((wo) => {
-    const lines = byWorkOrder.get(wo) ?? [];
-    return {
-      workOrderNumber: wo,
-      lines: lines.map((line) => ({
-        ...line,
-        originalInbound: originalInboundMap.get(`${wo}-${line.itemSku}`) ?? 0,
-      })),
-      totalQuantity: lines.reduce((sum, l) => sum + l.totalQuantity, 0),
-      totalPallets: lines.reduce((sum, l) => sum + l.palletCount, 0),
-      pallets: palletsByWo.get(wo) ?? [],
-    };
-  });
+ return workOrderNumbers.map((wo) => {
+  const lines = byWorkOrder.get(wo) ?? [];
+  const linesWithInbound = lines.map((line) => ({
+    ...line,
+    originalInbound: originalInboundMap.get(`${wo}-${line.itemSku}`) ?? 0,
+  }));
+
+  return {
+    workOrderNumber: wo,
+    lines: linesWithInbound,
+    totalQuantity: lines.reduce((sum, l) => sum + l.totalQuantity, 0),
+    totalPallets: lines.reduce((sum, l) => sum + l.palletCount, 0),
+    totalOriginalInbound: linesWithInbound.reduce((sum, l) => sum + l.originalInbound, 0),
+    pallets: palletsByWo.get(wo) ?? [],
+  };
+});
 }
 
 export default async function WorkOrdersPage({

@@ -21,15 +21,14 @@ type Pallet = {
   locationCode: string;
   inboundAt: string | Date;
 };
-
 type WorkOrder = {
   workOrderNumber: string;
   lines: Line[];
   totalQuantity: number;
   totalPallets: number;
+  totalOriginalInbound: number;
   pallets: Pallet[];
 };
-
 export default function WorkOrdersTable({
   workOrders,
   page,
@@ -116,13 +115,18 @@ export default function WorkOrdersTable({
                       {wo.workOrderNumber}
                     </span>
                   </span>
-                  <span className="text-xs text-zinc-500">
-                    {wo.totalPallets.toLocaleString()} pallet(s) ·{" "}
-                    <span className="text-zinc-300 font-mono">
-                      {wo.totalQuantity.toLocaleString()}
-                    </span>{" "}
-                    total units
-                  </span>
+                  <span className="text-xs text-zinc-500 text-right">
+  <div>
+    {wo.totalPallets.toLocaleString()} pallet(s) ·{" "}
+    <span className="text-zinc-300 font-mono">
+      {wo.totalQuantity.toLocaleString()}
+    </span>{" "}
+    total units
+  </div>
+  <div className="text-zinc-600 text-[10px]">
+    Originally inbounded: {wo.totalOriginalInbound.toLocaleString()}
+  </div>
+</span>
                 </button>
 
                
