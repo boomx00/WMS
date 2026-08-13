@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { pallets, items, locations } from "@/db/schema";
+import { pallets, items, locations, palletEvents } from "@/db/schema";
 import { eq, sql } from "drizzle-orm";
 import WorkOrdersTable from "./WorkOrdersTable";
 
@@ -19,6 +19,23 @@ async function getWorkOrderSummary() {
     .groupBy(pallets.workOrderNumber, items.sku, items.name)
     .orderBy(pallets.workOrderNumber);
 
+  const originalInboundRows = await db
+    .select({
+      workOrderNumber: pallets.workOrderNumber,
+      itemSku: items.sku,
+      originalInbound: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int`,
+    })
+    .from(palletEvents)
+    .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
+    .innerJoin(items, eq(pallets.itemId, items.id))
+    .where(eq(palletEvents.type, "INBOUND"))
+    .groupBy(pallets.workOrderNumber, items.sku);
+
+  const originalInboundMap = new Map<string, number>();
+  for (const row of originalInboundRows) {
+    originalInboundMap.set(`${row.workOrderNumber}-${row.itemSku}`, row.originalInbound);
+  }
+
   const byWorkOrder = new Map<string, typeof rows>();
   for (const row of rows) {
     if (!byWorkOrder.has(row.workOrderNumber)) {
@@ -29,7 +46,10 @@ async function getWorkOrderSummary() {
 
   return Array.from(byWorkOrder.entries()).map(([workOrderNumber, lines]) => ({
     workOrderNumber,
-    lines,
+    lines: lines.map((line) => ({
+      ...line,
+      originalInbound: originalInboundMap.get(`${workOrderNumber}-${line.itemSku}`) ?? 0,
+    })),
     totalQuantity: lines.reduce((sum, l) => sum + l.totalQuantity, 0),
     totalPallets: lines.reduce((sum, l) => sum + l.palletCount, 0),
   }));
@@ -79,9 +99,7 @@ export default async function WorkOrdersPage() {
       <header className="mb-8">
         <h1 className="text-2xl font-semibold">Work Orders</h1>
         <p className="text-zinc-500 text-sm mt-1">
-          Total quantity inbound per work order, including any split-off
-          portions (Leftover/Destroy). Click a work order to see individual
-          pallets.
+          Current tracked quantity vs. original inbound per work order.
         </p>
       </header>
 

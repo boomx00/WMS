@@ -8,6 +8,7 @@ type Line = {
   itemName: string;
   totalQuantity: number;
   palletCount: number;
+  originalInbound: number;
 };
 
 type Pallet = {
@@ -120,9 +121,14 @@ export default function WorkOrdersTable({ workOrders }: { workOrders: WorkOrder[
                         <span className="font-mono text-zinc-300">{line.itemSku}</span>{" "}
                         <span className="text-zinc-500">{line.itemName}</span>
                       </div>
-                      <div className="text-zinc-400 font-mono">
-                        {line.totalQuantity.toLocaleString()} units ·{" "}
-                        {line.palletCount} pallet(s)
+                      <div className="text-zinc-400 font-mono text-right">
+                        <div>
+                          {line.totalQuantity.toLocaleString()} units ·{" "}
+                          {line.palletCount} pallet(s)
+                        </div>
+                        <div className="text-zinc-600 text-[10px]">
+                          Originally inbounded: {line.originalInbound.toLocaleString()}
+                        </div>
                       </div>
                     </div>
                   ))}
