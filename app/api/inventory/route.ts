@@ -23,7 +23,7 @@ export async function GET() {
     .from(pallets)
     .innerJoin(items, eq(pallets.itemId, items.id))
     .innerJoin(locations, eq(pallets.locationId, locations.id))
-    .where(ne(pallets.status, "REMOVED"));
+    .where(eq(pallets.status, "ACTIVE"))
 
   return NextResponse.json(rows);
 }
