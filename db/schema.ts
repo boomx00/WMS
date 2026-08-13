@@ -241,6 +241,7 @@ export const salesOrders = pgTable(
     id: serial("id").primaryKey(),
     soNumber: text("so_number").notNull(),
     orderDate: timestamp("order_date").notNull(),
+    assignedCheckerId: integer("assigned_checker_id").references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("sales_orders_so_number_idx").on(table.soNumber)]
