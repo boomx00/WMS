@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type Line = {
   workOrderNumber: string;
@@ -29,7 +30,18 @@ type WorkOrder = {
   pallets: Pallet[];
 };
 
-export default function WorkOrdersTable({ workOrders }: { workOrders: WorkOrder[] }) {
+export default function WorkOrdersTable({
+  workOrders,
+  page,
+  totalPages,
+  totalCount,
+}: {
+  workOrders: WorkOrder[];
+  page: number;
+  totalPages: number;
+  totalCount: number;
+}) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -51,13 +63,14 @@ export default function WorkOrdersTable({ workOrders }: { workOrders: WorkOrder[
   function toggle(workOrderNumber: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(workOrderNumber)) {
-        next.delete(workOrderNumber);
-      } else {
-        next.add(workOrderNumber);
-      }
+      if (next.has(workOrderNumber)) next.delete(workOrderNumber);
+      else next.add(workOrderNumber);
       return next;
     });
+  }
+
+  function goToPage(p: number) {
+    router.push(`/work-orders?page=${p}`);
   }
 
   return (
@@ -66,18 +79,19 @@ export default function WorkOrdersTable({ workOrders }: { workOrders: WorkOrder[
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by work order or SKU..."
+        placeholder="Filter this page by work order or SKU..."
         className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm mb-4 focus:outline-none focus:border-amber-500"
       />
 
       <p className="text-xs text-zinc-600 mb-3">
-        {filtered.length.toLocaleString()} of {workOrders.length.toLocaleString()} work orders
+        Page {page} of {totalPages} · {totalCount.toLocaleString()} work orders total
+        {search.trim() && ` · ${filtered.length} matching on this page`}
       </p>
 
-      <div className="space-y-3">
+      <div className="space-y-3 mb-4">
         {filtered.length === 0 ? (
           <div className="border border-dashed border-zinc-800 rounded-lg px-8 py-12 text-center text-zinc-600 text-sm">
-            No matching work orders.
+            No matching work orders on this page.
           </div>
         ) : (
           filtered.map((wo) => {
@@ -183,6 +197,28 @@ export default function WorkOrdersTable({ workOrders }: { workOrders: WorkOrder[
           })
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => goToPage(page - 1)}
+            disabled={page <= 1}
+            className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            ← Previous
+          </button>
+          <span className="text-xs text-zinc-500">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            onClick={() => goToPage(page + 1)}
+            disabled={page >= totalPages}
+            className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

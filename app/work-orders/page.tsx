@@ -1,11 +1,33 @@
 import { db } from "@/lib/db";
 import { pallets, items, locations, palletEvents } from "@/db/schema";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, inArray, desc } from "drizzle-orm";
 import WorkOrdersTable from "./WorkOrdersTable";
 
 export const dynamic = "force-dynamic";
 
-async function getWorkOrderSummary() {
+const PAGE_SIZE = 50;
+
+async function getDistinctWorkOrderCount() {
+  const [row] = await db
+    .select({ count: sql<number>`count(distinct ${pallets.workOrderNumber})::int` })
+    .from(pallets);
+  return row.count;
+}
+
+async function getWorkOrderNumbersForPage(page: number) {
+  const offset = (page - 1) * PAGE_SIZE;
+  const rows = await db
+    .selectDistinct({ workOrderNumber: pallets.workOrderNumber })
+    .from(pallets)
+    .orderBy(desc(pallets.workOrderNumber))
+    .limit(PAGE_SIZE)
+    .offset(offset);
+  return rows.map((r) => r.workOrderNumber);
+}
+
+async function getWorkOrderSummary(workOrderNumbers: string[]) {
+  if (workOrderNumbers.length === 0) return [];
+
   const rows = await db
     .select({
       workOrderNumber: pallets.workOrderNumber,
@@ -16,8 +38,8 @@ async function getWorkOrderSummary() {
     })
     .from(pallets)
     .innerJoin(items, eq(pallets.itemId, items.id))
-    .groupBy(pallets.workOrderNumber, items.sku, items.name)
-    .orderBy(pallets.workOrderNumber);
+    .where(inArray(pallets.workOrderNumber, workOrderNumbers))
+    .groupBy(pallets.workOrderNumber, items.sku, items.name);
 
   const originalInboundRows = await db
     .select({
@@ -28,7 +50,9 @@ async function getWorkOrderSummary() {
     .from(palletEvents)
     .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
     .innerJoin(items, eq(pallets.itemId, items.id))
-    .where(eq(palletEvents.type, "INBOUND"))
+    .where(
+      sql`${palletEvents.type} = 'INBOUND' AND ${inArray(pallets.workOrderNumber, workOrderNumbers)}`
+    )
     .groupBy(pallets.workOrderNumber, items.sku);
 
   const originalInboundMap = new Map<string, number>();
@@ -36,27 +60,7 @@ async function getWorkOrderSummary() {
     originalInboundMap.set(`${row.workOrderNumber}-${row.itemSku}`, row.originalInbound);
   }
 
-  const byWorkOrder = new Map<string, typeof rows>();
-  for (const row of rows) {
-    if (!byWorkOrder.has(row.workOrderNumber)) {
-      byWorkOrder.set(row.workOrderNumber, []);
-    }
-    byWorkOrder.get(row.workOrderNumber)!.push(row);
-  }
-
-  return Array.from(byWorkOrder.entries()).map(([workOrderNumber, lines]) => ({
-    workOrderNumber,
-    lines: lines.map((line) => ({
-      ...line,
-      originalInbound: originalInboundMap.get(`${workOrderNumber}-${line.itemSku}`) ?? 0,
-    })),
-    totalQuantity: lines.reduce((sum, l) => sum + l.totalQuantity, 0),
-    totalPallets: lines.reduce((sum, l) => sum + l.palletCount, 0),
-  }));
-}
-
-async function getPalletsByWorkOrder() {
-  const rows = await db
+  const palletDetailRows = await db
     .select({
       workOrderNumber: pallets.workOrderNumber,
       palletId: pallets.id,
@@ -70,29 +74,52 @@ async function getPalletsByWorkOrder() {
     .from(pallets)
     .innerJoin(items, eq(pallets.itemId, items.id))
     .innerJoin(locations, eq(pallets.locationId, locations.id))
+    .where(inArray(pallets.workOrderNumber, workOrderNumbers))
     .orderBy(pallets.inboundAt);
+
+  const palletsByWo = new Map<string, typeof palletDetailRows>();
+  for (const row of palletDetailRows) {
+    if (!palletsByWo.has(row.workOrderNumber)) palletsByWo.set(row.workOrderNumber, []);
+    palletsByWo.get(row.workOrderNumber)!.push(row);
+  }
 
   const byWorkOrder = new Map<string, typeof rows>();
   for (const row of rows) {
-    if (!byWorkOrder.has(row.workOrderNumber)) {
-      byWorkOrder.set(row.workOrderNumber, []);
-    }
+    if (!byWorkOrder.has(row.workOrderNumber)) byWorkOrder.set(row.workOrderNumber, []);
     byWorkOrder.get(row.workOrderNumber)!.push(row);
   }
 
-  return byWorkOrder;
+  // Preserve the page's intended order (desc by workOrderNumber)
+  return workOrderNumbers.map((wo) => {
+    const lines = byWorkOrder.get(wo) ?? [];
+    return {
+      workOrderNumber: wo,
+      lines: lines.map((line) => ({
+        ...line,
+        originalInbound: originalInboundMap.get(`${wo}-${line.itemSku}`) ?? 0,
+      })),
+      totalQuantity: lines.reduce((sum, l) => sum + l.totalQuantity, 0),
+      totalPallets: lines.reduce((sum, l) => sum + l.palletCount, 0),
+      pallets: palletsByWo.get(wo) ?? [],
+    };
+  });
 }
 
-export default async function WorkOrdersPage() {
-  const [workOrders, palletsByWorkOrder] = await Promise.all([
-    getWorkOrderSummary(),
-    getPalletsByWorkOrder(),
+export default async function WorkOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = Math.max(1, Number(pageParam) || 1);
+
+  const [totalCount, workOrderNumbers] = await Promise.all([
+    getDistinctWorkOrderCount(),
+    getWorkOrderNumbersForPage(page),
   ]);
 
-  const workOrdersWithPallets = workOrders.map((wo) => ({
-    ...wo,
-    pallets: palletsByWorkOrder.get(wo.workOrderNumber) ?? [],
-  }));
+  const workOrders = await getWorkOrderSummary(workOrderNumbers);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
     <div className="p-8 max-w-4xl">
@@ -103,7 +130,12 @@ export default async function WorkOrdersPage() {
         </p>
       </header>
 
-      <WorkOrdersTable workOrders={workOrdersWithPallets} />
+      <WorkOrdersTable
+        workOrders={workOrders}
+        page={page}
+        totalPages={totalPages}
+        totalCount={totalCount}
+      />
     </div>
   );
 }
