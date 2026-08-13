@@ -163,7 +163,8 @@ export async function PATCH(req: NextRequest) {
   if (alreadyExistsElsewhere) {
     return NextResponse.json(
       {
-        error: `This pallet is already at ${alreadyExistsElsewhere.locationCode}, not ${currentLocationCode}.`,
+        //         error: `This pallet is already at ${alreadyExistsElsewhere.locationCode}, not ${currentLocationCode}.`,
+        error: `barang ini sudah di ${alreadyExistsElsewhere.locationCode}, bukan ${currentLocationCode}.`,
         matchType: "already_exists_elsewhere",
         actualLocationCode: alreadyExistsElsewhere.locationCode,
       },

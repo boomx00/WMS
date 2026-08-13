@@ -55,7 +55,7 @@ export async function PATCH(req: NextRequest) {
 
   if (!pallet) {
     return NextResponse.json(
-      { error: "No active pallet with that label found in Outbound Warehouse" },
+      { error: "Barang ini tidak ditemukan di OUTBOUND_WH, lakukan PICKING dulu" },
       { status: 404 }
     );
   }
