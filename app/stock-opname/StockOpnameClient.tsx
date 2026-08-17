@@ -10,6 +10,7 @@ type Session = {
   countedLines: number;
   discrepancies: number;
   status: string;
+  assignedToUsername: string | null;
 };
 
 const STATUS_STYLES: Record<string, string> = {
