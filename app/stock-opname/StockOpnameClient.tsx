@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
 type Session = {
   opnameNumber: string;
   notes: string | null;
@@ -161,9 +160,13 @@ type ReportResponse = {
 };
 
 function OpnameSessionRow({ session }: { session: Session }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<ReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustResult, setAdjustResult] = useState<string | null>(null);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
 
   async function toggle() {
     if (!open && !report) {
@@ -173,6 +176,34 @@ function OpnameSessionRow({ session }: { session: Session }) {
       setLoading(false);
     }
     setOpen((prev) => !prev);
+  }
+
+  async function handleAdjust() {
+    setAdjusting(true);
+    setAdjustError(null);
+    setAdjustResult(null);
+
+    const res = await fetch(`/api/stock-opname/${session.opnameNumber}/adjust`, {
+      method: "POST",
+    });
+    setAdjusting(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setAdjustError(data.error ?? "Failed to adjust inventory");
+      return;
+    }
+
+    const data = await res.json();
+    setAdjustResult(
+      `Applied ${data.applied} adjustment(s), ${data.skipped} already matched${
+        data.failed > 0 ? `, ${data.failed} failed (see console)` : ""
+      }.`
+    );
+    if (data.failed > 0) {
+      console.warn("Stock opname adjust failures:", data.failures);
+    }
+    router.refresh();
   }
 
   return (
@@ -197,6 +228,20 @@ function OpnameSessionRow({ session }: { session: Session }) {
 
       {open && (
         <div className="px-4 pb-4">
+          {session.status === "DONE" && (
+            <div className="mb-4 flex items-center gap-3">
+              <button
+                onClick={handleAdjust}
+                disabled={adjusting}
+                className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+              >
+                {adjusting ? "Adjusting..." : "Adjust"}
+              </button>
+              {adjustResult && <span className="text-xs text-emerald-400">{adjustResult}</span>}
+              {adjustError && <span className="text-xs text-red-400">{adjustError}</span>}
+            </div>
+          )}
+
           {loading ? (
             <p className="text-xs text-zinc-600">Loading...</p>
           ) : !report ? (
