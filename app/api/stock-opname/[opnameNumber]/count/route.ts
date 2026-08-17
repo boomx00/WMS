@@ -1,0 +1,94 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { stockOpnameItems, locations, items } from "@/db/schema";
+import { eq, and, or } from "drizzle-orm";
+import { getSession } from "@/lib/auth";
+import { normalizeLabel } from "@/lib/labelNormalize";
+
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
+function extractSku(label: string): string | null {
+  const cleaned = label.replace(/^\*+/, "");
+  const parts = cleaned.split("*");
+  return parts[0]?.trim() || null;
+}
+
+// PATCH /api/stock-opname/:opnameNumber/count
+// body: { locationCode, scanned, countedQty }
+// v1: purely a blind physical count log — does NOT cross-check against
+// location_stock. systemQty is always 0, difference is left unset.
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ opnameNumber: string }> }
+) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+  }
+
+  const { opnameNumber } = await params;
+  const body = await req.json();
+  const locationCode = sanitize(body.locationCode ?? "");
+  const rawScanned = sanitize(body.scanned ?? "");
+  const { countedQty } = body;
+
+  if (!locationCode || !rawScanned || countedQty === undefined || countedQty < 0) {
+    return NextResponse.json(
+      { error: "locationCode, scanned, and a non-negative countedQty are required" },
+      { status: 400 }
+    );
+  }
+
+  const [location] = await db.select().from(locations).where(eq(locations.code, locationCode));
+  if (!location) {
+    return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
+  }
+
+  const label = await normalizeLabel(db, rawScanned);
+  const sku = extractSku(label);
+  if (!sku) {
+    return NextResponse.json({ error: "Couldn't parse a SKU" }, { status: 400 });
+  }
+
+  const [item] = await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)));
+  if (!item) {
+    return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+  }
+
+  const [existingLine] = await db
+    .select()
+    .from(stockOpnameItems)
+    .where(
+      and(
+        eq(stockOpnameItems.opnameNumber, opnameNumber),
+        eq(stockOpnameItems.locationId, location.id),
+        eq(stockOpnameItems.itemId, item.id)
+      )
+    );
+
+  let result;
+  if (existingLine) {
+    [result] = await db
+      .update(stockOpnameItems)
+      .set({ countedQty, countedAt: new Date(), countedBy: session.userId })
+      .where(eq(stockOpnameItems.id, existingLine.id))
+      .returning();
+  } else {
+    [result] = await db
+      .insert(stockOpnameItems)
+      .values({
+        opnameNumber,
+        locationId: location.id,
+        itemId: item.id,
+        systemQty: 0,
+        countedQty,
+        countedAt: new Date(),
+        countedBy: session.userId,
+      })
+      .returning();
+  }
+
+  return NextResponse.json({ ...result, itemSku: item.sku, itemName: item.name });
+}
