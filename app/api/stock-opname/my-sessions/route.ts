@@ -33,13 +33,17 @@ export async function GET() {
 
   const progressMap = new Map(progressRows.map((r) => [r.opnameNumber, r]));
 
-  const result = sessions.map((s) => {
-    const progress = progressMap.get(s.opnameNumber);
-    const total = progress?.total ?? 0;
-    const counted = progress?.counted ?? 0;
-    const status = total === 0 || counted === 0 ? "PENDING" : counted >= total ? "DONE" : "IN_PROGRESS";
-    return { opnameNumber: s.opnameNumber, notes: s.notes, totalLines: total, countedLines: counted, status };
-  });
+const result = sessions.map((s) => {
+  const progress = progressMap.get(s.opnameNumber);
+  const total = progress?.total ?? 0;
+  const counted = progress?.counted ?? 0;
+  const status = s.completedAt
+    ? "DONE"
+    : total === 0 || counted === 0
+    ? "PENDING"
+    : "IN_PROGRESS";
+  return { opnameNumber: s.opnameNumber, notes: s.notes, totalLines: total, countedLines: counted, status };
+});
 
   return NextResponse.json(result);
 }

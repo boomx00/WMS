@@ -341,6 +341,7 @@ export const stockOpname = pgTable("stock_opname", {
     .references(() => users.id),
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
 });
 
 export const stockOpnameItems = pgTable("stock_opname_items", {

@@ -33,7 +33,11 @@ async function getSessions() {
   return sessions.map((s) => {
     const total = totalMap.get(s.opnameNumber) ?? 0;
     const counted = countedMap.get(s.opnameNumber) ?? 0;
-    const status = total === 0 || counted === 0 ? "PENDING" : counted >= total ? "DONE" : "IN_PROGRESS";
+    const status = s.completedAt
+  ? "DONE"
+  : total === 0 || counted === 0
+  ? "PENDING"
+  : "IN_PROGRESS";
     return {
       ...s,
       assignedToUsername: s.assignedTo ? usersById.get(s.assignedTo) ?? null : null,
