@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpnameItems, locations, items } from "@/db/schema";
+import { stockOpnameItems, stockOpnameLocations, locations, items } from "@/db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
@@ -17,8 +17,11 @@ function extractSku(label: string): string | null {
 
 // PATCH /api/stock-opname/:opnameNumber/count
 // body: { locationCode, scanned, countedQty }
-// v1: purely a blind physical count log — does NOT cross-check against
-// location_stock. systemQty is always 0, difference is left unset.
+//
+// A blind physical count log. If this location isn't yet part of this
+// opname session (e.g. a custom, real-time session where locations are
+// never pre-planned — only discovered as the PIC actually visits them),
+// it's registered into stock_opname_locations automatically here.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ opnameNumber: string }> }
@@ -57,6 +60,23 @@ export async function PATCH(
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
 
+  // Register this location into the session if it isn't already part of
+  // it — this is what makes a custom/real-time session grow as the PIC
+  // physically visits places, rather than needing a pre-planned list.
+  const [existingLocationLink] = await db
+    .select()
+    .from(stockOpnameLocations)
+    .where(
+      and(
+        eq(stockOpnameLocations.opnameNumber, opnameNumber),
+        eq(stockOpnameLocations.locationId, location.id)
+      )
+    );
+
+  if (!existingLocationLink) {
+    await db.insert(stockOpnameLocations).values({ opnameNumber, locationId: location.id });
+  }
+
   const [existingLine] = await db
     .select()
     .from(stockOpnameItems)
@@ -90,5 +110,5 @@ export async function PATCH(
       .returning();
   }
 
-  return NextResponse.json({ ...result, itemSku: item.sku, itemName: item.name });
+  return NextResponse.json({ ...result, itemSku: item.sku, itemName: item.name, locationCode: location.code });
 }
