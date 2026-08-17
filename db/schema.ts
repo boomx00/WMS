@@ -238,6 +238,7 @@ export const settings = pgTable("settings", {
   allowUntrackedOutbound: boolean("allow_untracked_outbound").notNull().default(false),
   allowDefaultPicking: boolean("allow_default_picking").notNull().default(true),
   allowNegativeFloorStock: boolean("allow_negative_floor_stock").notNull().default(false),
+  allowNegativeRackStock: boolean("allow_negative_rack_stock").notNull().default(false),
 });
 
 export const salesOrders = pgTable(
