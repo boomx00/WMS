@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locations, items, settings, locationStockEvents } from "@/db/schema";
+import { locations, items, settings, locationStockEvents, locationStock } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
-import { adjustLocationStock, moveLocationStock } from "@/lib/locationStock";
+import { adjustLocationStock } from "@/lib/locationStock";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
 
 // PATCH /api/location-stock/move
-// body: { sourceLocationCode, destinationLocationCode, itemSku, quantity, sourceUntracked? }
+// body: { sourceLocationCode, destinationLocationCode, itemSku, quantity }
 //
-// Moves stock between two locations purely by SKU + aggregate quantity —
-// no pallet label required. sourceUntracked=true is for pre-existing rack
-// stock that was never entered into the system (mirrors Picking v2's
-// default-picking behavior): only credits the destination, doesn't try to
-// decrement a source balance that was never recorded.
+// Rules (governed by "Default Move" / allowNegativeRackStock setting):
+//   - Source occupied by a DIFFERENT SKU → always blocked, setting has no effect.
+//   - Same SKU present, sufficient quantity → always allowed (MOVE).
+//   - Same SKU present but NOT enough, OR source genuinely empty:
+//       setting ON  → allowed, source clamped to exactly 0, logged as DEFAULT_MOVE.
+//       setting OFF → blocked with a clear insufficient-stock error.
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -27,7 +28,7 @@ export async function PATCH(req: NextRequest) {
   const sourceLocationCode = sanitize(body.sourceLocationCode ?? "");
   const destinationLocationCode = sanitize(body.destinationLocationCode ?? "");
   const itemSku = sanitize(body.itemSku ?? "");
-  const { quantity, sourceUntracked } = body;
+  const { quantity } = body;
 
   if (!sourceLocationCode || !destinationLocationCode || !itemSku || !quantity || quantity <= 0) {
     return NextResponse.json(
@@ -64,39 +65,58 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
 
-  if (sourceUntracked) {
+  const allStockAtSource = await db
+    .select()
+    .from(locationStock)
+    .where(eq(locationStock.locationId, sourceLocation.id));
+
+  const matchingRow = allStockAtSource.find((r) => r.itemId === item.id);
+  const occupiedByOther = allStockAtSource.some((r) => r.itemId !== item.id && r.quantity > 0);
+
+  // Only RACK cells are single-SKU by design.
+  if (sourceLocation.type === "RACK" && occupiedByOther) {
+    return NextResponse.json(
+      { error: `${sourceLocationCode} is occupied by a different product, not ${itemSku}` },
+      { status: 409 }
+    );
+  }
+
+  const availableAtSource = matchingRow?.quantity ?? 0;
+  const sufficient = quantity <= availableAtSource;
+
+  let eventType: "MOVE" | "DEFAULT_MOVE" = "MOVE";
+
+  if (!sufficient) {
     const [settingsRow] = await db.select().from(settings).limit(1);
-    if (settingsRow && !settingsRow.allowDefaultPicking) {
+    if (!settingsRow?.allowNegativeRackStock) {
       return NextResponse.json(
-        { error: "Default picking/moving is currently disabled in Settings" },
-        { status: 403 }
+        {
+          error:
+            availableAtSource === 0
+              ? `No stock recorded at ${sourceLocationCode} for ${itemSku}. Enable Default Move in Settings to allow this.`
+              : `Only ${availableAtSource} of ${itemSku} available at ${sourceLocationCode}. Enable Default Move in Settings to allow taking more.`,
+        },
+        { status: 409 }
       );
     }
+    eventType = "DEFAULT_MOVE";
   }
+
+  const sourceDecrement = Math.min(quantity, Math.max(availableAtSource, 0));
 
   try {
     await db.transaction(async (tx) => {
-      if (sourceUntracked) {
-        await adjustLocationStock(tx, destinationLocation.id, item.id, quantity);
-        await tx.insert(locationStockEvents).values({
-          type: "DEFAULT_MOVE",
-          itemId: item.id,
-          sourceLocationId: sourceLocation.id,
-          destinationLocationId: destinationLocation.id,
-          quantity,
-          userId: session.userId,
-        });
-      } else {
-        await moveLocationStock(tx, sourceLocation.id, destinationLocation.id, item.id, quantity);
-        await tx.insert(locationStockEvents).values({
-          type: "MOVE",
-          itemId: item.id,
-          sourceLocationId: sourceLocation.id,
-          destinationLocationId: destinationLocation.id,
-          quantity,
-          userId: session.userId,
-        });
-      }
+      await adjustLocationStock(tx, sourceLocation.id, item.id, -sourceDecrement);
+      await adjustLocationStock(tx, destinationLocation.id, item.id, quantity);
+
+      await tx.insert(locationStockEvents).values({
+        type: eventType,
+        itemId: item.id,
+        sourceLocationId: sourceLocation.id,
+        destinationLocationId: destinationLocation.id,
+        quantity,
+        userId: session.userId,
+      });
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to move";
@@ -108,5 +128,6 @@ export async function PATCH(req: NextRequest) {
     destinationLocationCode: destinationLocation.code,
     itemSku: item.sku,
     quantityMoved: quantity,
+    matchType: eventType === "DEFAULT_MOVE" ? "default_move" : "exact",
   });
 }
