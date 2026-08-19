@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "WMS — Inventory",
   description: "Warehouse inventory tracking",
+  other: {
+     "color-scheme":"dark",
+	},
 };
 
 const navItems = [
@@ -27,7 +30,7 @@ const navItems = [
   // { href: "/pallets", label: "Pallets" },
   { href: "/locations", label: "Locations" },
   { href: "/items", label: "Items" },
-  // { href: "/work-orders", label: "Work Orders" },
+  { href: "/work-orders", label: "Work Orders" },
   { href: "/users", label: "Users" },
   // { href: "/roles", label: "Roles" },
   // { href: "/transactions", label: "History" },
