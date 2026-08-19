@@ -129,17 +129,39 @@ async function getSalesOrdersForPage(page: number) {
     linesByOrder.get(l.salesOrderId)!.push(l);
   }
 
-  return orders.map((o) => ({
-    ...o,
-    items: (linesByOrder.get(o.id) ?? []).map((line) => {
-const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
-const status: "PENDING" | "PICKING" | "SHIPPED" =
-  shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
+  return orders.map((o) => {
+    const orderItems = (linesByOrder.get(o.id) ?? []).map((line) => {
+      const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
+      const status: "PENDING" | "PICKING" | "SHIPPED" =
+        shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
       const pickedFrom = pickSourceMap.get(`${o.id}-${line.itemId}`) ?? [];
       const shippedBy = shippedByMap.get(`${o.id}-${line.itemId}`) ?? [];
       return { ...line, shipped, status, pickedFrom, shippedBy };
-    }),
-  }));
+    });
+
+    // Overall SO status: COMPLETE if every item is fully shipped, PARTIAL
+    // if anything has shipped at all but not everything, NOT_STARTED if
+    // nothing has shipped yet.
+    const allComplete = orderItems.length > 0 && orderItems.every((l) => l.status === "SHIPPED");
+    const anyShipped = orderItems.some((l) => l.shipped > 0);
+    const overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED" = allComplete
+      ? "COMPLETE"
+      : anyShipped
+      ? "PARTIAL"
+      : "NOT_STARTED";
+
+    // Distinct set of everyone who picked anything for this SO, across all items.
+    const pickedByUsers = Array.from(
+      new Set(orderItems.flatMap((l) => l.pickedFrom.map((p) => p.username)))
+    );
+
+    return {
+      ...o,
+      items: orderItems,
+      overallStatus,
+      pickedByUsers,
+    };
+  });
 }
 
 export default async function SalesOrdersPage({

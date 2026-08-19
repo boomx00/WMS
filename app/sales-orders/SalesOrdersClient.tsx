@@ -24,14 +24,20 @@ type Order = {
   orderDate: string | Date;
   createdAt: string | Date;
   items: OrderLine[];
+  overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED";
+  pickedByUsers: string[];
 };
 
+const OVERALL_STATUS_STYLES: Record<string, string> = {
+  NOT_STARTED: "bg-zinc-800 text-zinc-400",
+  PARTIAL: "bg-amber-950 text-amber-300",
+  COMPLETE: "bg-emerald-950 text-emerald-300",
+};
 const STATUS_STYLES: Record<string, string> = {
   PENDING: "bg-zinc-800 text-zinc-400",
   PICKING: "bg-amber-950 text-amber-300",
   SHIPPED: "bg-emerald-950 text-emerald-300",
 };
-
 type SortDirection = "asc" | "desc";
 
 export default function SalesOrdersClient({
@@ -90,27 +96,29 @@ export default function SalesOrdersClient({
 
       <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-zinc-900 text-zinc-500 text-left">
-              <th className="px-4 py-3 font-medium w-8"></th>
-              <th className="px-4 py-3 font-medium">
-                <button
-                  onClick={toggleSort}
-                  className="flex items-center gap-1 hover:text-zinc-300 transition-colors"
-                >
-                  SO Number
-                  <span className="text-[10px]">{sortDirection === "asc" ? "▲" : "▼"}</span>
-                </button>
-              </th>
-              <th className="px-4 py-3 font-medium">Date</th>
-              <th className="px-4 py-3 font-medium text-right">Items</th>
-              <th className="px-4 py-3 font-medium w-16"></th>
-            </tr>
-          </thead>
+ <thead>
+  <tr className="bg-zinc-900 text-zinc-500 text-left">
+    <th className="px-4 py-3 font-medium w-8"></th>
+    <th className="px-4 py-3 font-medium">
+      <button
+        onClick={toggleSort}
+        className="flex items-center gap-1 hover:text-zinc-300 transition-colors"
+      >
+        SO Number
+        <span className="text-[10px]">{sortDirection === "asc" ? "▲" : "▼"}</span>
+      </button>
+    </th>
+    <th className="px-4 py-3 font-medium">Date</th>
+    <th className="px-4 py-3 font-medium">Status</th>
+    <th className="px-4 py-3 font-medium">Picked By</th>
+    <th className="px-4 py-3 font-medium text-right">Items</th>
+    <th className="px-4 py-3 font-medium w-16"></th>
+  </tr>
+</thead>
           <tbody>
             {sortedOrders.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
                   No sales orders yet.
                 </td>
               </tr>
@@ -122,39 +130,49 @@ export default function SalesOrdersClient({
                 return (
                   <Fragment key={order.id}>
                     <tr
-                      className="border-t border-zinc-800 hover:bg-zinc-900/50 cursor-pointer"
-                      onClick={() => toggle(order.id)}
-                    >
-                      <td className="px-4 py-3">
-                        <span
-                          className={`text-zinc-500 text-xs transition-transform inline-block ${
-                            isOpen ? "rotate-90" : ""
-                          }`}
-                        >
-                          ▶
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-amber-500">{order.soNumber}</td>
-                      <td className="px-4 py-3 text-zinc-400">
-                        {new Date(order.orderDate).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3 text-right text-zinc-400">{order.items.length}</td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingId(isEditing ? null : order.id);
-                            if (!isOpen) toggle(order.id);
-                          }}
-                          className="text-xs text-amber-500 hover:underline"
-                        >
-                          {isEditing ? "Cancel" : "Edit"}
-                        </button>
-                      </td>
-                    </tr>
+  className="border-t border-zinc-800 hover:bg-zinc-900/50 cursor-pointer"
+  onClick={() => toggle(order.id)}
+>
+  <td className="px-4 py-3">
+    <span
+      className={`text-zinc-500 text-xs transition-transform inline-block ${
+        isOpen ? "rotate-90" : ""
+      }`}
+    >
+      ▶
+    </span>
+  </td>
+  <td className="px-4 py-3 font-mono text-amber-500">{order.soNumber}</td>
+  <td className="px-4 py-3 text-zinc-400">
+    {new Date(order.orderDate).toLocaleDateString()}
+  </td>
+  <td className="px-4 py-3">
+    <span
+      className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${OVERALL_STATUS_STYLES[order.overallStatus]}`}
+    >
+      {order.overallStatus.replace("_", " ")}
+    </span>
+  </td>
+  <td className="px-4 py-3 text-zinc-500 text-xs">
+    {order.pickedByUsers.length === 0 ? "—" : order.pickedByUsers.join(", ")}
+  </td>
+  <td className="px-4 py-3 text-right text-zinc-400">{order.items.length}</td>
+  <td className="px-4 py-3 text-right">
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        setEditingId(isEditing ? null : order.id);
+        if (!isOpen) toggle(order.id);
+      }}
+      className="text-xs text-amber-500 hover:underline"
+    >
+      {isEditing ? "Cancel" : "Edit"}
+    </button>
+  </td>
+</tr>
                     {isOpen && (
                       <tr className="border-t border-zinc-800/60 bg-zinc-950/40">
-                        <td colSpan={5} className="px-4 py-4">
+                        <td colSpan={7} className="px-4 py-4">
                           {isEditing ? (
                             <EditSalesOrderForm
                               order={order}
