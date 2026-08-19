@@ -132,8 +132,9 @@ async function getSalesOrdersForPage(page: number) {
   return orders.map((o) => ({
     ...o,
     items: (linesByOrder.get(o.id) ?? []).map((line) => {
-      const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
-      const status = shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
+const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
+const status: "PENDING" | "PICKING" | "SHIPPED" =
+  shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
       const pickedFrom = pickSourceMap.get(`${o.id}-${line.itemId}`) ?? [];
       const shippedBy = shippedByMap.get(`${o.id}-${line.itemId}`) ?? [];
       return { ...line, shipped, status, pickedFrom, shippedBy };
