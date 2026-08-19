@@ -4,7 +4,7 @@ import { pallets, palletEvents, locations, salesOrders, salesOrderItems } from "
 import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
-
+import { hasRole } from "@/lib/auth";
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
@@ -16,6 +16,13 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+  const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
+if (!authorized) {
+  return NextResponse.json(
+    { error: "Only Checker and Admin roles can perform shipping" },
+    { status: 403 }
+  );
+}
 
   const body = await req.json();
   const soNumber = sanitize(body.soNumber ?? "");

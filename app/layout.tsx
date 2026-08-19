@@ -32,7 +32,7 @@ const navItems = [
   { href: "/items", label: "Items" },
   { href: "/work-orders", label: "Work Orders" },
   { href: "/users", label: "Users" },
-  // { href: "/roles", label: "Roles" },
+  { href: "/roles", label: "Roles" },
   // { href: "/transactions", label: "History" },
   { href: "/scan", label: "Scan" },
   // { href: "/pending", label: "Pending" },

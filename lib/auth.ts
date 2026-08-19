@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { users, roles } from "@/db/schema";
 import { eq } from "drizzle-orm";
+
 const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
 
 export type SessionPayload = {
@@ -58,4 +59,17 @@ export async function requireAdmin() {
     return { error: "Admin access required", status: 403 as const };
   }
   return null;
+}
+
+export async function hasRole(userId: number, allowedRoleNames: string[]): Promise<boolean> {
+  const [row] = await db
+    .select({ roleName: roles.name })
+    .from(users)
+    .innerJoin(roles, eq(users.roleId, roles.id))
+    .where(eq(users.id, userId));
+
+  if (!row?.roleName) return false;
+
+  const normalized = row.roleName.toLowerCase();
+  return allowedRoleNames.some((allowed) => allowed.toLowerCase() === normalized);
 }
