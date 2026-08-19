@@ -50,7 +50,7 @@ export async function PATCH(req: NextRequest) {
   const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
 if (!authorized) {
   return NextResponse.json(
-    { error: "Only Checker and Admin roles can perform shipping" },
+    { error: "ANDA BUKAN CHECKER!" },
     { status: 403 }
   );
 }
