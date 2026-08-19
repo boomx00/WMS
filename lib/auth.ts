@@ -1,6 +1,8 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-
+import { db } from "@/lib/db";
+import { users, roles } from "@/db/schema";
+import { eq } from "drizzle-orm";
 const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
 
 export type SessionPayload = {
@@ -33,4 +35,27 @@ export async function getSession(): Promise<SessionPayload | null> {
   if (!token) return null;
 
   return verifySession(token);
+}
+
+// Returns the current session's role name (e.g. "Admin"), or null if not
+// logged in / role can't be resolved.
+export async function getSessionRole(): Promise<string | null> {
+  const session = await getSession();
+  if (!session) return null;
+
+  const [row] = await db
+    .select({ roleName: roles.name })
+    .from(users)
+    .innerJoin(roles, eq(users.roleId, roles.id))
+    .where(eq(users.id, session.userId));
+
+  return row?.roleName ?? null;
+}
+
+export async function requireAdmin() {
+  const role = await getSessionRole();
+  if (role !== "Admin") {
+    return { error: "Admin access required", status: 403 as const };
+  }
+  return null;
 }

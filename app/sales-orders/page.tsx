@@ -38,7 +38,7 @@ async function getSalesOrdersForPage(page: number) {
     .innerJoin(items, eq(salesOrderItems.itemId, items.id))
     .where(inArray(salesOrderItems.salesOrderId, orderIds));
 
-  const { palletEvents, pallets, locationStockEvents, locations } = await import("@/db/schema");
+  const { palletEvents, pallets, locationStockEvents, locations, users } = await import("@/db/schema");
 
   const shippedRows = await db
     .select({
@@ -53,22 +53,45 @@ async function getSalesOrdersForPage(page: number) {
     )
     .groupBy(palletEvents.salesOrderId, pallets.itemId);
 
-  // Where each item's picked quantity actually came from — one row per
-  // (SO, item, source location), summed if picked multiple times.
+  // Who picked what, from where — one row per (SO, item, location, user).
   const pickSourceRows = await db
     .select({
       salesOrderId: locationStockEvents.salesOrderId,
       itemId: locationStockEvents.itemId,
       locationCode: locations.code,
       type: locationStockEvents.type,
+      username: users.username,
       quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
     })
     .from(locationStockEvents)
     .innerJoin(locations, eq(locationStockEvents.sourceLocationId, locations.id))
+    .innerJoin(users, eq(locationStockEvents.userId, users.id))
     .where(
       sql`${locationStockEvents.type} IN ('PICKING', 'DEFAULT_PICKING') AND ${inArray(locationStockEvents.salesOrderId, orderIds)}`
     )
-    .groupBy(locationStockEvents.salesOrderId, locationStockEvents.itemId, locations.code, locationStockEvents.type);
+    .groupBy(
+      locationStockEvents.salesOrderId,
+      locationStockEvents.itemId,
+      locations.code,
+      locationStockEvents.type,
+      users.username
+    );
+
+  // Who shipped what, one row per (SO, item, user).
+  const shippedByRows = await db
+    .select({
+      salesOrderId: palletEvents.salesOrderId,
+      itemId: pallets.itemId,
+      username: users.username,
+      quantity: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int`,
+    })
+    .from(palletEvents)
+    .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
+    .innerJoin(users, eq(palletEvents.userId, users.id))
+    .where(
+      sql`${palletEvents.type} = 'OUTBOUND' AND ${inArray(palletEvents.salesOrderId, orderIds)}`
+    )
+    .groupBy(palletEvents.salesOrderId, pallets.itemId, users.username);
 
   const shippedMap = new Map<string, number>();
   for (const row of shippedRows) {
@@ -76,7 +99,10 @@ async function getSalesOrdersForPage(page: number) {
     shippedMap.set(`${row.salesOrderId}-${row.itemId}`, row.shipped);
   }
 
-  const pickSourceMap = new Map<string, { locationCode: string; quantity: number; type: string }[]>();
+  const pickSourceMap = new Map<
+    string,
+    { locationCode: string; quantity: number; type: string; username: string }[]
+  >();
   for (const row of pickSourceRows) {
     if (row.salesOrderId === null) continue;
     const key = `${row.salesOrderId}-${row.itemId}`;
@@ -85,7 +111,16 @@ async function getSalesOrdersForPage(page: number) {
       locationCode: row.locationCode,
       quantity: row.quantity,
       type: row.type,
+      username: row.username,
     });
+  }
+
+  const shippedByMap = new Map<string, { username: string; quantity: number }[]>();
+  for (const row of shippedByRows) {
+    if (row.salesOrderId === null) continue;
+    const key = `${row.salesOrderId}-${row.itemId}`;
+    if (!shippedByMap.has(key)) shippedByMap.set(key, []);
+    shippedByMap.get(key)!.push({ username: row.username, quantity: row.quantity });
   }
 
   const linesByOrder = new Map<number, typeof lines>();
@@ -98,16 +133,12 @@ async function getSalesOrdersForPage(page: number) {
     ...o,
     items: (linesByOrder.get(o.id) ?? []).map((line) => {
       const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
-      const status: "PENDING" | "PICKING" | "SHIPPED" =
-  shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
+      const status = shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
       const pickedFrom = pickSourceMap.get(`${o.id}-${line.itemId}`) ?? [];
-      return { ...line, shipped, status, pickedFrom };
+      const shippedBy = shippedByMap.get(`${o.id}-${line.itemId}`) ?? [];
+      return { ...line, shipped, status, pickedFrom, shippedBy };
     }),
   }));
-}
-
-async function getAllItems() {
-  return db.select({ sku: items.sku, name: items.name }).from(items).orderBy(items.sku);
 }
 
 export default async function SalesOrdersPage({
@@ -121,13 +152,13 @@ export default async function SalesOrdersPage({
   const [totalCount, orders, allItems] = await Promise.all([
     getTotalOrderCount(),
     getSalesOrdersForPage(page),
-    getAllItems(),
+    db.select({ sku: items.sku, name: items.name }).from(items).orderBy(items.sku),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="p-8 max-w-5xl">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold">Sales Orders</h1>
         <p className="text-zinc-500 text-sm mt-1">

@@ -43,10 +43,16 @@ export async function PATCH(req: NextRequest) {
   }
 
   const [sourceLocation] = await db.select().from(locations).where(eq(locations.code, locationCode));
+  
   if (!sourceLocation) {
     return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
   }
-
+if (sourceLocation.type === "OUTBOUND_WH") {
+  return NextResponse.json(
+    { error: "Barang ini sudah di picking, dan berada di Outbound WH" },
+    { status: 409 }
+  );
+}
   const [outboundWh] = await db.select().from(locations).where(eq(locations.type, "OUTBOUND_WH"));
   if (!outboundWh) {
     return NextResponse.json({ error: "No Outbound Warehouse location exists yet" }, { status: 500 });

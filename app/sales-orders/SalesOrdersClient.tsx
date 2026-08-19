@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type ItemOption = { sku: string; name: string };
 
-type PickSource = { locationCode: string; quantity: number; type: string };
+type PickSource = { locationCode: string; quantity: number; type: string; username: string };
+type ShippedBy = { username: string; quantity: number };
 
 type OrderLine = {
   quantity: number;
@@ -14,6 +15,7 @@ type OrderLine = {
   shipped: number;
   status: "PENDING" | "PICKING" | "SHIPPED";
   pickedFrom: PickSource[];
+  shippedBy: ShippedBy[];
 };
 
 type Order = {
@@ -30,6 +32,8 @@ const STATUS_STYLES: Record<string, string> = {
   SHIPPED: "bg-emerald-950 text-emerald-300",
 };
 
+type SortDirection = "asc" | "desc";
+
 export default function SalesOrdersClient({
   orders,
   allItems,
@@ -43,9 +47,10 @@ export default function SalesOrdersClient({
   totalPages: number;
   totalCount: number;
 }) {
+  const router = useRouter();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [editingId, setEditingId] = useState<number | null>(null);
-  const router = useRouter();
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   function goToPage(p: number) {
     router.push(`/sales-orders?page=${p}`);
@@ -60,6 +65,19 @@ export default function SalesOrdersClient({
     });
   }
 
+  function toggleSort() {
+    setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+  }
+
+  const sortedOrders = useMemo(() => {
+    const copy = [...orders];
+    copy.sort((a, b) => {
+      const cmp = a.soNumber.localeCompare(b.soNumber, undefined, { numeric: true });
+      return sortDirection === "asc" ? cmp : -cmp;
+    });
+    return copy;
+  }, [orders, sortDirection]);
+
   return (
     <div>
       <div className="mb-8">
@@ -70,116 +88,156 @@ export default function SalesOrdersClient({
         Page {page} of {totalPages} · {totalCount.toLocaleString()} sales orders total
       </p>
 
-      <div className="space-y-3 mb-4">
-        {orders.length === 0 ? (
-          <div className="border border-dashed border-zinc-800 rounded-lg px-8 py-12 text-center text-zinc-600 text-sm">
-            No sales orders yet.
-          </div>
-        ) : (
-          orders.map((order) => {
-            const isOpen = expanded.has(order.id);
-            const isEditing = editingId === order.id;
+      <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-zinc-900 text-zinc-500 text-left">
+              <th className="px-4 py-3 font-medium w-8"></th>
+              <th className="px-4 py-3 font-medium">
+                <button
+                  onClick={toggleSort}
+                  className="flex items-center gap-1 hover:text-zinc-300 transition-colors"
+                >
+                  SO Number
+                  <span className="text-[10px]">{sortDirection === "asc" ? "▲" : "▼"}</span>
+                </button>
+              </th>
+              <th className="px-4 py-3 font-medium">Date</th>
+              <th className="px-4 py-3 font-medium text-right">Items</th>
+              <th className="px-4 py-3 font-medium w-16"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedOrders.length === 0 ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-zinc-600">
+                  No sales orders yet.
+                </td>
+              </tr>
+            ) : (
+              sortedOrders.map((order) => {
+                const isOpen = expanded.has(order.id);
+                const isEditing = editingId === order.id;
 
-            return (
-              <div
-                key={order.id}
-                className="border border-zinc-800 rounded-lg bg-zinc-900/30 overflow-hidden"
-              >
-                <div className="w-full flex items-center justify-between p-4">
-                  <button
-                    onClick={() => toggle(order.id)}
-                    className="flex items-center gap-2 text-left flex-1"
-                  >
-                    <span
-                      className={`text-zinc-500 text-xs transition-transform ${
-                        isOpen ? "rotate-90" : ""
-                      }`}
+                return (
+                  <Fragment key={order.id}>
+                    <tr
+                      className="border-t border-zinc-800 hover:bg-zinc-900/50 cursor-pointer"
+                      onClick={() => toggle(order.id)}
                     >
-                      ▶
-                    </span>
-                    <span className="font-mono text-amber-500 text-sm">{order.soNumber}</span>
-                  </button>
-                  <span className="text-xs text-zinc-500 mr-3">
-                    {new Date(order.orderDate).toLocaleDateString()} · {order.items.length} item(s)
-                  </span>
-                  <button
-                    onClick={() => {
-                      setEditingId(isEditing ? null : order.id);
-                      if (!isOpen) toggle(order.id);
-                    }}
-                    className="text-xs text-amber-500 hover:underline"
-                  >
-                    {isEditing ? "Cancel" : "Edit"}
-                  </button>
-                </div>
-
-                {isOpen && (
-                  <div className="px-4 pb-4">
-                    {isEditing ? (
-                      <EditSalesOrderForm
-                        order={order}
-                        allItems={allItems}
-                        onDone={() => setEditingId(null)}
-                      />
-                    ) : (
-                      <table className="w-full text-xs">
-  <thead>
-    <tr className="text-zinc-500 text-left border-t border-zinc-800 pt-2">
-      <th className="py-2 font-medium">SKU</th>
-      <th className="py-2 font-medium">Product</th>
-      <th className="py-2 font-medium text-right">Ordered</th>
-      <th className="py-2 font-medium text-right">Shipped</th>
-      <th className="py-2 font-medium">Status</th>
-      <th className="py-2 font-medium">Picked From</th>
-    </tr>
-  </thead>
-  <tbody>
-    {order.items.map((line, i) => (
-      <tr key={i} className="border-t border-zinc-800/60">
-        <td className="py-1.5 font-mono text-zinc-300">{line.itemSku}</td>
-        <td className="py-1.5 text-zinc-500">{line.itemName}</td>
-        <td className="py-1.5 text-right font-mono">
-          {line.quantity.toLocaleString()}
-        </td>
-        <td className="py-1.5 text-right font-mono">
-          {line.shipped.toLocaleString()}
-        </td>
-        <td className="py-1.5">
-          <span
-            className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[line.status]}`}
-          >
-            {line.status}
-          </span>
-        </td>
-        <td className="py-1.5">
-          {line.pickedFrom.length === 0 ? (
-            <span className="text-zinc-700">—</span>
-          ) : (
-            <div className="space-y-0.5">
-              {line.pickedFrom.map((source, j) => (
-                <div key={j} className="font-mono text-zinc-400">
-                  <span className="text-amber-500">{source.locationCode}</span>
-                  {" · "}
-                  {source.quantity.toLocaleString()}
-                  {source.type === "DEFAULT_PICKING" && (
-                    <span className="text-purple-400"> (default)</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </td>
-      </tr>
-    ))}
-  </tbody>
-</table>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`text-zinc-500 text-xs transition-transform inline-block ${
+                            isOpen ? "rotate-90" : ""
+                          }`}
+                        >
+                          ▶
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-amber-500">{order.soNumber}</td>
+                      <td className="px-4 py-3 text-zinc-400">
+                        {new Date(order.orderDate).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-right text-zinc-400">{order.items.length}</td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingId(isEditing ? null : order.id);
+                            if (!isOpen) toggle(order.id);
+                          }}
+                          className="text-xs text-amber-500 hover:underline"
+                        >
+                          {isEditing ? "Cancel" : "Edit"}
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="border-t border-zinc-800/60 bg-zinc-950/40">
+                        <td colSpan={5} className="px-4 py-4">
+                          {isEditing ? (
+                            <EditSalesOrderForm
+                              order={order}
+                              allItems={allItems}
+                              onDone={() => setEditingId(null)}
+                            />
+                          ) : (
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-zinc-500 text-left">
+                                  <th className="py-2 font-medium">SKU</th>
+                                  <th className="py-2 font-medium">Product</th>
+                                  <th className="py-2 font-medium text-right">Ordered</th>
+                                  <th className="py-2 font-medium text-right">Shipped</th>
+                                  <th className="py-2 font-medium">Status</th>
+                                  <th className="py-2 font-medium">Picked From / By</th>
+                                  <th className="py-2 font-medium">Shipped By</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {order.items.map((line, i) => (
+                                  <tr key={i} className="border-t border-zinc-800/60">
+                                    <td className="py-1.5 font-mono text-zinc-300">{line.itemSku}</td>
+                                    <td className="py-1.5 text-zinc-500">{line.itemName}</td>
+                                    <td className="py-1.5 text-right font-mono">
+                                      {line.quantity.toLocaleString()}
+                                    </td>
+                                    <td className="py-1.5 text-right font-mono">
+                                      {line.shipped.toLocaleString()}
+                                    </td>
+                                    <td className="py-1.5">
+                                      <span
+                                        className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[line.status]}`}
+                                      >
+                                        {line.status}
+                                      </span>
+                                    </td>
+                                    <td className="py-1.5">
+                                      {line.pickedFrom.length === 0 ? (
+                                        <span className="text-zinc-700">—</span>
+                                      ) : (
+                                        <div className="space-y-0.5">
+                                          {line.pickedFrom.map((source, j) => (
+                                            <div key={j} className="font-mono text-zinc-400">
+                                              <span className="text-amber-500">{source.locationCode}</span>
+                                              {" · "}
+                                              {source.quantity.toLocaleString()}
+                                              {source.type === "DEFAULT_PICKING" && (
+                                                <span className="text-purple-400"> (default)</span>
+                                              )}
+                                              <span className="text-zinc-600"> — {source.username}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="py-1.5">
+                                      {line.shippedBy.length === 0 ? (
+                                        <span className="text-zinc-700">—</span>
+                                      ) : (
+                                        <div className="space-y-0.5">
+                                          {line.shippedBy.map((s, j) => (
+                                            <div key={j} className="font-mono text-zinc-400">
+                                              {s.username} · {s.quantity.toLocaleString()}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
                     )}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
+                  </Fragment>
+                );
+              })
+            )}
+          </tbody>
+        </table>
       </div>
 
       {totalPages > 1 && (
@@ -412,7 +470,7 @@ function EditSalesOrderForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="border-t border-zinc-800 pt-4 space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <div className="flex gap-3">
         <div className="flex-1">
           <label className="block text-xs text-zinc-500 mb-1">SO Number</label>
