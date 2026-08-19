@@ -26,17 +26,18 @@ async function getSalesOrdersForPage(page: number) {
 
   const orderIds = orders.map((o) => o.id);
 
-  const lines = await db
-    .select({
-      salesOrderId: salesOrderItems.salesOrderId,
-      itemId: salesOrderItems.itemId,
-      quantity: salesOrderItems.quantity,
-      itemSku: items.sku,
-      itemName: items.name,
-    })
-    .from(salesOrderItems)
-    .innerJoin(items, eq(salesOrderItems.itemId, items.id))
-    .where(inArray(salesOrderItems.salesOrderId, orderIds));
+const lines = await db
+  .select({
+    salesOrderId: salesOrderItems.salesOrderId,
+    itemId: salesOrderItems.itemId,
+    quantity: salesOrderItems.quantity,
+    itemSku: items.sku,
+    itemName: items.name,
+    palletCartonQty: items.palletCartonQty,
+  })
+  .from(salesOrderItems)
+  .innerJoin(items, eq(salesOrderItems.itemId, items.id))
+  .where(inArray(salesOrderItems.salesOrderId, orderIds));
 
   const { palletEvents, pallets, locationStockEvents, locations, users } = await import("@/db/schema");
 

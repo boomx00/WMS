@@ -12,6 +12,7 @@ type OrderLine = {
   quantity: number;
   itemSku: string;
   itemName: string;
+  palletCartonQty: number;
   shipped: number;
   status: "PENDING" | "PICKING" | "SHIPPED";
   pickedFrom: PickSource[];
@@ -182,27 +183,31 @@ export default function SalesOrdersClient({
                           ) : (
                             <table className="w-full text-xs">
                               <thead>
-                                <tr className="text-zinc-500 text-left">
-                                  <th className="py-2 font-medium">SKU</th>
-                                  <th className="py-2 font-medium">Product</th>
-                                  <th className="py-2 font-medium text-right">Ordered</th>
-                                  <th className="py-2 font-medium text-right">Shipped</th>
-                                  <th className="py-2 font-medium">Status</th>
-                                  <th className="py-2 font-medium">Picked From / By</th>
-                                  <th className="py-2 font-medium">Shipped By</th>
-                                </tr>
+<tr className="text-zinc-500 text-left">
+  <th className="py-2 font-medium">SKU</th>
+  <th className="py-2 font-medium">Product</th>
+  <th className="py-2 font-medium text-right">Carton/Pallet</th>
+  <th className="py-2 font-medium text-right">Ordered</th>
+  <th className="py-2 font-medium text-right">Shipped</th>
+  <th className="py-2 font-medium">Status</th>
+  <th className="py-2 font-medium">Picked From / By</th>
+  <th className="py-2 font-medium">Shipped By</th>
+</tr>
                               </thead>
                               <tbody>
                                 {order.items.map((line, i) => (
-                                  <tr key={i} className="border-t border-zinc-800/60">
-                                    <td className="py-1.5 font-mono text-zinc-300">{line.itemSku}</td>
-                                    <td className="py-1.5 text-zinc-500">{line.itemName}</td>
-                                    <td className="py-1.5 text-right font-mono">
-                                      {line.quantity.toLocaleString()}
-                                    </td>
-                                    <td className="py-1.5 text-right font-mono">
-                                      {line.shipped.toLocaleString()}
-                                    </td>
+<tr key={i} className="border-t border-zinc-800/60">
+  <td className="py-1.5 font-mono text-zinc-300">{line.itemSku}</td>
+  <td className="py-1.5 text-zinc-500">{line.itemName}</td>
+  <td className="py-1.5 text-right font-mono text-zinc-400">
+    {line.palletCartonQty.toLocaleString()}
+  </td>
+  <td className="py-1.5 text-right font-mono">
+    {line.quantity.toLocaleString()}
+  </td>
+  <td className="py-1.5 text-right font-mono">
+    {line.shipped.toLocaleString()}
+  </td>
                                     <td className="py-1.5">
                                       <span
                                         className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[line.status]}`}
