@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Tab = "INBOUND" | "TO_OUTBOUND" | "SHIP" | "SPLIT" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST" | "CHECK_SO";
-// Parses "SKU*palletSeq*qty*workOrder" into its parts.
+type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST" | "CORRECT_QTY" | "CHECK_SO";// Parses "SKU*palletSeq*qty*workOrder" into its parts.
 function parseLabel(raw: string) {
   const parts = raw.trim().split("*");
   if (parts.length !== 4) return null;
@@ -20,7 +19,7 @@ export default function ScanForms() {
   return (
     <div>
       <div className="flex gap-1 mb-6 border border-zinc-800 rounded-lg p-1 w-fit">
-{(["INBOUND", "TO_OUTBOUND", "SHIP", "SPLIT", "INITIAL_STOCK", "CONFIRM", "ADJUST", "CHECK_SO"] as Tab[]).map((t) => (
+{(["INBOUND", "TO_OUTBOUND", "SPLIT", "CONFIRM", "ADJUST", "CORRECT_QTY", "CHECK_SO"] as Tab[]).map((t) => (
   <button
     key={t}
     onClick={() => setTab(t)}
@@ -36,12 +35,11 @@ export default function ScanForms() {
       </div>
 {tab === "ADJUST" && <AdjustForm />}
 {tab === "INBOUND" && <InboundForm />}
-{tab === "TO_OUTBOUND" && <ToOutboundForm />}
 {tab === "SHIP" && <ShipForm />}
-{tab === "SPLIT" && <SplitForm />}
 {tab === "INITIAL_STOCK" && <InitialStockForm />}
 {tab === "CONFIRM" && <ConfirmInboundForm />}
 {tab === "CHECK_SO" && <CheckSoForm />}
+{tab === "CORRECT_QTY" && <CorrectQtyForm />}
     </div>
   );
 }
@@ -956,5 +954,100 @@ function CheckSoForm() {
         </div>
       )}
     </div>
+  );
+}
+
+function CorrectQtyForm() {
+  const router = useRouter();
+  const [label, setLabel] = useState("");
+  const [newQuantity, setNewQuantity] = useState("");
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    const res = await fetch("/api/pallets/correct-quantity", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        label: label.trim(),
+        newQuantity: Number(newQuantity),
+        reason: reason.trim(),
+      }),
+    });
+    setLoading(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to correct quantity");
+      return;
+    }
+
+    const data = await res.json();
+    const sign = data.delta > 0 ? "+" : "";
+    setSuccess(`Corrected ${label.trim()}: ${data.previousQuantity} → ${data.quantity} (${sign}${data.delta})`);
+    setLabel("");
+    setNewQuantity("");
+    setReason("");
+    router.refresh();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
+      <p className="text-xs text-zinc-500">
+        Correct a specific pallet&apos;s recorded quantity — for fixing a
+        mistaken entry made during Inbound (label, MO, and qty are tracked
+        together). Keeps Location Stock in sync automatically.
+      </p>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Scan pallet label</label>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          autoFocus
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Corrected quantity</label>
+        <input
+          type="number"
+          min={0}
+          value={newQuantity}
+          onChange={(e) => setNewQuantity(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Reason (optional)</label>
+        <input
+          type="text"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="e.g. Mistyped quantity during Inbound"
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading || !label || newQuantity === ""}
+        className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+      >
+        {loading ? "Correcting..." : "Correct Quantity"}
+      </button>
+
+      <FeedbackBox error={error} success={success} />
+    </form>
   );
 }
