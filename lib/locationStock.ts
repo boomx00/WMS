@@ -1,5 +1,5 @@
 import { locationStock, locations, items } from "@/db/schema";
-import { eq, and, ne } from "drizzle-orm";
+import { eq, and, ne, gt } from "drizzle-orm";
 
 const MAX_PALLETS_PER_RACK_CELL = 14;
 
@@ -26,17 +26,23 @@ export async function adjustLocationStock(
     .from(locationStock)
     .where(and(eq(locationStock.locationId, locationId), eq(locationStock.itemId, itemId)));
 
-  if (location.type === "RACK" && delta > 0) {
-    const [conflict] = await tx
-      .select()
-      .from(locationStock)
-      .where(and(eq(locationStock.locationId, locationId), ne(locationStock.itemId, itemId)))
-      .limit(1);
-    if (conflict) {
-      throw new Error(
-        "This rack location already holds a different product. Only one SKU can be stored per rack cell."
-      );
-    }
+if (location.type === "RACK" && delta > 0) {
+  const [conflict] = await tx
+    .select()
+    .from(locationStock)
+    .where(
+      and(
+        eq(locationStock.locationId, locationId),
+        ne(locationStock.itemId, itemId),
+        gt(locationStock.quantity, 0)
+      )
+    )
+    .limit(1);
+  if (conflict) {
+    throw new Error(
+      "This rack location already holds a different product. Only one SKU can be stored per rack cell."
+    );
+  }
 
     const [item] = await tx.select().from(items).where(eq(items.id, itemId));
     if (item && item.palletCartonQty > 0) {
