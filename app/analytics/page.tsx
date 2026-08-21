@@ -1,4 +1,5 @@
 import InboundByPersonChart from "./InboundByPersonChart";
+import DriverActivityPanel from "./DriverActivityPanel";
 
 export default function AnalyticsPage() {
   return (
@@ -10,7 +11,10 @@ export default function AnalyticsPage() {
         </p>
       </header>
 
-      <InboundByPersonChart />
+      <div className="space-y-8">
+        <DriverActivityPanel />
+        <InboundByPersonChart />
+      </div>
     </div>
   );
 }

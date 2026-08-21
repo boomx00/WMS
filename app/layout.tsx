@@ -36,7 +36,7 @@ const navItems = [
   // { href: "/transactions", label: "History" },
   { href: "/scan", label: "Scan" },
   // { href: "/pending", label: "Pending" },
-  // { href: "/analytics", label: "Analytics" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/stock-opname", label: "Stock Opname" },
   { href: "/settings", label: "Settings" },
 ];
