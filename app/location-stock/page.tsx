@@ -1,10 +1,8 @@
 import { db } from "@/lib/db";
 import { locationStock, locations, items } from "@/db/schema";
-import { eq, or, ne } from "drizzle-orm";
-import LocationStockTable from "./LocationStockTable"
+import { eq, ne, or, sql } from "drizzle-orm";import LocationStockTable from "./LocationStockTable"
 
 export const dynamic = "force-dynamic";
-
 async function getLocationStock() {
   return db
     .select({
@@ -14,6 +12,15 @@ async function getLocationStock() {
       itemSku: items.sku,
       itemName: items.name,
       quantity: locationStock.quantity,
+
+
+      // Calculate pallet quantity
+   palletQuantity: sql<number>`
+  ROUND(
+    ${locationStock.quantity}::numeric / NULLIF(${items.palletCartonQty}, 0),
+    2
+  )
+`,
       updatedAt: locationStock.updatedAt,
     })
     .from(locationStock)

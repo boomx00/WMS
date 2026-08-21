@@ -9,9 +9,16 @@ type Row = {
   itemSku: string;
   itemName: string;
   quantity: number;
+  palletQuantity: number,
   updatedAt: string | Date;
 };
+const formatPallet = (value: number | string) => {
+  const num = Number(value);
 
+  return Number.isInteger(num)
+    ? num.toString()
+    : num.toFixed(2).replace(/\.?0+$/, "");
+};
 export default function LocationStockTable({ rows }: { rows: Row[] }) {
   const [search, setSearch] = useState("");
 
@@ -20,12 +27,13 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
     if (!q) return rows;
     return rows.filter(
       (r) =>
+        
         r.locationCode.toLowerCase().includes(q) ||
         r.itemSku.toLowerCase().includes(q) ||
         r.itemName.toLowerCase().includes(q)
     );
+   
   }, [rows, search]);
-
   return (
     <div>
       <input
@@ -48,6 +56,7 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
               <th className="px-4 py-3 font-medium">SKU</th>
               <th className="px-4 py-3 font-medium">Product</th>
               <th className="px-4 py-3 font-medium text-right">Quantity</th>
+              <th className="px-4 py-3 font-medium text-right">Pallet</th>
               <th className="px-4 py-3 font-medium text-right">Updated</th>
             </tr>
           </thead>
@@ -74,6 +83,9 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
                   <td className="px-4 py-3 text-right font-mono">
                     {row.quantity.toLocaleString()}
                   </td>
+                  <th className="px-4 py-3 font-medium text-right">
+                    {formatPallet(row.palletQuantity)}
+                    </th>
                   <td className="px-4 py-3 text-right text-zinc-500 text-xs">
                     {new Date(row.updatedAt).toLocaleString()}
                   </td>
