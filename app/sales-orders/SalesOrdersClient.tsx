@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type ItemOption = { sku: string; name: string };
@@ -58,7 +58,27 @@ export default function SalesOrdersClient({
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [editingId, setEditingId] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+const [search, setSearch] = useState("");
+const [searchResults, setSearchResults] = useState<Order[] | null>(null);
+const [searching, setSearching] = useState(false);
 
+useEffect(() => {
+  if (!search.trim()) {
+    setSearchResults(null);
+    return;
+  }
+
+  const handle = setTimeout(async () => {
+    setSearching(true);
+    const res = await fetch(`/api/sales-orders/search?q=${encodeURIComponent(search.trim())}`);
+    setSearching(false);
+    if (res.ok) {
+      setSearchResults(await res.json());
+    }
+  }, 300);
+
+  return () => clearTimeout(handle);
+}, [search]);
   function goToPage(p: number) {
     router.push(`/sales-orders?page=${p}`);
   }
@@ -76,14 +96,15 @@ export default function SalesOrdersClient({
     setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
   }
 
-  const sortedOrders = useMemo(() => {
-    const copy = [...orders];
-    copy.sort((a, b) => {
-      const cmp = a.soNumber.localeCompare(b.soNumber, undefined, { numeric: true });
-      return sortDirection === "asc" ? cmp : -cmp;
-    });
-    return copy;
-  }, [orders, sortDirection]);
+const sortedOrders = useMemo(() => {
+  const base = searchResults ?? orders;
+  const copy = [...base];
+  copy.sort((a, b) => {
+    const cmp = a.soNumber.localeCompare(b.soNumber, undefined, { numeric: true });
+    return sortDirection === "asc" ? cmp : -cmp;
+  });
+  return copy;
+}, [orders, searchResults, sortDirection]);
 
   return (
     <div>
@@ -91,9 +112,21 @@ export default function SalesOrdersClient({
         <CreateSalesOrderForm allItems={allItems} />
       </div>
 
-      <p className="text-xs text-zinc-600 mb-3">
-        Page {page} of {totalPages} · {totalCount.toLocaleString()} sales orders total
-      </p>
+      <input
+  type="text"
+  value={search}
+  onChange={(e) => setSearch(e.target.value)}
+  placeholder="Search by SO number..."
+  className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm mb-3 focus:outline-none focus:border-amber-500"
+/>
+
+<p className="text-xs text-zinc-600 mb-3">
+  {searching
+    ? "Searching..."
+    : searchResults !== null
+    ? `${sortedOrders.length.toLocaleString()} result(s) for "${search.trim()}"`
+    : `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} sales orders total`}
+</p>
 
       <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
         <table className="w-full text-sm">
@@ -263,7 +296,7 @@ export default function SalesOrdersClient({
         </table>
       </div>
 
-      {totalPages > 1 && (
+{searchResults === null && totalPages > 1 && (
         <div className="flex items-center justify-between">
           <button
             onClick={() => goToPage(page - 1)}

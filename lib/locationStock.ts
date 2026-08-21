@@ -40,7 +40,7 @@ if (location.type === "RACK" && delta > 0) {
     .limit(1);
   if (conflict) {
     throw new Error(
-      "This rack location already holds a different product. Only one SKU can be stored per rack cell."
+      "RAK INI SUDAH MEMILIKI SKU LAINNYA"
     );
   }
 

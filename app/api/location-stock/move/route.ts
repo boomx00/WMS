@@ -76,7 +76,7 @@ export async function PATCH(req: NextRequest) {
   // Only RACK cells are single-SKU by design.
   if (sourceLocation.type === "RACK" && occupiedByOther) {
     return NextResponse.json(
-      { error: `${sourceLocationCode} is occupied by a different product, not ${itemSku}` },
+      { error: `${sourceLocationCode} sudah berisi SKU lain, bukan ${itemSku}` },
       { status: 409 }
     );
   }
