@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Row = {
   id: number;
@@ -36,26 +37,52 @@ const TYPE_LABELS: Record<string, string> = {
   SHIP: "SHIP",
   ADJUSTMENT: "ADJUSTMENT",
 };
-export default function MovementHistoryV2Table({ rows }: { rows: Row[] }) {
+
+export default function MovementHistoryV2Table({
+  rows,
+  page,
+  totalPages,
+  totalCount,
+}: {
+  rows: Row[];
+  page: number;
+  totalPages: number;
+  totalCount: number;
+}) {
+  const router = useRouter();
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
+  const [searchResults, setSearchResults] = useState<Row[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (!search.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    const handle = setTimeout(async () => {
+      setSearching(true);
+      const res = await fetch(`/api/movement-history-v2/search?q=${encodeURIComponent(search.trim())}`);
+      setSearching(false);
+      if (res.ok) {
+        setSearchResults(await res.json());
+      }
+    }, 300);
+
+    return () => clearTimeout(handle);
+  }, [search]);
+
+  const baseRows = searchResults ?? rows;
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    if (typeFilter === "ALL") return baseRows;
+    return baseRows.filter((row) => row.type === typeFilter);
+  }, [baseRows, typeFilter]);
 
-    return rows.filter((row) => {
-      if (typeFilter !== "ALL" && row.type !== typeFilter) return false;
-      if (!q) return true;
-      return (
-        row.itemSku.toLowerCase().includes(q) ||
-        row.itemName.toLowerCase().includes(q) ||
-        (row.destinationCode ?? "").toLowerCase().includes(q) ||
-        (row.sourceCode ?? "").toLowerCase().includes(q) ||
-        (row.soNumber ?? "").toLowerCase().includes(q) ||
-        row.username.toLowerCase().includes(q)
-      );
-    });
-  }, [rows, search, typeFilter]);
+  function goToPage(p: number) {
+    router.push(`/movement-history-v2?page=${p}`);
+  }
 
   return (
     <div>
@@ -67,27 +94,32 @@ export default function MovementHistoryV2Table({ rows }: { rows: Row[] }) {
           placeholder="Search by SKU, product, location, SO number, or user..."
           className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
         />
-<select
-  value={typeFilter}
-  onChange={(e) => setTypeFilter(e.target.value)}
-  className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
->
-  <option value="ALL">All types</option>
-  <option value="INBOUND">Inbound</option>
-  <option value="DEFAULT_INBOUND">Default Inbound</option>
-  <option value="PICKING">Picking</option>
-  <option value="DEFAULT_PICKING">Default Picking</option>
-  <option value="SHIP">Ship</option>
-  <option value="MOVE">Move</option>
-<option value="DEFAULT_MOVE">Default Move</option>
-</select>
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        >
+          <option value="ALL">All types</option>
+          <option value="INBOUND">Inbound</option>
+          <option value="DEFAULT_INBOUND">Default Inbound</option>
+          <option value="PICKING">Picking</option>
+          <option value="DEFAULT_PICKING">Default Picking</option>
+          <option value="MOVE">Move</option>
+          <option value="DEFAULT_MOVE">Default Move</option>
+          <option value="SHIP">Ship</option>
+          <option value="ADJUSTMENT">Adjustment</option>
+        </select>
       </div>
 
       <p className="text-xs text-zinc-600 mb-3">
-        {filtered.length.toLocaleString()} of {rows.length.toLocaleString()} events
+        {searching
+          ? "Searching..."
+          : searchResults !== null
+          ? `${filtered.length.toLocaleString()} result(s) for "${search.trim()}"`
+          : `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} events total`}
       </p>
 
-      <div className="border border-zinc-800 rounded-lg overflow-hidden">
+      <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-zinc-900 text-zinc-500 text-left">
@@ -142,6 +174,28 @@ export default function MovementHistoryV2Table({ rows }: { rows: Row[] }) {
           </tbody>
         </table>
       </div>
+
+      {searchResults === null && totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => goToPage(page - 1)}
+            disabled={page <= 1}
+            className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            ← Previous
+          </button>
+          <span className="text-xs text-zinc-500">
+            Page {page} of {totalPages}
+          </span>
+          <button
+            onClick={() => goToPage(page + 1)}
+            disabled={page >= totalPages}
+            className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

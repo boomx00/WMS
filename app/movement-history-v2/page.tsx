@@ -1,15 +1,24 @@
 import { db } from "@/lib/db";
 import { locationStockEvents, items, locations, users, salesOrders } from "@/db/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import MovementHistoryV2Table from "./MovementHistoryV2Table";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = 50;
+
 const sourceLoc = alias(locations, "source_loc");
 const destLoc = alias(locations, "dest_loc");
 
-async function getEvents() {
+async function getTotalCount() {
+  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(locationStockEvents);
+  return row.count;
+}
+
+async function getEventsForPage(page: number) {
+  const offset = (page - 1) * PAGE_SIZE;
+
   return db
     .select({
       id: locationStockEvents.id,
@@ -30,11 +39,20 @@ async function getEvents() {
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
     .orderBy(desc(locationStockEvents.createdAt))
-    .limit(200);
+    .limit(PAGE_SIZE)
+    .offset(offset);
 }
 
-export default async function MovementHistoryV2Page() {
-  const rows = await getEvents();
+export default async function MovementHistoryV2Page({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
+  const { page: pageParam } = await searchParams;
+  const page = Math.max(1, Number(pageParam) || 1);
+
+  const [totalCount, rows] = await Promise.all([getTotalCount(), getEventsForPage(page)]);
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
     <div className="p-8 max-w-4xl">
@@ -46,7 +64,7 @@ export default async function MovementHistoryV2Page() {
         </p>
       </header>
 
-      <MovementHistoryV2Table rows={rows} />
+      <MovementHistoryV2Table rows={rows} page={page} totalPages={totalPages} totalCount={totalCount} />
     </div>
   );
 }
