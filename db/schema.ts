@@ -86,7 +86,24 @@ export const usersRelations = relations(users, ({ one }) => ({
 // ============================================================
 // Items (product master)
 // ============================================================
-
+export const shipmentRevisions = pgTable("shipment_revisions", {
+  id: serial("id").primaryKey(),
+  salesOrderId: integer("sales_order_id")
+    .notNull()
+    .references(() => salesOrders.id),
+  originalItemId: integer("original_item_id")
+    .notNull()
+    .references(() => items.id),
+  revisedItemId: integer("revised_item_id")
+    .notNull()
+    .references(() => items.id),
+  quantity: integer("quantity").notNull(),
+  reason: text("reason"),
+  revisedBy: integer("revised_by")
+    .notNull()
+    .references(() => users.id),
+  revisedAt: timestamp("revised_at").defaultNow().notNull(),
+});
 export const items = pgTable(
   "items",
   {
