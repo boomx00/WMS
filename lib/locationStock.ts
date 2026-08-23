@@ -57,18 +57,25 @@ if (location.type === "RACK" && delta > 0) {
     }
   }
 
-  if (existing) {
-    const newQty = existing.quantity + delta;
+if (existing) {
+  const newQty = existing.quantity + delta;
 
-    if (delta < 0 && newQty < 0 && !allowNegative) {
-      throw new Error(`Insufficient stock: tried to remove ${-delta}, only ${existing.quantity} available`);
-    }
+  if (delta < 0 && newQty < 0 && !allowNegative) {
+    throw new Error(`Insufficient stock: tried to remove ${-delta}, only ${existing.quantity} available`);
+  }
 
+  if (newQty === 0) {
+    // Delete rather than leave a lingering zero row — otherwise a
+    // different SKU added to this same location later creates a second
+    // row instead of cleanly replacing this one.
+    await tx.delete(locationStock).where(eq(locationStock.id, existing.id));
+  } else {
     await tx
       .update(locationStock)
       .set({ quantity: newQty, updatedAt: new Date() })
       .where(eq(locationStock.id, existing.id));
-  } else {
+  }
+} else {
     if (delta < 0 && !allowNegative) {
       throw new Error("Insufficient stock: no existing stock at this location for this item");
     }
