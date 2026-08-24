@@ -54,25 +54,32 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "New quantity is the same as the current quantity" }, { status: 400 });
   }
 
-  await db.transaction(async (tx) => {
-    if (existing) {
+await db.transaction(async (tx) => {
+  if (existing) {
+    if (newQuantity === 0) {
+      // Delete rather than leave a lingering zero row — otherwise a
+      // different SKU added to this same location later creates a
+      // duplicate instead of cleanly replacing this one.
+      await tx.delete(locationStock).where(eq(locationStock.id, existing.id));
+    } else {
       await tx
         .update(locationStock)
         .set({ quantity: newQuantity, updatedAt: new Date() })
         .where(eq(locationStock.id, existing.id));
-    } else {
-      await tx.insert(locationStock).values({ locationId: location.id, itemId: item.id, quantity: newQuantity });
     }
+  } else {
+    await tx.insert(locationStock).values({ locationId: location.id, itemId: item.id, quantity: newQuantity });
+  }
 
-    await tx.insert(locationStockEvents).values({
-      type: "ADJUSTMENT",
-      itemId: item.id,
-      sourceLocationId: null,
-      destinationLocationId: location.id,
-      quantity: delta, // signed — positive for increase, negative for decrease
-      userId: session.userId,
-    });
+  await tx.insert(locationStockEvents).values({
+    type: "ADJUSTMENT",
+    itemId: item.id,
+    sourceLocationId: null,
+    destinationLocationId: location.id,
+    quantity: delta,
+    userId: session.userId,
   });
+});
 
   return NextResponse.json({
     locationCode: location.code,
