@@ -91,26 +91,40 @@ if (sourceLocation.type === "OUTBOUND_WH") {
     );
   }
 
-  const availableAtSource = matchingRow?.quantity ?? 0;
-  const sufficient = quantity <= availableAtSource;
+const availableAtSource = matchingRow?.quantity ?? 0;
+const sufficient = quantity <= availableAtSource;
 
-  let eventType: "PICKING" | "DEFAULT_PICKING" = "PICKING";
+let eventType: "PICKING" | "DEFAULT_PICKING" = "PICKING";
 
-  if (!sufficient) {
-    const [settingsRow] = await db.select().from(settings).limit(1);
-    if (!settingsRow?.allowDefaultPicking) {
-      return NextResponse.json(
-        {
-          error:
-            availableAtSource === 0
-              ? `No stock recorded at ${locationCode} for ${itemSku}. Enable Default Picking in Settings to allow this.`
-              : `Only ${availableAtSource} of ${itemSku} available at ${locationCode}. Enable Default Picking in Settings to allow taking more.`,
-        },
-        { status: 409 }
-      );
-    }
-    eventType = "DEFAULT_PICKING";
+if (!sufficient) {
+  // Default Picking only ever applies to FLOOR — a rack cell must have
+  // genuinely sufficient tracked stock, no exceptions, regardless of the
+  // setting. Racks are individually-tracked, single-SKU locations, so an
+  // insufficient/empty rack reading is a real data problem worth blocking
+  // on, not something to silently paper over.
+  if (sourceLocation.type !== "FLOOR") {
+    return NextResponse.json(
+      {
+        error:
+          availableAtSource === 0
+            ? `No stock recorded at ${locationCode} for ${itemSku}. Default Picking is only available from Floor.`
+            : `Only ${availableAtSource} of ${itemSku} available at ${locationCode}. Default Picking is only available from Floor.`,
+      },
+      { status: 409 }
+    );
   }
+
+  const [settingsRow] = await db.select().from(settings).limit(1);
+  if (!settingsRow?.allowDefaultPicking) {
+    return NextResponse.json(
+      {
+        error: `Only ${availableAtSource} of ${itemSku} available at ${locationCode}. Enable Default Picking in Settings to allow taking more.`,
+      },
+      { status: 409 }
+    );
+  }
+  eventType = "DEFAULT_PICKING";
+}
 
   const sourceDecrement = Math.min(quantity, Math.max(availableAtSource, 0));
 
