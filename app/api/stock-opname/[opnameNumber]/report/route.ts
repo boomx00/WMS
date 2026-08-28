@@ -6,7 +6,8 @@ import { eq } from "drizzle-orm";
 // GET /api/stock-opname/:opnameNumber/report
 // The full picture for one session: who it's assigned to, every location
 // in scope, and — for each one — whatever's actually been counted there
-// so far (SKU + quantity, one row per distinct item found).
+// so far (SKU, the system quantity as it stood at the moment of that
+// count, the counted quantity, and the resulting difference).
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ opnameNumber: string }> }
@@ -24,25 +25,27 @@ export async function GET(
     assignedToUsername = assignee?.username ?? null;
   }
 
-const allLocations = await db
-  .select({
-    locationId: stockOpnameLocations.locationId,
-    locationCode: locations.code,
-    area: locations.area,
-    x: locations.x,
-    y: locations.y,
-  })
-  .from(stockOpnameLocations)
-  .innerJoin(locations, eq(stockOpnameLocations.locationId, locations.id))
-  .where(eq(stockOpnameLocations.opnameNumber, opnameNumber))
-  .orderBy(locations.area, locations.x, locations.y);
+  const allLocations = await db
+    .select({
+      locationId: stockOpnameLocations.locationId,
+      locationCode: locations.code,
+      area: locations.area,
+      x: locations.x,
+      y: locations.y,
+    })
+    .from(stockOpnameLocations)
+    .innerJoin(locations, eq(stockOpnameLocations.locationId, locations.id))
+    .where(eq(stockOpnameLocations.opnameNumber, opnameNumber))
+    .orderBy(locations.area, locations.x, locations.y);
 
   const countedRows = await db
     .select({
       locationId: stockOpnameItems.locationId,
       itemSku: items.sku,
       itemName: items.name,
+      systemQty: stockOpnameItems.systemQty,
       countedQty: stockOpnameItems.countedQty,
+      difference: stockOpnameItems.difference,
       countedAt: stockOpnameItems.countedAt,
       countedByUsername: users.username,
     })
@@ -65,7 +68,9 @@ const allLocations = await db
       items: counts.map((c) => ({
         itemSku: c.itemSku,
         itemName: c.itemName,
+        systemQty: c.systemQty,
         countedQty: c.countedQty,
+        difference: c.difference,
         countedAt: c.countedAt,
         countedByUsername: c.countedByUsername,
       })),

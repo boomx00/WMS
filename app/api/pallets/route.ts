@@ -6,8 +6,24 @@ import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { adjustLocationStock } from "@/lib/locationStock";
 import { locationStockEvents } from "@/db/schema";
+
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
+}
+
+// A real printed pallet label is exactly one scan of
+// "*SKU*palletSeq*qty*workOrder" — e.g. *14013024102*0004*5000*MO007449.
+// SKU length varies by product (checked against the item DB separately),
+// but everything after it is fixed-width. Anchored start-to-end so a
+// double/concatenated scan (two valid labels stuck together) — which
+// would otherwise slip through since sku/workOrderNumber/quantity are
+// submitted as separate fields the server never cross-checks against the
+// raw label — is rejected instead of silently becoming the pallet's
+// permanent identifier.
+const REAL_LABEL_REGEX = /^\*?[^*]+\*\d{4}\*\d{4}\*MO\d{6}$/;
+
+function isValidRealLabel(label: string): boolean {
+  return REAL_LABEL_REGEX.test(label);
 }
 
 // GET /api/pallets - list all pallets (current state)
@@ -33,6 +49,16 @@ export async function POST(req: NextRequest) {
   if (!rawLabel || !rawSku || !workOrderNumber || !quantity) {
     return NextResponse.json(
       { error: "label, sku, workOrderNumber, and quantity are required" },
+      { status: 400 }
+    );
+  }
+
+  if (!isValidRealLabel(rawLabel)) {
+    return NextResponse.json(
+      {
+        error:
+          "PERIKSA ULANG LABEL YANG DI SCAN!! HAPUS TERUS SCAN LAGI!!",
+      },
       { status: 400 }
     );
   }
@@ -64,7 +90,7 @@ export async function POST(req: NextRequest) {
   if (existingElsewhere) {
     return NextResponse.json(
       {
-        error: `This pallet has already been inbounded — it's currently at ${existingElsewhere.locationCode}.`,
+        error: `PALLET INI SUDAH DI INBOUND!!`,
         matchType: "already_exists_elsewhere",
         actualLocationCode: existingElsewhere.locationCode,
       },

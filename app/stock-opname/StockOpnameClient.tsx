@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+
 type Session = {
   opnameNumber: string;
   notes: string | null;
@@ -24,7 +25,8 @@ export default function StockOpnameClient({
   users,
 }: {
   sessions: Session[];
-  users: { username: string }[]; }) {
+  users: { username: string }[];
+}) {
   const router = useRouter();
   const [opnameNumber, setOpnameNumber] = useState("");
   const [locationCodes, setLocationCodes] = useState("");
@@ -48,12 +50,12 @@ export default function StockOpnameClient({
     const res = await fetch("/api/stock-opname", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-body: JSON.stringify({
-  opnameNumber: opnameNumber.trim(),
-  notes: notes.trim(),
-  locationCodes: codes,
-  assignedToUsername: assignedToUsername || undefined,
-}),
+      body: JSON.stringify({
+        opnameNumber: opnameNumber.trim(),
+        notes: notes.trim(),
+        locationCodes: codes,
+        assignedToUsername: assignedToUsername || undefined,
+      }),
     });
     setLoading(false);
 
@@ -64,11 +66,11 @@ body: JSON.stringify({
     }
 
     const data = await res.json();
-    setSuccess(`Created ${opnameNumber.trim()} with ${data.lineCount} line(s) to count.`);
-setOpnameNumber("");
-setLocationCodes("");
-setAssignedToUsername("");
-setNotes("");
+    setSuccess(`Created ${opnameNumber.trim()} with ${data.locationCount} location(s) to count.`);
+    setOpnameNumber("");
+    setLocationCodes("");
+    setAssignedToUsername("");
+    setNotes("");
     router.refresh();
   }
 
@@ -88,32 +90,35 @@ setNotes("");
         </div>
 
         <div>
-      <label className="block text-xs text-zinc-500 mb-1">
-  Locations (comma-separated: exact codes, or "Rack A" / "Rack B" for a whole area — leave blank for everywhere)
-</label>
-<input
-  type="text"
-  value={locationCodes}
-  onChange={(e) => setLocationCodes(e.target.value)}
-  placeholder="Rack A, Rack B, FLOOR"
-  className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-/>
+          <label className="block text-xs text-zinc-500 mb-1">
+            Locations (comma-separated: exact codes, or "Rack A" / "Rack B" for a whole area — leave blank for
+            everywhere)
+          </label>
+          <input
+            type="text"
+            value={locationCodes}
+            onChange={(e) => setLocationCodes(e.target.value)}
+            placeholder="Rack A, Rack B, FLOOR"
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+          />
         </div>
-<div>
-  <label className="block text-xs text-zinc-500 mb-1">Assign to (PIC)</label>
-  <select
-    value={assignedToUsername}
-    onChange={(e) => setAssignedToUsername(e.target.value)}
-    className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-  >
-    <option value="">Unassigned</option>
-    {users.map((u) => (
-      <option key={u.username} value={u.username}>
-        {u.username}
-      </option>
-    ))}
-  </select>
-</div>
+
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Assign to (PIC)</label>
+          <select
+            value={assignedToUsername}
+            onChange={(e) => setAssignedToUsername(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+          >
+            <option value="">Unassigned</option>
+            {users.map((u) => (
+              <option key={u.username} value={u.username}>
+                {u.username}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div>
           <label className="block text-xs text-zinc-500 mb-1">Notes (optional)</label>
           <input
@@ -136,20 +141,28 @@ setNotes("");
         {success && <p className="text-xs text-emerald-400">{success}</p>}
       </form>
 
-<div className="space-y-3">
-  {sessions.length === 0 ? (
-    <div className="border border-dashed border-zinc-800 rounded-lg px-8 py-12 text-center text-zinc-600 text-sm">
-      No opname sessions yet.
-    </div>
-  ) : (
-    sessions.map((s) => <OpnameSessionRow key={s.opnameNumber} session={s} />)
-  )}
-</div>
+      <div className="space-y-3">
+        {sessions.length === 0 ? (
+          <div className="border border-dashed border-zinc-800 rounded-lg px-8 py-12 text-center text-zinc-600 text-sm">
+            No opname sessions yet.
+          </div>
+        ) : (
+          sessions.map((s) => <OpnameSessionRow key={s.opnameNumber} session={s} />)
+        )}
+      </div>
     </div>
   );
-  
 }
-type ReportItem = { itemSku: string; itemName: string; countedQty: number; countedAt: string | null; countedByUsername: string | null };
+
+type ReportItem = {
+  itemSku: string;
+  itemName: string;
+  systemQty: number;
+  countedQty: number;
+  difference: number;
+  countedAt: string | null;
+  countedByUsername: string | null;
+};
 type ReportLocation = { locationCode: string; counted: boolean; items: ReportItem[] };
 type ReportResponse = {
   opnameNumber: string;
@@ -159,6 +172,19 @@ type ReportResponse = {
   countedLocations: number;
   report: ReportLocation[];
 };
+
+function DifferenceBadge({ difference }: { difference: number }) {
+  if (difference === 0) {
+    return <span className="text-emerald-400 font-mono">Match</span>;
+  }
+  const sign = difference > 0 ? "+" : "";
+  return (
+    <span className={`font-mono ${difference > 0 ? "text-amber-400" : "text-red-400"}`}>
+      {sign}
+      {difference.toLocaleString()}
+    </span>
+  );
+}
 
 function OpnameSessionRow({ session }: { session: Session }) {
   const router = useRouter();
@@ -209,7 +235,10 @@ function OpnameSessionRow({ session }: { session: Session }) {
 
   return (
     <div className="border border-zinc-800 rounded-lg bg-zinc-900/30 overflow-hidden">
-      <button onClick={toggle} className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-900/60 transition-colors">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-900/60 transition-colors"
+      >
         <div className="flex items-center gap-2">
           <span className={`text-zinc-500 text-xs transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
           <span className="font-mono text-amber-500 text-sm">{session.opnameNumber}</span>
@@ -221,7 +250,9 @@ function OpnameSessionRow({ session }: { session: Session }) {
           <span className="text-xs text-zinc-500">
             {session.countedLines}/{session.totalLines} counted
           </span>
-          <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[session.status]}`}>
+          <span
+            className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[session.status]}`}
+          >
             {session.status.replace("_", " ")}
           </span>
         </div>
@@ -254,7 +285,9 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   <th className="py-2 font-medium">Location</th>
                   <th className="py-2 font-medium">SKU</th>
                   <th className="py-2 font-medium">Product</th>
+                  <th className="py-2 font-medium text-right">System Qty</th>
                   <th className="py-2 font-medium text-right">Counted Qty</th>
+                  <th className="py-2 font-medium text-right">Difference</th>
                   <th className="py-2 font-medium">By</th>
                 </tr>
               </thead>
@@ -263,7 +296,9 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   loc.items.length === 0 ? (
                     <tr key={loc.locationCode} className="border-t border-zinc-800/60">
                       <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
-                      <td colSpan={4} className="py-1.5 text-zinc-700">Not counted yet</td>
+                      <td colSpan={6} className="py-1.5 text-zinc-700">
+                        Not counted yet
+                      </td>
                     </tr>
                   ) : (
                     loc.items.map((item, i) => (
@@ -271,7 +306,13 @@ function OpnameSessionRow({ session }: { session: Session }) {
                         <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
                         <td className="py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
                         <td className="py-1.5 text-zinc-500">{item.itemName}</td>
+                        <td className="py-1.5 text-right font-mono text-zinc-400">
+                          {item.systemQty.toLocaleString()}
+                        </td>
                         <td className="py-1.5 text-right font-mono">{item.countedQty.toLocaleString()}</td>
+                        <td className="py-1.5 text-right">
+                          <DifferenceBadge difference={item.difference} />
+                        </td>
                         <td className="py-1.5 text-zinc-500">{item.countedByUsername ?? "—"}</td>
                       </tr>
                     ))

@@ -4,6 +4,10 @@ import { salesOrders, salesOrderItems, items } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
 // GET /api/sales-orders - list all sales orders with their line items
 export async function GET() {
   const orders = await db.select().from(salesOrders).orderBy(salesOrders.orderDate);
@@ -42,34 +46,36 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { soNumber, orderDate, items: lineItems } = body;
+  const soNumber = sanitize(body.soNumber ?? "");
+  const orderDate = body.orderDate;
+  const lineItems = Array.isArray(body.items) ? body.items : [];
 
-  if (!soNumber || !orderDate || !Array.isArray(lineItems) || lineItems.length === 0) {
+  if (!soNumber || !orderDate || lineItems.length === 0) {
     return NextResponse.json(
       { error: "soNumber, orderDate, and at least one item are required" },
       { status: 400 }
     );
   }
 
-  // Resolve every SKU up front, before writing anything
-// Resolve every SKU up front, before writing anything. Duplicate SKUs
-// (same item listed on more than one line) get merged into a single
-// resolved line with summed quantity, rather than inserted as separate rows.
-const resolvedByItemId = new Map<number, number>();
-for (const line of lineItems) {
-  if (!line.sku || !line.quantity || line.quantity <= 0) {
-    return NextResponse.json({ error: "Each item needs a sku and a positive quantity" }, { status: 400 });
+  // Resolve every SKU up front, before writing anything. Duplicate SKUs
+  // (same item listed on more than one line) get merged into a single
+  // resolved line with summed quantity, rather than inserted as separate rows.
+  const resolvedByItemId = new Map<number, number>();
+  for (const line of lineItems) {
+    const sku = sanitize(line.sku ?? "");
+    if (!sku || !line.quantity || line.quantity <= 0) {
+      return NextResponse.json({ error: "Each item needs a sku and a positive quantity" }, { status: 400 });
+    }
+    const [item] = await db.select().from(items).where(eq(items.sku, sku));
+    if (!item) {
+      return NextResponse.json({ error: `Unknown SKU: ${sku}` }, { status: 404 });
+    }
+    resolvedByItemId.set(item.id, (resolvedByItemId.get(item.id) ?? 0) + line.quantity);
   }
-  const [item] = await db.select().from(items).where(eq(items.sku, line.sku));
-  if (!item) {
-    return NextResponse.json({ error: `Unknown SKU: ${line.sku}` }, { status: 404 });
-  }
-  resolvedByItemId.set(item.id, (resolvedByItemId.get(item.id) ?? 0) + line.quantity);
-}
-const resolvedLines = Array.from(resolvedByItemId.entries()).map(([itemId, quantity]) => ({
-  itemId,
-  quantity,
-}));
+  const resolvedLines = Array.from(resolvedByItemId.entries()).map(([itemId, quantity]) => ({
+    itemId,
+    quantity,
+  }));
 
   const result = await db.transaction(async (tx) => {
     const [order] = await tx

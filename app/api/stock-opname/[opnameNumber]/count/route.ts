@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpnameItems, stockOpnameLocations, locations, items } from "@/db/schema";
+import { stockOpnameItems, stockOpnameLocations, locations, items, locationStock } from "@/db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
@@ -18,10 +18,17 @@ function extractSku(label: string): string | null {
 // PATCH /api/stock-opname/:opnameNumber/count
 // body: { locationCode, scanned, countedQty }
 //
-// A blind physical count log. If this location isn't yet part of this
-// opname session (e.g. a custom, real-time session where locations are
-// never pre-planned — only discovered as the PIC actually visits them),
-// it's registered into stock_opname_locations automatically here.
+// Alongside the blind physical count, this also snapshots whatever
+// location_stock says is there for this exact location+item *at the
+// moment of counting* — so the recorded line always reflects what the
+// system believed at count time, not whatever it happens to say later
+// (e.g. after other movements land). difference = countedQty - systemQty,
+// recomputed every time a line is (re)counted.
+//
+// If this location isn't yet part of this opname session (e.g. a custom,
+// real-time session where locations are never pre-planned — only
+// discovered as the PIC actually visits them), it's registered into
+// stock_opname_locations automatically here.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ opnameNumber: string }> }
@@ -77,6 +84,16 @@ export async function PATCH(
     await db.insert(stockOpnameLocations).values({ opnameNumber, locationId: location.id });
   }
 
+  // Snapshot the live system quantity for this exact location+item right
+  // now — this is the number the count is being checked against.
+  const [stockRow] = await db
+    .select()
+    .from(locationStock)
+    .where(and(eq(locationStock.locationId, location.id), eq(locationStock.itemId, item.id)));
+
+  const systemQty = stockRow?.quantity ?? 0;
+  const difference = countedQty - systemQty;
+
   const [existingLine] = await db
     .select()
     .from(stockOpnameItems)
@@ -92,7 +109,7 @@ export async function PATCH(
   if (existingLine) {
     [result] = await db
       .update(stockOpnameItems)
-      .set({ countedQty, countedAt: new Date(), countedBy: session.userId })
+      .set({ systemQty, countedQty, difference, countedAt: new Date(), countedBy: session.userId })
       .where(eq(stockOpnameItems.id, existingLine.id))
       .returning();
   } else {
@@ -102,8 +119,9 @@ export async function PATCH(
         opnameNumber,
         locationId: location.id,
         itemId: item.id,
-        systemQty: 0,
+        systemQty,
         countedQty,
+        difference,
         countedAt: new Date(),
         countedBy: session.userId,
       })
