@@ -55,8 +55,8 @@ export async function POST(
     return NextResponse.json({ error: `${itemSku} isn't on sales order ${soNumber}` }, { status: 400 });
   }
 
-  const currentlyEarmarked = await getPickedForSoQuantity(db, salesOrder.id, item.id);
-  const stillNeeded = orderLine.quantity - currentlyEarmarked;
+const currentlyEarmarked = Math.max(0, await getPickedForSoQuantity(db, salesOrder.id, item.id));
+const stillNeeded = orderLine.quantity - currentlyEarmarked;
   if (quantity > stillNeeded) {
     return NextResponse.json(
       { error: `SO ${soNumber} only needs ${stillNeeded} more of ${itemSku}` },
