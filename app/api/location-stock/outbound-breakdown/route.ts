@@ -6,22 +6,19 @@ import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
 
-// An SO counts as "complete" if every one of its line items has fully
-// shipped — once complete, its marked/leftover figures are no longer
-// meaningful to show here regardless of any underlying historical drift.
-async function isSalesOrderComplete(salesOrderId: number): Promise<boolean> {
-  const lines = await db
+// Whether THIS specific (SO, item) line has already fully shipped —
+// checked per line, not per whole order, since a different SKU on the
+// same SO being incomplete shouldn't keep this one visible.
+async function isLineComplete(salesOrderId: number, itemId: number): Promise<boolean> {
+  const [orderLine] = await db
     .select()
     .from(salesOrderItems)
-    .where(eq(salesOrderItems.salesOrderId, salesOrderId));
+    .where(and(eq(salesOrderItems.salesOrderId, salesOrderId), eq(salesOrderItems.itemId, itemId)));
 
-  if (lines.length === 0) return false;
+  if (!orderLine) return false;
 
-  for (const line of lines) {
-    const shipped = await getShippedQuantity(db, salesOrderId, line.itemId);
-    if (shipped < line.quantity) return false;
-  }
-  return true;
+  const shipped = await getShippedQuantity(db, salesOrderId, itemId);
+  return shipped >= orderLine.quantity;
 }
 
 // GET /api/location-stock/outbound-breakdown?sku=...
@@ -67,10 +64,12 @@ export async function GET(req: NextRequest) {
   for (const row of distinctSoRows) {
     if (row.salesOrderId === null) continue;
 
-    // Skip completed SOs entirely — their marked figure is no longer
-    // relevant to show, whatever it might compute to.
-    const complete = await isSalesOrderComplete(row.salesOrderId);
-    if (complete) continue;
+    // Skip if THIS ITEM's line on this SO is already fully shipped —
+    // regardless of other items on the same SO, and regardless of
+    // whatever the underlying marked math computes to (including
+    // negative values from historical drift).
+    const lineComplete = await isLineComplete(row.salesOrderId, item.id);
+    if (lineComplete) continue;
 
     const quantity = await getPickedForSoQuantity(db, row.salesOrderId, item.id);
     if (quantity !== 0) {
