@@ -150,7 +150,6 @@ const sortedOrders = useMemo(() => {
     <th className="px-4 py-3 font-medium">Picked By</th>
     <th className="px-4 py-3 font-medium text-right">Items</th>
     <th className="px-4 py-3 font-medium w-16"></th>
-    <th className="px-4 py-3 font-medium w-32"></th>
   </tr>
 </thead>
           <tbody>
@@ -207,9 +206,7 @@ const sortedOrders = useMemo(() => {
       {isEditing ? "Cancel" : "Edit"}
     </button>
   </td>
-  <td className="px-4 py-3 text-right">
-  <FinishButton order={order} isAdmin={isAdmin} />
-</td>
+ 
 </tr>
                     {isOpen && (
                       <tr className="border-t border-zinc-800/60 bg-zinc-950/40">

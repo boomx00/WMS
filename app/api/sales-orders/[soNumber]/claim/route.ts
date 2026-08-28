@@ -38,9 +38,6 @@ export async function POST(
   if (!salesOrder) {
     return NextResponse.json({ error: "Unknown sales order number" }, { status: 404 });
   }
-  if (salesOrder.finishedAt) {
-    return NextResponse.json({ error: "This sales order has already been finished" }, { status: 409 });
-  }
 
   const [item] = await db.select().from(items).where(eq(items.sku, itemSku));
   if (!item) {

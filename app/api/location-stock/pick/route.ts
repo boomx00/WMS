@@ -69,9 +69,7 @@ export async function PATCH(req: NextRequest) {
     if (!salesOrder) {
       return NextResponse.json({ error: "Unknown sales order number" }, { status: 404 });
     }
-    if (salesOrder.finishedAt) {
-      return NextResponse.json({ error: "This sales order has already been finished" }, { status: 409 });
-    }
+
     salesOrderId = salesOrder.id;
 
     const [orderLine] = await db

@@ -76,9 +76,7 @@ const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.so
 if (!salesOrder) {
   return NextResponse.json({ error: "Unknown sales order number" }, { status: 404 });
 }
-if (salesOrder.finishedAt) {
-  return NextResponse.json({ error: "This sales order has already been finished" }, { status: 409 });
-}
+
 
   const [outboundWh] = await db.select().from(locations).where(eq(locations.type, "OUTBOUND_WH"));
   if (!outboundWh) {
