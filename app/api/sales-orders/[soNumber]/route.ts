@@ -4,7 +4,7 @@ import { salesOrders, salesOrderItems, items, palletEvents, pallets } from "@/db
 import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
-// PATCH /api/sales-orders/:id
+// PATCH /api/sales-orders/:soNumber
 // body: { soNumber, orderDate, items: [{ sku, quantity }] }
 // Replaces the sales order's header and line items wholesale. Blocks any
 // item's new quantity from dropping below what's already been shipped
@@ -12,20 +12,24 @@ import { getSession } from "@/lib/auth";
 // shipped for it.
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ soNumber: string }> }
 ) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const { id } = await params;
-  const orderId = Number(id);
+  const { soNumber: currentSoNumber } = await params;
 
-  const [existingOrder] = await db.select().from(salesOrders).where(eq(salesOrders.id, orderId));
+  const [existingOrder] = await db
+    .select()
+    .from(salesOrders)
+    .where(eq(salesOrders.soNumber, currentSoNumber));
   if (!existingOrder) {
     return NextResponse.json({ error: "Sales order not found" }, { status: 404 });
   }
+
+  const orderId = existingOrder.id;
 
   const body = await req.json();
   const { soNumber, orderDate, items: lineItems } = body;
