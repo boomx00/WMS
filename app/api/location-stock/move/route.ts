@@ -93,8 +93,8 @@ export async function PATCH(req: NextRequest) {
         {
           error:
             availableAtSource === 0
-              ? `No stock recorded at ${sourceLocationCode} for ${itemSku}. Enable Default Move in Settings to allow this.`
-              : `Only ${availableAtSource} of ${itemSku} available at ${sourceLocationCode}. Enable Default Move in Settings to allow taking more.`,
+              ? `Tidak ada stock barang ${itemSku} di ${sourceLocationCode}! Enable Default Move in Settings to allow this.`
+              : `Hanya ada ${availableAtSource} karton ${itemSku} di ${sourceLocationCode}! Enable Default Move in Settings to allow taking more.`,
         },
         { status: 409 }
       );

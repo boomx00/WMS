@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStock, locations, items, salesOrders, salesOrderItems, palletEvents, pallets } from "@/db/schema";
-import { eq, and, or, sql } from "drizzle-orm";
+import { locationStock, locations, items, salesOrders, salesOrderItems } from "@/db/schema";
+import { eq, and, or } from "drizzle-orm";
 import { normalizeLabel } from "@/lib/labelNormalize";
+import { getShippedQuantity } from "@/lib/shippedQuantity";
+import { getPickedForSoQuantity } from "@/lib/pickedForSo";
+import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -15,10 +18,6 @@ function extractSku(label: string): string | null {
 }
 
 // GET /api/location-stock/lookup-by-label?label=...&soNumber=...
-// Accepts a full pallet label, the literal default barcode, or just a
-// bare SKU — all resolve down to the SKU. Reports how much is present in
-// Outbound WH, plus (if soNumber given) how much has already shipped
-// against that SO for this item.
 export async function GET(req: NextRequest) {
   const rawLabel = sanitize(req.nextUrl.searchParams.get("label") ?? "");
   const soNumber = sanitize(req.nextUrl.searchParams.get("soNumber") ?? "");
@@ -53,14 +52,20 @@ export async function GET(req: NextRequest) {
     .from(locationStock)
     .where(and(eq(locationStock.locationId, outboundWh.id), eq(locationStock.itemId, item.id)));
 
-  const availableQty = stockRow?.quantity ?? 0;
+  const totalInOutboundWh = stockRow?.quantity ?? 0;
+  const unclaimed = await getUnclaimedQuantity(db, item.id);
 
-const result: Record<string, unknown> = {
-  itemSku: item.sku,
-  itemName: item.name,
-  quantity: availableQty,
-  palletCartonQty: item.palletCartonQty,
-};
+  const result: Record<string, unknown> = {
+    itemSku: item.sku,
+    itemName: item.name,
+    // `quantity` now means the unmarked/unclaimed leftover sitting in
+    // Outbound WH — not the grand total (which includes stock already
+    // earmarked to other SOs and thus not meaningfully "available").
+    quantity: unclaimed,
+    totalInOutboundWh,
+    unclaimedInOutboundWh: unclaimed,
+    palletCartonQty: item.palletCartonQty,
+  };
 
   if (soNumber) {
     const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.soNumber, soNumber));
@@ -71,21 +76,16 @@ const result: Record<string, unknown> = {
         .where(and(eq(salesOrderItems.salesOrderId, salesOrder.id), eq(salesOrderItems.itemId, item.id)));
 
       if (orderLine) {
-        const [alreadyShippedRow] = await db
-          .select({ total: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int` })
-          .from(palletEvents)
-          .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
-          .where(
-            and(
-              eq(palletEvents.salesOrderId, salesOrder.id),
-              eq(pallets.itemId, item.id),
-              eq(palletEvents.type, "OUTBOUND")
-            )
-          );
+        const alreadyShipped = await getShippedQuantity(db, salesOrder.id, item.id);
+        // Uses the SHARED helper — correctly nets PICKING, DEFAULT_PICKING,
+        // RELEASE, and CLAIM together, so a claim actually reduces what
+        // still needs claiming and increases what's shippable.
+        const pickedForSo = await getPickedForSoQuantity(db, salesOrder.id, item.id);
 
         result.orderedQty = orderLine.quantity;
-        result.alreadyShipped = alreadyShippedRow?.total ?? 0;
-        result.remaining = orderLine.quantity - (alreadyShippedRow?.total ?? 0);
+        result.alreadyShipped = alreadyShipped;
+        result.remaining = orderLine.quantity - alreadyShipped;
+        result.availableToShip = pickedForSo;
       }
     }
   }

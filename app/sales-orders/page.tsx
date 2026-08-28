@@ -2,7 +2,19 @@ import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items } from "@/db/schema";
 import { eq, inArray, desc, sql } from "drizzle-orm";
 import SalesOrdersClient from "./SalesOrdersClient";
+import { getSession } from "@/lib/auth";
+import { users, roles } from "@/db/schema";
 
+async function getIsAdmin(): Promise<boolean> {
+  const session = await getSession();
+  if (!session) return false;
+  const [row] = await db
+    .select({ roleName: roles.name })
+    .from(users)
+    .innerJoin(roles, eq(users.roleId, roles.id))
+    .where(eq(users.id, session.userId));
+  return row?.roleName?.toLowerCase() === "admin";
+}
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
@@ -173,11 +185,12 @@ export default async function SalesOrdersPage({
   const { page: pageParam } = await searchParams;
   const page = Math.max(1, Number(pageParam) || 1);
 
-  const [totalCount, orders, allItems] = await Promise.all([
-    getTotalOrderCount(),
-    getSalesOrdersForPage(page),
-    db.select({ sku: items.sku, name: items.name }).from(items).orderBy(items.sku),
-  ]);
+const [totalCount, orders, allItems, isAdmin] = await Promise.all([
+  getTotalOrderCount(),
+  getSalesOrdersForPage(page),
+  db.select({ sku: items.sku, name: items.name }).from(items).orderBy(items.sku),
+  getIsAdmin(),
+]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
@@ -190,13 +203,14 @@ export default async function SalesOrdersPage({
         </p>
       </header>
 
-      <SalesOrdersClient
-        orders={orders}
-        allItems={allItems}
-        page={page}
-        totalPages={totalPages}
-        totalCount={totalCount}
-      />
+<SalesOrdersClient
+  orders={orders}
+  allItems={allItems}
+  page={page}
+  totalPages={totalPages}
+  totalCount={totalCount}
+  isAdmin={isAdmin}
+/>
     </div>
   );
 }

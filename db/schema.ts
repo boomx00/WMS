@@ -265,6 +265,8 @@ export const salesOrders = pgTable(
     soNumber: text("so_number").notNull(),
     orderDate: timestamp("order_date").notNull(),
     assignedCheckerId: integer("assigned_checker_id").references(() => users.id),
+    finishedAt: timestamp("finished_at"),
+    finishedBy: integer("finished_by").references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("sales_orders_so_number_idx").on(table.soNumber)]
@@ -332,6 +334,8 @@ export const locationStockEventTypeEnum = pgEnum("location_stock_event_type", [
   "MOVE",
   "DEFAULT_MOVE",
   "ADJUSTMENT",
+  "RELEASE",
+  "CLAIM",
 ]);
 
 export const locationStockEvents = pgTable("location_stock_events", {

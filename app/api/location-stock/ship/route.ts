@@ -11,12 +11,11 @@ import {
 } from "@/db/schema";
 import { db } from "@/lib/db";
 import { eq, and, or, sql } from "drizzle-orm";
-import { getSession } from "@/lib/auth";
+import { getSession, hasRole } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { adjustLocationStock } from "@/lib/locationStock";
-import { hasRole } from "@/lib/auth";
-
-
+import { getShippedQuantity } from "@/lib/shippedQuantity";
+import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
@@ -27,20 +26,15 @@ function extractSku(label: string): string | null {
   return parts[0]?.trim() || null;
 }
 
+
+
 // PATCH /api/location-stock/ship
 // body: { soNumber, label, quantity }
 //
-// `label` can be a real pallet label, the literal SKU*default barcode, or
-// just a bare SKU — all resolve to one target pallet record: either the
-// exact real pallet scanned (retire + leftover folds into the shared
-// default bucket), or the default bucket itself directly (simple
-// decrement — it IS the aggregate, nothing to retire).
-//
-// If the shipped quantity is NOT a whole multiple of the item's
-// palletCartonQty (i.e. a partial pallet — e.g. 6 of 16 cartons), an
-// additional PICKING event is logged with Outbound WH as its own source,
-// so the Sales Order page's "Picked From" breakdown correctly shows that
-// portion as having come from Outbound WH itself.
+// A shipment can only draw against stock that was actually picked
+// SPECIFICALLY for this SO (via the SO-tagged Picking flow) — not the
+// general Outbound WH pool shared across every order. This prevents
+// shipping stock that was picked for a different SO entirely.
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -48,12 +42,12 @@ export async function PATCH(req: NextRequest) {
   }
 
   const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
-if (!authorized) {
-  return NextResponse.json(
-    { error: "ANDA BUKAN CHECKER!" },
-    { status: 403 }
-  );
-}
+  if (!authorized) {
+    return NextResponse.json(
+      { error: "Only Checker and Admin roles can perform shipping" },
+      { status: 403 }
+    );
+  }
 
   const body = await req.json();
   const soNumber = sanitize(body.soNumber ?? "");
@@ -78,10 +72,13 @@ if (!authorized) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
 
-  const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.soNumber, soNumber));
-  if (!salesOrder) {
-    return NextResponse.json({ error: "Unknown sales order number" }, { status: 404 });
-  }
+const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.soNumber, soNumber));
+if (!salesOrder) {
+  return NextResponse.json({ error: "Unknown sales order number" }, { status: 404 });
+}
+if (salesOrder.finishedAt) {
+  return NextResponse.json({ error: "This sales order has already been finished" }, { status: 409 });
+}
 
   const [outboundWh] = await db.select().from(locations).where(eq(locations.type, "OUTBOUND_WH"));
   if (!outboundWh) {
@@ -97,25 +94,31 @@ if (!authorized) {
     return NextResponse.json({ error: `This item isn't on sales order ${soNumber}` }, { status: 400 });
   }
 
-  const [alreadyShippedRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int` })
-    .from(palletEvents)
-    .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
-    .where(
-      and(
-        eq(palletEvents.salesOrderId, salesOrder.id),
-        eq(pallets.itemId, item.id),
-        eq(palletEvents.type, "OUTBOUND")
-      )
-    );
+  const alreadyShipped = await getShippedQuantity(db, salesOrder.id, item.id);
+  const remainingOnOrder = orderLine.quantity - alreadyShipped;
 
-  const alreadyShipped = alreadyShippedRow?.total ?? 0;
-  const remaining = orderLine.quantity - alreadyShipped;
-
-  if (quantity > remaining) {
+  if (quantity > remainingOnOrder) {
     return NextResponse.json(
       {
-        error: `This would ship ${quantity}, but only ${remaining} remain on sales order ${soNumber} for this item (${orderLine.quantity} ordered, ${alreadyShipped} already shipped).`,
+        error: `This would ship ${quantity}, but only ${remainingOnOrder} remain on sales order ${soNumber} for this item (${orderLine.quantity} ordered, ${alreadyShipped} already shipped).`,
+      },
+      { status: 409 }
+    );
+  }
+
+  // The real constraint: how much was actually picked FOR THIS SO, minus
+  // whatever's already been shipped against it. This is independent of —
+  // and usually smaller than — the general Outbound WH stock number,
+  // since that pool is shared across every order.
+const availableForThisSo = await getPickedForSoQuantity(db, salesOrder.id, item.id);
+
+  if (quantity > availableForThisSo) {
+    return NextResponse.json(
+      {
+        error:
+          availableForThisSo <= 0
+            ? `Belum ada picking untuk ${soNumber} barang ${item.sku} !! Lakukan picking dulu !!.`
+            : `Hanya ${availableForThisSo} karton ${item.sku} sudah di picking untuk ${soNumber} !!. Pick lebih banyak dulu !!`,
       },
       { status: 409 }
     );
@@ -131,9 +134,7 @@ if (!authorized) {
 
   const targetIsDefaultBucket = exactPallet ? exactPallet.label === item.defaultCode : true;
 
-  // Whole vs. partial pallet — used to decide whether to log the extra
-  // Outbound-WH-sourced PICKING event.
-  const isPartialPallet = item.palletCartonQty > 0 && quantity % item.palletCartonQty !== 0;
+
 
   try {
     await db.transaction(async (tx) => {
@@ -279,20 +280,7 @@ if (!authorized) {
         userId: session.userId,
       });
 
-      // Partial pallet — log this portion as PICKING sourced from
-      // Outbound WH itself, so the Sales Order page's "Picked From"
-      // column correctly attributes it there rather than showing nothing.
-      if (isPartialPallet) {
-        await tx.insert(locationStockEvents).values({
-          type: "PICKING",
-          itemId: item.id,
-          sourceLocationId: outboundWh.id,
-          destinationLocationId: outboundWh.id,
-          salesOrderId: salesOrder.id,
-          quantity,
-          userId: session.userId,
-        });
-      }
+
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to ship";
@@ -302,6 +290,6 @@ if (!authorized) {
   return NextResponse.json({
     itemSku: item.sku,
     quantityShipped: quantity,
-    remainingOnOrder: remaining - quantity,
+    remainingOnOrder: remainingOnOrder - quantity,
   });
 }

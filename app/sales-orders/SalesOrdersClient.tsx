@@ -27,6 +27,7 @@ type Order = {
   items: OrderLine[];
   overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED";
   pickedByUsers: string[];
+  finishedAt: string | Date | null;
 };
 
 const OVERALL_STATUS_STYLES: Record<string, string> = {
@@ -47,12 +48,14 @@ export default function SalesOrdersClient({
   page,
   totalPages,
   totalCount,
+  isAdmin,
 }: {
   orders: Order[];
   allItems: ItemOption[];
   page: number;
   totalPages: number;
   totalCount: number;
+  isAdmin: boolean;
 }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -147,6 +150,7 @@ const sortedOrders = useMemo(() => {
     <th className="px-4 py-3 font-medium">Picked By</th>
     <th className="px-4 py-3 font-medium text-right">Items</th>
     <th className="px-4 py-3 font-medium w-16"></th>
+    <th className="px-4 py-3 font-medium w-32"></th>
   </tr>
 </thead>
           <tbody>
@@ -203,6 +207,9 @@ const sortedOrders = useMemo(() => {
       {isEditing ? "Cancel" : "Edit"}
     </button>
   </td>
+  <td className="px-4 py-3 text-right">
+  <FinishButton order={order} isAdmin={isAdmin} />
+</td>
 </tr>
                     {isOpen && (
                       <tr className="border-t border-zinc-800/60 bg-zinc-950/40">
@@ -508,11 +515,11 @@ function EditSalesOrderForm({
     const mergedLines = Array.from(merged.entries()).map(([sku, quantity]) => ({ sku, quantity }));
 
     setLoading(true);
-    const res = await fetch(`/api/sales-orders/${order.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ soNumber, orderDate, items: mergedLines }),
-    });
+const res = await fetch(`/api/sales-orders/${order.soNumber}`, {
+  method: "PATCH",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ soNumber, orderDate, items: mergedLines }),
+});
     setLoading(false);
 
     if (!res.ok) {
@@ -677,6 +684,71 @@ function ItemPicker({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function FinishButton({ order, isAdmin }: { order: Order; isAdmin: boolean }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleFinish() {
+    setLoading(true);
+    setError(null);
+    const res = await fetch(`/api/sales-orders/${order.soNumber}/finish`, { method: "POST" });
+    setLoading(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to finish");
+      return;
+    }
+    router.refresh();
+  }
+
+  async function handleUnfinish() {
+    setLoading(true);
+    setError(null);
+    const res = await fetch(`/api/sales-orders/${order.soNumber}/unfinish`, { method: "POST" });
+    setLoading(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to undo");
+      return;
+    }
+    router.refresh();
+  }
+
+  if (order.finishedAt) {
+    return (
+      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300">
+          Finished
+        </span>
+        {isAdmin && (
+          <button
+            onClick={handleUnfinish}
+            disabled={loading}
+            className="text-xs text-red-400 hover:underline disabled:opacity-50"
+          >
+            {loading ? "..." : "Undo"}
+          </button>
+        )}
+        {error && <span className="text-[10px] text-red-400">{error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+      <button
+        onClick={handleFinish}
+        disabled={loading}
+        className="text-xs text-amber-500 hover:underline disabled:opacity-50"
+      >
+        {loading ? "..." : "Confirm Finish"}
+      </button>
+      {error && <span className="text-[10px] text-red-400">{error}</span>}
     </div>
   );
 }
