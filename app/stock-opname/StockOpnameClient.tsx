@@ -158,7 +158,9 @@ type ReportItem = {
   itemSku: string;
   itemName: string;
   palletCartonQty: number;
+  systemQty: number | null;      // NEW
   countedQty: number | null;
+  difference: number | null;     // NEW
   countedAt: string | null;
   countedByUsername: string | null;
 };
@@ -227,7 +229,9 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   <th className="py-2 font-medium">Product</th>
                   <th className="py-2 font-medium text-right">Pallet Qty</th>
                   <th className="py-2 font-medium text-right">Carton Qty</th>
-                  <th className="py-2 font-medium">By</th>
+                  <th className="py-2 font-medium text-right">System Qty</th>{/* NEW */}
+                  <th className="py-2 font-medium text-right">Diff</th>{/* NEW */}
+                  <th className="py-2 font-medium text-right">By</th>
                 </tr>
               </thead>
               <tbody>
@@ -260,7 +264,28 @@ function OpnameSessionRow({ session }: { session: Session }) {
                           <td className="py-1.5 text-right font-mono">
                             {(item.countedQty ?? 0).toLocaleString()}
                           </td>
-                          <td className="py-1.5 text-zinc-500">{item.countedByUsername ?? "—"}</td>
+                          <td className="py-1.5 text-right font-mono">
+  {(item.countedQty ?? 0).toLocaleString()}
+</td>
+
+<td className="py-1.5 text-right font-mono">
+  {item.difference != null ? (
+    <span
+      className={
+        item.difference === 0
+          ? "text-zinc-500"
+          : item.difference > 0
+          ? "text-emerald-500"
+          : "text-red-400"
+      }
+    >
+      {item.difference > 0 ? `+${item.difference}` : item.difference}
+    </span>
+  ) : (
+    "—"
+  )}
+</td>
+<td className="py-1.5 text-zinc-500 text-right">{item.countedByUsername ?? "—"}</td>
                         </tr>
                       );
                     })

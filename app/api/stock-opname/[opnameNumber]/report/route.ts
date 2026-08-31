@@ -34,20 +34,22 @@ export async function GET(
     .where(eq(stockOpnameLocations.opnameNumber, opnameNumber))
     .orderBy(locations.area, locations.x, locations.y);
 
-  const countedRows = await db
-    .select({
-      locationId: stockOpnameItems.locationId,
-      itemSku: items.sku,
-      itemName: items.name,
-      palletCartonQty: items.palletCartonQty,
-      countedQty: stockOpnameItems.countedQty,
-      countedAt: stockOpnameItems.countedAt,
-      countedByUsername: users.username,
-    })
-    .from(stockOpnameItems)
-    .innerJoin(items, eq(stockOpnameItems.itemId, items.id))
-    .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
-    .where(and(eq(stockOpnameItems.opnameNumber, opnameNumber), isNotNull(stockOpnameItems.countedQty)));
+const countedRows = await db
+  .select({
+    locationId: stockOpnameItems.locationId,
+    itemSku: items.sku,
+    itemName: items.name,
+    palletCartonQty: items.palletCartonQty,
+    systemQty: stockOpnameItems.systemQty,       // NEW
+    countedQty: stockOpnameItems.countedQty,
+    difference: stockOpnameItems.difference,     // NEW
+    countedAt: stockOpnameItems.countedAt,
+    countedByUsername: users.username,
+  })
+  .from(stockOpnameItems)
+  .innerJoin(items, eq(stockOpnameItems.itemId, items.id))
+  .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
+  .where(and(eq(stockOpnameItems.opnameNumber, opnameNumber), isNotNull(stockOpnameItems.countedQty)));
 
   const countedByLocation = new Map<number, typeof countedRows>();
   for (const row of countedRows) {
@@ -60,14 +62,16 @@ export async function GET(
     return {
       locationCode: loc.locationCode,
       counted: counts.length > 0,
-      items: counts.map((c) => ({
-        itemSku: c.itemSku,
-        itemName: c.itemName,
-        palletCartonQty: c.palletCartonQty,
-        countedQty: c.countedQty,
-        countedAt: c.countedAt,
-        countedByUsername: c.countedByUsername,
-      })),
+ items: counts.map((c) => ({
+  itemSku: c.itemSku,
+  itemName: c.itemName,
+  palletCartonQty: c.palletCartonQty,
+  systemQty: c.systemQty,       // NEW
+  countedQty: c.countedQty,
+  difference: c.difference,     // NEW
+  countedAt: c.countedAt,
+  countedByUsername: c.countedByUsername,
+})),
     };
   });
 
