@@ -309,7 +309,7 @@ function OpnameSessionRow({ session }: { session: Session }) {
                         <td className="py-1.5 text-right font-mono text-zinc-400">
                           {item.systemQty.toLocaleString()}
                         </td>
-                        <td className="py-1.5 text-right font-mono">{item.countedQty.toLocaleString()}</td>
+                        <td className="py-1.5 text-right font-mono">{(item.countedQty ?? 0).toLocaleString()}</td>
                         <td className="py-1.5 text-right">
                           <DifferenceBadge difference={item.difference} />
                         </td>
