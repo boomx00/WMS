@@ -48,6 +48,8 @@ type ReportRow = {
   loc: string;
   kodeMaterial: string;
   skuAwal: string;
+  systemSkuAtLocation: string | null;
+  skuMatch: "MATCH" | "MISMATCH" | null;
   palet: number | null;
   boxPerPalet: number | null;
   totalBox: number | null;
@@ -112,13 +114,23 @@ export async function POST(req: NextRequest) {
 
   const allItems = await db.select().from(items);
   const itemBySku = new Map(allItems.map((i) => [i.sku.trim().toUpperCase(), i]));
+  const itemById = new Map(allItems.map((i) => [i.id, i]));
 
   const stockRows = await db.select().from(locationStock);
   const stockByLocationAndItem = new Map(stockRows.map((s) => [`${s.locationId}:${s.itemId}`, s.quantity]));
 
   const stockTotalByLocation = new Map<number, number>();
+  // What the system actually thinks is at each location — independent of
+  // whatever the file's Kode Material claims. This is the "ground truth"
+  // to compare the file against, not just a lookup keyed by Kode Material.
+  const systemSkusByLocation = new Map<number, string[]>();
   for (const s of stockRows) {
     stockTotalByLocation.set(s.locationId, (stockTotalByLocation.get(s.locationId) ?? 0) + s.quantity);
+    if (s.quantity === 0) continue;
+    const item = itemById.get(s.itemId);
+    if (!item) continue;
+    if (!systemSkusByLocation.has(s.locationId)) systemSkusByLocation.set(s.locationId, []);
+    systemSkusByLocation.get(s.locationId)!.push(item.sku);
   }
 
   const report: ReportRow[] = normalizedRows.map((row, idx) => {
@@ -132,13 +144,40 @@ export async function POST(req: NextRequest) {
     const base = { rowNumber: idx + 2, loc, kodeMaterial, skuAwal, palet, boxPerPalet, totalBox };
 
     if (!loc) {
-      return { ...base, systemQty: null, difference: null, status: "INVALID_ROW" as const };
+      return {
+        ...base,
+        systemSkuAtLocation: null,
+        skuMatch: null,
+        systemQty: null,
+        difference: null,
+        status: "INVALID_ROW" as const,
+      };
     }
 
     const location = locationByCode.get(loc.toUpperCase());
     if (!location) {
-      return { ...base, systemQty: null, difference: null, status: "UNKNOWN_LOCATION" as const };
+      return {
+        ...base,
+        systemSkuAtLocation: null,
+        skuMatch: null,
+        systemQty: null,
+        difference: null,
+        status: "UNKNOWN_LOCATION" as const,
+      };
     }
+
+    // Ground truth: whatever the system's location_stock actually has
+    // recorded at this location, regardless of what Kode Material claims.
+    // This is what the file is really being checked against.
+    const skusHere = systemSkusByLocation.get(location.id) ?? [];
+    const systemSkuAtLocation = skusHere.length > 0 ? skusHere.join(", ") : "—";
+    const skuMatch: "MATCH" | "MISMATCH" = !kodeMaterial
+      ? skusHere.length === 0
+        ? "MATCH"
+        : "MISMATCH"
+      : skusHere.some((s) => s.toUpperCase() === kodeMaterial.toUpperCase())
+        ? "MATCH"
+        : "MISMATCH";
 
     // Kode Material is empty ("N/A" in the source file) — this means the
     // slot is genuinely empty in real life, not that a row is malformed.
@@ -152,6 +191,8 @@ export async function POST(req: NextRequest) {
       const difference = fileQty - systemQty;
       return {
         ...base,
+        systemSkuAtLocation,
+        skuMatch,
         systemQty,
         difference,
         status: difference === 0 ? ("MATCH" as const) : ("MISMATCH" as const),
@@ -159,12 +200,26 @@ export async function POST(req: NextRequest) {
     }
 
     if (totalBox === null) {
-      return { ...base, systemQty: null, difference: null, status: "INVALID_ROW" as const };
+      return {
+        ...base,
+        systemSkuAtLocation,
+        skuMatch,
+        systemQty: null,
+        difference: null,
+        status: "INVALID_ROW" as const,
+      };
     }
 
     const item = itemBySku.get(kodeMaterial.toUpperCase());
     if (!item) {
-      return { ...base, systemQty: null, difference: null, status: "UNKNOWN_SKU" as const };
+      return {
+        ...base,
+        systemSkuAtLocation,
+        skuMatch,
+        systemQty: null,
+        difference: null,
+        status: "UNKNOWN_SKU" as const,
+      };
     }
 
     const systemQty = stockByLocationAndItem.get(`${location.id}:${item.id}`) ?? 0;
@@ -172,6 +227,8 @@ export async function POST(req: NextRequest) {
 
     return {
       ...base,
+      systemSkuAtLocation,
+      skuMatch,
       systemQty,
       difference,
       status: difference === 0 ? ("MATCH" as const) : ("MISMATCH" as const),

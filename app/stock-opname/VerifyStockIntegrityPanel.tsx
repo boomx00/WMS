@@ -7,6 +7,8 @@ type ReportRow = {
   loc: string;
   kodeMaterial: string;
   skuAwal: string;
+  systemSkuAtLocation: string | null;
+  skuMatch: "MATCH" | "MISMATCH" | null;
   palet: number | null;
   boxPerPalet: number | null;
   totalBox: number | null;
@@ -86,11 +88,12 @@ export default function VerifyStockIntegrityPanel() {
         Upload an Excel file with columns <span className="font-mono">LOC</span>,{" "}
         <span className="font-mono">Kode Material</span>, <span className="font-mono">SKU AWAL</span>,{" "}
         <span className="font-mono">PALET</span>, <span className="font-mono">BOX/PALET</span>, and{" "}
-        <span className="font-mono">TOTAL BOX</span>. Each row's TOTAL BOX is checked against the live system
-        quantity for that location + SKU (matched on Kode Material = current SKU). SKU AWAL is shown for
-        reference only and isn't used for matching. A row marked "N/A" / "KOSONG" means that slot is genuinely
-        empty in real life — it's still checked, against whether the system also shows zero stock at that
-        location. This is a read-only check — nothing gets changed.
+        <span className="font-mono">TOTAL BOX</span>. Kode Material and SKU Awal (from the file) sit on the
+        left; System SKU — whatever the system actually has recorded at that location, independent of what
+        the file claims — sits on the right, so you can see exactly what it's being checked against. TOTAL
+        BOX is compared against the live system quantity for the matched item. A row marked "N/A" / "KOSONG"
+        means that slot is genuinely empty in real life — it's still checked, against whether the system also
+        shows zero stock at that location. This is a read-only check — nothing gets changed.
       </p>
 
       <div className="flex items-center gap-3 mb-6">
@@ -154,6 +157,8 @@ export default function VerifyStockIntegrityPanel() {
                   <th className="px-3 py-2 font-medium">LOC</th>
                   <th className="px-3 py-2 font-medium">Kode Material</th>
                   <th className="px-3 py-2 font-medium">SKU Awal</th>
+                  <th className="px-3 py-2 font-medium">System SKU</th>
+                  <th className="px-3 py-2 font-medium">SKU Match</th>
                   <th className="px-3 py-2 font-medium text-right">Palet</th>
                   <th className="px-3 py-2 font-medium text-right">Box/Palet</th>
                   <th className="px-3 py-2 font-medium text-right">Total Box (File)</th>
@@ -165,7 +170,7 @@ export default function VerifyStockIntegrityPanel() {
               <tbody>
                 {filteredReport.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-3 py-6 text-center text-zinc-600">
+                    <td colSpan={12} className="px-3 py-6 text-center text-zinc-600">
                       No rows in this category.
                     </td>
                   </tr>
@@ -176,6 +181,16 @@ export default function VerifyStockIntegrityPanel() {
                       <td className="px-3 py-1.5 font-mono text-amber-500">{row.loc || "—"}</td>
                       <td className="px-3 py-1.5 font-mono text-zinc-300">{row.kodeMaterial || "—"}</td>
                       <td className="px-3 py-1.5 font-mono text-zinc-500">{row.skuAwal || "—"}</td>
+                      <td className="px-3 py-1.5 font-mono text-zinc-300">{row.systemSkuAtLocation ?? "—"}</td>
+                      <td className="px-3 py-1.5">
+                        {row.skuMatch === null ? (
+                          <span className="text-zinc-700">—</span>
+                        ) : row.skuMatch === "MATCH" ? (
+                          <span className="text-emerald-400">Match</span>
+                        ) : (
+                          <span className="text-red-400">Mismatch</span>
+                        )}
+                      </td>
                       <td className="px-3 py-1.5 text-right font-mono text-zinc-400">{row.palet ?? "—"}</td>
                       <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
                         {row.boxPerPalet ?? "—"}
