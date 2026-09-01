@@ -9,6 +9,7 @@ type ReportRow = {
   skuAwal: string;
   systemSkuAtLocation: string | null;
   skuMatch: "MATCH" | "MISMATCH" | null;
+  totalSystemInventory: number | null;
   palet: number | null;
   boxPerPalet: number | null;
   totalBox: number | null;
@@ -159,10 +160,11 @@ export default function VerifyStockIntegrityPanel() {
                   <th className="px-3 py-2 font-medium">SKU Awal</th>
                   <th className="px-3 py-2 font-medium">System SKU</th>
                   <th className="px-3 py-2 font-medium">SKU Match</th>
+                  <th className="px-3 py-2 font-medium text-right">Total System Inventory</th>
                   <th className="px-3 py-2 font-medium text-right">Palet</th>
                   <th className="px-3 py-2 font-medium text-right">Box/Palet</th>
                   <th className="px-3 py-2 font-medium text-right">Total Box (File)</th>
-                  <th className="px-3 py-2 font-medium text-right">System Qty</th>
+                  <th className="px-3 py-2 font-medium text-right">System Qty (This Location)</th>
                   <th className="px-3 py-2 font-medium text-right">Difference</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                 </tr>
@@ -170,7 +172,7 @@ export default function VerifyStockIntegrityPanel() {
               <tbody>
                 {filteredReport.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="px-3 py-6 text-center text-zinc-600">
+                    <td colSpan={13} className="px-3 py-6 text-center text-zinc-600">
                       No rows in this category.
                     </td>
                   </tr>
@@ -190,6 +192,9 @@ export default function VerifyStockIntegrityPanel() {
                         ) : (
                           <span className="text-red-400">Mismatch</span>
                         )}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
+                        {row.totalSystemInventory ?? "—"}
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono text-zinc-400">{row.palet ?? "—"}</td>
                       <td className="px-3 py-1.5 text-right font-mono text-zinc-400">

@@ -34,10 +34,10 @@ async function getSessions() {
     const total = totalMap.get(s.opnameNumber) ?? 0;
     const counted = countedMap.get(s.opnameNumber) ?? 0;
     const status = s.completedAt
-  ? "DONE"
-  : total === 0 || counted === 0
-  ? "PENDING"
-  : "IN_PROGRESS";
+      ? "DONE"
+      : total === 0 || counted === 0
+        ? "PENDING"
+        : "IN_PROGRESS";
     return {
       ...s,
       assignedToUsername: s.assignedTo ? usersById.get(s.assignedTo) ?? null : null,
@@ -57,14 +57,16 @@ export default async function StockOpnamePage() {
   const [sessions, userList] = await Promise.all([getSessions(), getUsers()]);
 
   return (
-    <div className="p-8 max-w-4xl">
-      <header className="mb-8">
+    <div className="p-8">
+      <header className="mb-8 max-w-4xl">
         <h1 className="text-2xl font-semibold">Stock Opname</h1>
         <p className="text-zinc-500 text-sm mt-1">
           Physical inventory counts, checked against system-recorded stock.
         </p>
       </header>
 
+      {/* Not wrapped in max-w-4xl — the Verify Stock Integrity tab needs
+          the full width of the main content area (up to the sidebar). */}
       <StockOpnameClient sessions={sessions} users={userList} />
     </div>
   );

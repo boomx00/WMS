@@ -50,6 +50,7 @@ type ReportRow = {
   skuAwal: string;
   systemSkuAtLocation: string | null;
   skuMatch: "MATCH" | "MISMATCH" | null;
+  totalSystemInventory: number | null;
   palet: number | null;
   boxPerPalet: number | null;
   totalBox: number | null;
@@ -124,8 +125,12 @@ export async function POST(req: NextRequest) {
   // whatever the file's Kode Material claims. This is the "ground truth"
   // to compare the file against, not just a lookup keyed by Kode Material.
   const systemSkusByLocation = new Map<number, string[]>();
+  // Total system inventory per item, across every location — separate
+  // from systemQty (which is scoped to just the one location on this row).
+  const totalInventoryByItemId = new Map<number, number>();
   for (const s of stockRows) {
     stockTotalByLocation.set(s.locationId, (stockTotalByLocation.get(s.locationId) ?? 0) + s.quantity);
+    totalInventoryByItemId.set(s.itemId, (totalInventoryByItemId.get(s.itemId) ?? 0) + s.quantity);
     if (s.quantity === 0) continue;
     const item = itemById.get(s.itemId);
     if (!item) continue;
@@ -148,6 +153,7 @@ export async function POST(req: NextRequest) {
         ...base,
         systemSkuAtLocation: null,
         skuMatch: null,
+        totalSystemInventory: null,
         systemQty: null,
         difference: null,
         status: "INVALID_ROW" as const,
@@ -160,6 +166,7 @@ export async function POST(req: NextRequest) {
         ...base,
         systemSkuAtLocation: null,
         skuMatch: null,
+        totalSystemInventory: null,
         systemQty: null,
         difference: null,
         status: "UNKNOWN_LOCATION" as const,
@@ -193,6 +200,7 @@ export async function POST(req: NextRequest) {
         ...base,
         systemSkuAtLocation,
         skuMatch,
+        totalSystemInventory: null,
         systemQty,
         difference,
         status: difference === 0 ? ("MATCH" as const) : ("MISMATCH" as const),
@@ -204,6 +212,7 @@ export async function POST(req: NextRequest) {
         ...base,
         systemSkuAtLocation,
         skuMatch,
+        totalSystemInventory: null,
         systemQty: null,
         difference: null,
         status: "INVALID_ROW" as const,
@@ -216,6 +225,7 @@ export async function POST(req: NextRequest) {
         ...base,
         systemSkuAtLocation,
         skuMatch,
+        totalSystemInventory: null,
         systemQty: null,
         difference: null,
         status: "UNKNOWN_SKU" as const,
@@ -224,11 +234,13 @@ export async function POST(req: NextRequest) {
 
     const systemQty = stockByLocationAndItem.get(`${location.id}:${item.id}`) ?? 0;
     const difference = totalBox - systemQty;
+    const totalSystemInventory = totalInventoryByItemId.get(item.id) ?? 0;
 
     return {
       ...base,
       systemSkuAtLocation,
       skuMatch,
+      totalSystemInventory,
       systemQty,
       difference,
       status: difference === 0 ? ("MATCH" as const) : ("MISMATCH" as const),
