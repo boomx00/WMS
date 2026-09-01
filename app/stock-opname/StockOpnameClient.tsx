@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import VerifyStockIntegrityPanel from "./VerifyStockIntegrityPanel";
 
 type Session = {
   opnameNumber: string;
@@ -27,6 +28,7 @@ export default function StockOpnameClient({
   sessions: Session[];
   users: { username: string }[];
 }) {
+  const [activeTab, setActiveTab] = useState<"opname" | "verify">("opname");
   const router = useRouter();
   const [opnameNumber, setOpnameNumber] = useState("");
   const [locationCodes, setLocationCodes] = useState("");
@@ -76,7 +78,20 @@ export default function StockOpnameClient({
 
   return (
     <div>
-      <form onSubmit={handleCreate} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4 mb-8">
+      <div className="flex gap-1 mb-6 border-b border-zinc-800">
+        <TabButton label="Stock Opname" active={activeTab === "opname"} onClick={() => setActiveTab("opname")} />
+        <TabButton
+          label="Verify Stock Integrity"
+          active={activeTab === "verify"}
+          onClick={() => setActiveTab("verify")}
+        />
+      </div>
+
+      {activeTab === "verify" ? (
+        <VerifyStockIntegrityPanel />
+      ) : (
+        <div>
+          <form onSubmit={handleCreate} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4 mb-8">
         <div>
           <label className="block text-xs text-zinc-500 mb-1">Opname Number</label>
           <input
@@ -150,17 +165,33 @@ export default function StockOpnameClient({
           sessions.map((s) => <OpnameSessionRow key={s.opnameNumber} session={s} />)
         )}
       </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+        active
+          ? "border-amber-500 text-amber-500"
+          : "border-transparent text-zinc-500 hover:text-zinc-300"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
 type ReportItem = {
   itemSku: string;
   itemName: string;
-  palletCartonQty: number;
-  systemQty: number | null;      // NEW
-  countedQty: number | null;
-  difference: number | null;     // NEW
+  systemQty: number;
+  countedQty: number;
+  difference: number;
   countedAt: string | null;
   countedByUsername: string | null;
 };
@@ -174,10 +205,27 @@ type ReportResponse = {
   report: ReportLocation[];
 };
 
+function DifferenceBadge({ difference }: { difference: number }) {
+  if (difference === 0) {
+    return <span className="text-emerald-400 font-mono">Match</span>;
+  }
+  const sign = difference > 0 ? "+" : "";
+  return (
+    <span className={`font-mono ${difference > 0 ? "text-amber-400" : "text-red-400"}`}>
+      {sign}
+      {difference.toLocaleString()}
+    </span>
+  );
+}
+
 function OpnameSessionRow({ session }: { session: Session }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<ReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustResult, setAdjustResult] = useState<string | null>(null);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
 
   async function toggle() {
     if (!open && !report) {
@@ -187,6 +235,34 @@ function OpnameSessionRow({ session }: { session: Session }) {
       setLoading(false);
     }
     setOpen((prev) => !prev);
+  }
+
+  async function handleAdjust() {
+    setAdjusting(true);
+    setAdjustError(null);
+    setAdjustResult(null);
+
+    const res = await fetch(`/api/stock-opname/${session.opnameNumber}/adjust`, {
+      method: "POST",
+    });
+    setAdjusting(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setAdjustError(data.error ?? "Failed to adjust inventory");
+      return;
+    }
+
+    const data = await res.json();
+    setAdjustResult(
+      `Applied ${data.applied} adjustment(s), ${data.skipped} already matched${
+        data.failed > 0 ? `, ${data.failed} failed (see console)` : ""
+      }.`
+    );
+    if (data.failed > 0) {
+      console.warn("Stock opname adjust failures:", data.failures);
+    }
+    router.refresh();
   }
 
   return (
@@ -216,6 +292,20 @@ function OpnameSessionRow({ session }: { session: Session }) {
 
       {open && (
         <div className="px-4 pb-4">
+          {session.status === "DONE" && (
+            <div className="mb-4 flex items-center gap-3">
+              <button
+                onClick={handleAdjust}
+                disabled={adjusting}
+                className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+              >
+                {adjusting ? "Adjusting..." : "Adjust"}
+              </button>
+              {adjustResult && <span className="text-xs text-emerald-400">{adjustResult}</span>}
+              {adjustError && <span className="text-xs text-red-400">{adjustError}</span>}
+            </div>
+          )}
+
           {loading ? (
             <p className="text-xs text-zinc-600">Loading...</p>
           ) : !report ? (
@@ -227,11 +317,10 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   <th className="py-2 font-medium">Location</th>
                   <th className="py-2 font-medium">SKU</th>
                   <th className="py-2 font-medium">Product</th>
-                  <th className="py-2 font-medium text-right">Pallet Qty</th>
-                  <th className="py-2 font-medium text-right">Carton Qty</th>
-                  <th className="py-2 font-medium text-right">System Qty</th>{/* NEW */}
-                  <th className="py-2 font-medium text-right">Diff</th>{/* NEW */}
-                  <th className="py-2 font-medium text-right">By</th>
+                  <th className="py-2 font-medium text-right">System Qty</th>
+                  <th className="py-2 font-medium text-right">Counted Qty</th>
+                  <th className="py-2 font-medium text-right">Difference</th>
+                  <th className="py-2 font-medium">By</th>
                 </tr>
               </thead>
               <tbody>
@@ -239,56 +328,26 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   loc.items.length === 0 ? (
                     <tr key={loc.locationCode} className="border-t border-zinc-800/60">
                       <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
-                      <td colSpan={5} className="py-1.5 text-zinc-700">
+                      <td colSpan={6} className="py-1.5 text-zinc-700">
                         Not counted yet
                       </td>
                     </tr>
                   ) : (
-                    loc.items.map((item, i) => {
-                      const palletQty =
-                        item.countedQty != null && item.palletCartonQty > 0
-                          ? item.countedQty / item.palletCartonQty
-                          : null;
-                      return (
-                        <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60">
-                          <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
-                          <td className="py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
-                          <td className="py-1.5 text-zinc-500">{item.itemName}</td>
-                          <td className="py-1.5 text-right font-mono">
-                            {palletQty !== null
-                              ? Number.isInteger(palletQty)
-                                ? palletQty.toLocaleString()
-                                : palletQty.toFixed(1)
-                              : "—"}
-                          </td>
-                          <td className="py-1.5 text-right font-mono">
-                            {(item.countedQty ?? 0).toLocaleString()}
-                          </td>
-                          <td className="py-1.5 text-right font-mono">
-  {(item.systemQty ?? 0).toLocaleString()}
-</td>
-
-<td className="py-1.5 text-right font-mono">
-  {item.difference != null ? (
-    <span
-      className={
-        item.difference === 0
-          ? "text-zinc-500"
-          : item.difference > 0
-          ? "text-emerald-500"
-          : "text-red-400"
-      }
-    >
-      {item.difference > 0 ? `+${item.difference}` : item.difference}
-    </span>
-  ) : (
-    "—"
-  )}
-</td>
-<td className="py-1.5 text-zinc-500 text-right">{item.countedByUsername ?? "—"}</td>
-                        </tr>
-                      );
-                    })
+                    loc.items.map((item, i) => (
+                      <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60">
+                        <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
+                        <td className="py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
+                        <td className="py-1.5 text-zinc-500">{item.itemName}</td>
+                        <td className="py-1.5 text-right font-mono text-zinc-400">
+                          {item.systemQty.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 text-right font-mono">{item.countedQty.toLocaleString()}</td>
+                        <td className="py-1.5 text-right">
+                          <DifferenceBadge difference={item.difference} />
+                        </td>
+                        <td className="py-1.5 text-zinc-500">{item.countedByUsername ?? "—"}</td>
+                      </tr>
+                    ))
                   )
                 )}
               </tbody>
