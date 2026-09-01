@@ -88,7 +88,9 @@ export default function VerifyStockIntegrityPanel() {
         <span className="font-mono">PALET</span>, <span className="font-mono">BOX/PALET</span>, and{" "}
         <span className="font-mono">TOTAL BOX</span>. Each row's TOTAL BOX is checked against the live system
         quantity for that location + SKU (matched on Kode Material = current SKU). SKU AWAL is shown for
-        reference only and isn't used for matching. This is a read-only check — nothing gets changed.
+        reference only and isn't used for matching. A row marked "N/A" / "KOSONG" means that slot is genuinely
+        empty in real life — it's still checked, against whether the system also shows zero stock at that
+        location. This is a read-only check — nothing gets changed.
       </p>
 
       <div className="flex items-center gap-3 mb-6">

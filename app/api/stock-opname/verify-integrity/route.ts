@@ -31,6 +31,18 @@ function toNumber(value: unknown): number | null {
   return isNaN(n) ? null : n;
 }
 
+// Source files mark a blank cell with sentinel text rather than leaving it
+// empty — "N/A" in Kode Material, "KOSONG" ("empty" in Indonesian) in SKU
+// AWAL. Either marker, in either column, is normalized to "" so these rows
+// are treated as genuinely missing data (INVALID_ROW) rather than as a
+// real material code that just doesn't match anything (UNKNOWN_SKU).
+const EMPTY_MARKERS = new Set(["N/A", "NA", "KOSONG", "-", ""]);
+
+function cleanValue(raw: unknown): string {
+  const v = String(raw ?? "").trim();
+  return EMPTY_MARKERS.has(v.toUpperCase()) ? "" : v;
+}
+
 type ReportRow = {
   rowNumber: number;
   loc: string;
@@ -104,23 +116,50 @@ export async function POST(req: NextRequest) {
   const stockRows = await db.select().from(locationStock);
   const stockByLocationAndItem = new Map(stockRows.map((s) => [`${s.locationId}:${s.itemId}`, s.quantity]));
 
+  const stockTotalByLocation = new Map<number, number>();
+  for (const s of stockRows) {
+    stockTotalByLocation.set(s.locationId, (stockTotalByLocation.get(s.locationId) ?? 0) + s.quantity);
+  }
+
   const report: ReportRow[] = normalizedRows.map((row, idx) => {
-    const loc = String(row.loc ?? "").trim();
-    const kodeMaterial = String(row.kodeMaterial ?? "").trim();
-    const skuAwal = String(row.skuAwal ?? "").trim();
+    const loc = cleanValue(row.loc);
+    const kodeMaterial = cleanValue(row.kodeMaterial);
+    const skuAwal = cleanValue(row.skuAwal);
     const palet = toNumber(row.palet);
     const boxPerPalet = toNumber(row.boxPerPalet);
     const totalBox = toNumber(row.totalBox);
 
     const base = { rowNumber: idx + 2, loc, kodeMaterial, skuAwal, palet, boxPerPalet, totalBox };
 
-    if (!loc || !kodeMaterial || totalBox === null) {
+    if (!loc) {
       return { ...base, systemQty: null, difference: null, status: "INVALID_ROW" as const };
     }
 
     const location = locationByCode.get(loc.toUpperCase());
     if (!location) {
       return { ...base, systemQty: null, difference: null, status: "UNKNOWN_LOCATION" as const };
+    }
+
+    // Kode Material is empty ("N/A" in the source file) — this means the
+    // slot is genuinely empty in real life, not that a row is malformed.
+    // The useful check here is different: does the system also think
+    // nothing is stored at this location? If the system still has stock
+    // recorded here, that's a real discrepancy (physical count says empty,
+    // system disagrees) — not something to silently skip.
+    if (!kodeMaterial) {
+      const systemQty = stockTotalByLocation.get(location.id) ?? 0;
+      const fileQty = totalBox ?? 0;
+      const difference = fileQty - systemQty;
+      return {
+        ...base,
+        systemQty,
+        difference,
+        status: difference === 0 ? ("MATCH" as const) : ("MISMATCH" as const),
+      };
+    }
+
+    if (totalBox === null) {
+      return { ...base, systemQty: null, difference: null, status: "INVALID_ROW" as const };
     }
 
     const item = itemBySku.get(kodeMaterial.toUpperCase());
