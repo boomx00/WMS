@@ -7,44 +7,60 @@ type DriverSummary = {
   username: string;
   inboundCount: number;
   inboundQty: number;
-  pickingCount: number;
-  pickingQty: number;
+  outboundCount: number;
+  outboundQty: number;
   otherCount: number;
   otherQty: number;
   totalCount: number;
   lastActivityAt: string | null;
 };
 
-type DriverEvent = {
+type Category = "INBOUND" | "OUTBOUND" | "OTHER";
+
+type EventItem = {
   id: number;
-  type: string;
-  category: "INBOUND" | "PICKING" | "OTHER";
   itemSku: string;
   itemName: string;
-  sourceCode: string | null;
-  destCode: string | null;
   quantity: number;
   createdAt: string;
 };
 
-type DriverDetail = {
-  username: string;
-  page: number;
-  totalPages: number;
-  totalCount: number;
-  events: DriverEvent[];
+type RouteGroup = {
+  from: string;
+  to: string;
+  count: number;
+  totalQty: number;
+  events: EventItem[];
 };
 
-const CATEGORY_STYLES: Record<string, string> = {
+type CategoryGroup = {
+  category: Category;
+  count: number;
+  totalQty: number;
+  routes: RouteGroup[];
+};
+
+type DriverDetail = {
+  username: string;
+  categories: CategoryGroup[];
+};
+
+const CATEGORY_LABELS: Record<Category, string> = {
+  INBOUND: "Inbound",
+  OUTBOUND: "Outbound",
+  OTHER: "Other (Perpindahan Lokasi)",
+};
+
+const CATEGORY_STYLES: Record<Category, string> = {
   INBOUND: "bg-emerald-950 text-emerald-300",
-  PICKING: "bg-sky-950 text-sky-300",
+  OUTBOUND: "bg-sky-950 text-sky-300",
   OTHER: "bg-zinc-800 text-zinc-400",
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  INBOUND: "Inbound",
-  PICKING: "Picking",
-  OTHER: "Other",
+const CATEGORY_HINTS: Record<Category, string> = {
+  INBOUND: "Floor → Rack",
+  OUTBOUND: "Rack or Floor → Outbound WH",
+  OTHER: "Everything else (rack-to-rack moves, etc.)",
 };
 
 function defaultRange() {
@@ -65,10 +81,13 @@ export default function DriverActivityPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<Record<number, DriverDetail>>({});
-  const [detailLoading, setDetailLoading] = useState<number | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [expandedDriverId, setExpandedDriverId] = useState<number | null>(null);
+  const [driverDetail, setDriverDetail] = useState<Record<number, DriverDetail>>({});
+  const [driverDetailLoading, setDriverDetailLoading] = useState<number | null>(null);
+  const [driverDetailError, setDriverDetailError] = useState<string | null>(null);
+
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [expandedRoutes, setExpandedRoutes] = useState<Set<string>>(new Set());
 
   const rangeIso = () => ({
     startIso: new Date(start).toISOString(),
@@ -78,8 +97,10 @@ export default function DriverActivityPanel() {
   async function handleFetch() {
     setLoading(true);
     setError(null);
-    setExpandedId(null);
-    setDetail({});
+    setExpandedDriverId(null);
+    setDriverDetail({});
+    setExpandedCategories(new Set());
+    setExpandedRoutes(new Set());
 
     const { startIso, endIso } = rangeIso();
     const res = await fetch(
@@ -97,50 +118,62 @@ export default function DriverActivityPanel() {
     setRows(await res.json());
   }
 
-  async function fetchDetailPage(userId: number, page: number, append: boolean) {
-    setDetailLoading(userId);
-    setDetailError(null);
+  async function toggleDriver(userId: number) {
+    if (expandedDriverId === userId) {
+      setExpandedDriverId(null);
+      return;
+    }
+    setExpandedDriverId(userId);
+
+    if (driverDetail[userId]) return;
+
+    setDriverDetailLoading(userId);
+    setDriverDetailError(null);
 
     const { startIso, endIso } = rangeIso();
     const res = await fetch(
-      `/api/analytics/driver-activity/${userId}?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}&page=${page}`
+      `/api/analytics/driver-activity/${userId}?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`
     );
 
-    setDetailLoading(null);
+    setDriverDetailLoading(null);
 
     if (!res.ok) {
       const data = await res.json();
-      setDetailError(data.error ?? "Failed to load driver's events");
+      setDriverDetailError(data.error ?? "Failed to load driver's activity");
       return;
     }
 
     const data: DriverDetail = await res.json();
-    setDetail((prev) => {
-      const existing = prev[userId];
-      const events = append && existing ? [...existing.events, ...data.events] : data.events;
-      return { ...prev, [userId]: { ...data, events } };
+    setDriverDetail((prev) => ({ ...prev, [userId]: data }));
+  }
+
+  function toggleCategory(userId: number, category: Category) {
+    const key = `${userId}:${category}`;
+    setExpandedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
     });
   }
 
-  function toggleExpand(userId: number) {
-    if (expandedId === userId) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(userId);
-    if (!detail[userId]) {
-      fetchDetailPage(userId, 1, false);
-    }
+  function toggleRoute(userId: number, category: Category, routeKey: string) {
+    const key = `${userId}:${category}:${routeKey}`;
+    setExpandedRoutes((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   return (
     <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
       <h2 className="text-sm font-medium mb-1">Driver Activity (v2)</h2>
       <p className="text-xs text-zinc-500 mb-4">
-        Forklift Driver activity sourced from Location Stock events.
-        Inbound = Floor → Rack, Picking = any pick/default-pick. Other
-        movement (rack-to-rack moves, adjustments, ship) is grouped as
-        Other rather than dropped.
+        Forklift Driver activity sourced from Location Stock events, classified purely by
+        location type: Inbound is Floor → Rack, Outbound is Rack or Floor → Outbound WH, Other
+        covers everything else (rack-to-rack moves / perpindahan lokasi).
       </p>
 
       <div className="flex items-end gap-3 mb-6 flex-wrap">
@@ -177,22 +210,23 @@ export default function DriverActivityPanel() {
         (rows.length === 0 ? (
           <p className="text-sm text-zinc-600">No Forklift Driver users found.</p>
         ) : (
-          <div className="border border-zinc-800 rounded-lg overflow-hidden">
+          <div className="border border-zinc-800 rounded-lg">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-zinc-900 text-zinc-500 text-left">
-                  <th className="px-4 py-3 font-medium">Driver</th>
+                  <th className="px-4 py-3 font-medium rounded-tl-lg">Driver</th>
                   <th className="px-4 py-3 font-medium text-right">Inbound</th>
-                  <th className="px-4 py-3 font-medium text-right">Picking</th>
+                  <th className="px-4 py-3 font-medium text-right">Outbound</th>
                   <th className="px-4 py-3 font-medium text-right">Other</th>
                   <th className="px-4 py-3 font-medium text-right">Total</th>
                   <th className="px-4 py-3 font-medium text-right">Last Activity</th>
-                  <th className="px-4 py-3 font-medium"></th>
+                  <th className="px-4 py-3 font-medium rounded-tr-lg"></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const d = detail[row.userId];
+                  const d = driverDetail[row.userId];
+                  const isOpen = expandedDriverId === row.userId;
                   return (
                     <Fragment key={row.userId}>
                       <tr className="border-t border-zinc-800 hover:bg-zinc-900/50">
@@ -202,8 +236,8 @@ export default function DriverActivityPanel() {
                           <span className="text-zinc-500 text-xs"> / {row.inboundQty.toLocaleString()}u</span>
                         </td>
                         <td className="px-4 py-3 text-right font-mono">
-                          {row.pickingCount.toLocaleString()}
-                          <span className="text-zinc-500 text-xs"> / {row.pickingQty.toLocaleString()}u</span>
+                          {row.outboundCount.toLocaleString()}
+                          <span className="text-zinc-500 text-xs"> / {row.outboundQty.toLocaleString()}u</span>
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-zinc-500">
                           {row.otherCount.toLocaleString()}
@@ -217,83 +251,38 @@ export default function DriverActivityPanel() {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
-                            onClick={() => toggleExpand(row.userId)}
+                            onClick={() => toggleDriver(row.userId)}
                             className="text-xs text-amber-500 hover:text-amber-400"
                           >
-                            {expandedId === row.userId ? "Hide" : "Details"}
+                            {isOpen ? "Hide" : "Details"}
                           </button>
                         </td>
                       </tr>
 
-                      {expandedId === row.userId && (
+                      {isOpen && (
                         <tr className="border-t border-zinc-800 bg-zinc-950/50">
-                          <td colSpan={7} className="px-4 py-4">
-                            {detailLoading === row.userId && !d ? (
-                              <p className="text-xs text-zinc-500">Loading events...</p>
-                            ) : detailError ? (
-                              <p className="text-xs text-red-400">{detailError}</p>
-                            ) : d && d.events.length === 0 ? (
-                              <p className="text-xs text-zinc-600">No events in this range.</p>
-                            ) : d ? (
-                              <div>
-                                <table className="w-full text-xs">
-                                  <thead>
-                                    <tr className="text-zinc-600 text-left">
-                                      <th className="px-2 py-1.5 font-medium">Category</th>
-                                      <th className="px-2 py-1.5 font-medium">Product</th>
-                                      <th className="px-2 py-1.5 font-medium">From</th>
-                                      <th className="px-2 py-1.5 font-medium">To</th>
-                                      <th className="px-2 py-1.5 font-medium text-right">Qty</th>
-                                      <th className="px-2 py-1.5 font-medium text-right">When</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {d.events.map((ev) => (
-                                      <tr key={ev.id} className="border-t border-zinc-900">
-                                        <td className="px-2 py-1.5">
-                                          <span
-                                            className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${CATEGORY_STYLES[ev.category]}`}
-                                          >
-                                            {CATEGORY_LABELS[ev.category]}
-                                          </span>
-                                        </td>
-                                        <td className="px-2 py-1.5">
-                                          <span className="font-mono text-zinc-300">{ev.itemSku}</span>{" "}
-                                          <span className="text-zinc-600">{ev.itemName}</span>
-                                        </td>
-                                        <td className="px-2 py-1.5 font-mono text-amber-500">
-                                          {ev.sourceCode ?? "—"}
-                                        </td>
-                                        <td className="px-2 py-1.5 font-mono text-amber-500">
-                                          {ev.destCode ?? "—"}
-                                        </td>
-                                        <td className="px-2 py-1.5 text-right font-mono">
-                                          {ev.quantity.toLocaleString()}
-                                        </td>
-                                        <td className="px-2 py-1.5 text-right text-zinc-500">
-                                          {new Date(ev.createdAt).toLocaleString()}
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-
-                                <div className="flex items-center justify-between mt-2">
-                                  <p className="text-[10px] text-zinc-600">
-                                    {d.events.length.toLocaleString()} of {d.totalCount.toLocaleString()} event(s)
-                                  </p>
-                                  {d.page < d.totalPages && (
-                                    <button
-                                      onClick={() => fetchDetailPage(row.userId, d.page + 1, true)}
-                                      disabled={detailLoading === row.userId}
-                                      className="text-[10px] text-amber-500 hover:text-amber-400 disabled:opacity-50"
-                                    >
-                                      {detailLoading === row.userId ? "Loading..." : "Load more"}
-                                    </button>
-                                  )}
+                          <td colSpan={7} className="p-0">
+                            <div className="w-full px-4 md:px-6 py-5">
+                              {driverDetailLoading === row.userId && !d ? (
+                                <p className="text-xs text-zinc-500">Loading activity...</p>
+                              ) : driverDetailError ? (
+                                <p className="text-xs text-red-400">{driverDetailError}</p>
+                              ) : d ? (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                  {d.categories.map((cat) => (
+                                    <CategoryCard
+                                      key={cat.category}
+                                      userId={row.userId}
+                                      cat={cat}
+                                      expandedCategories={expandedCategories}
+                                      expandedRoutes={expandedRoutes}
+                                      onToggleCategory={toggleCategory}
+                                      onToggleRoute={toggleRoute}
+                                    />
+                                  ))}
                                 </div>
-                              </div>
-                            ) : null}
+                              ) : null}
+                            </div>
                           </td>
                         </tr>
                       )}
@@ -304,6 +293,138 @@ export default function DriverActivityPanel() {
             </table>
           </div>
         ))}
+    </div>
+  );
+}
+
+function CategoryCard({
+  userId,
+  cat,
+  expandedCategories,
+  expandedRoutes,
+  onToggleCategory,
+  onToggleRoute,
+}: {
+  userId: number;
+  cat: CategoryGroup;
+  expandedCategories: Set<string>;
+  expandedRoutes: Set<string>;
+  onToggleCategory: (userId: number, category: Category) => void;
+  onToggleRoute: (userId: number, category: Category, routeKey: string) => void;
+}) {
+  const categoryKey = `${userId}:${cat.category}`;
+  const isOpen = expandedCategories.has(categoryKey);
+
+  return (
+    <div className="border border-zinc-800 rounded-lg bg-zinc-950/40 flex flex-col">
+      <button
+        onClick={() => onToggleCategory(userId, cat.category)}
+        className="w-full flex items-center justify-between p-3 text-left hover:bg-zinc-900/40 transition-colors"
+      >
+        <div>
+          <span
+            className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${CATEGORY_STYLES[cat.category]}`}
+          >
+            {CATEGORY_LABELS[cat.category]}
+          </span>
+          <p className="text-[10px] text-zinc-600 mt-1">{CATEGORY_HINTS[cat.category]}</p>
+        </div>
+        <div className="text-right">
+          <div className="text-sm font-mono text-zinc-300">{cat.totalQty.toLocaleString()}u</div>
+          <div className="text-[10px] text-zinc-600">{cat.count.toLocaleString()} txn</div>
+        </div>
+      </button>
+
+      {isOpen && (
+        <div className="border-t border-zinc-800 p-2 overflow-x-auto">
+          {cat.routes.length === 0 ? (
+            <p className="text-xs text-zinc-600 p-2">No activity in this range.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-zinc-600 text-left">
+                  <th className="px-2 py-1.5 font-medium">From</th>
+                  <th className="px-2 py-1.5 font-medium">To</th>
+                  <th className="px-2 py-1.5 font-medium">Item</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Qty</th>
+                  <th className="px-2 py-1.5 font-medium text-right">Txns</th>
+                  <th className="px-2 py-1.5 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {cat.routes.map((route) => {
+                  const routeKey = `${route.from}→${route.to}`;
+                  const routeOpen = expandedRoutes.has(`${userId}:${cat.category}:${routeKey}`);
+                  const isCombined = route.count > 1;
+
+                  return (
+                    <Fragment key={routeKey}>
+                      <tr className="border-t border-zinc-900">
+                        <td className="px-2 py-1.5 font-mono text-zinc-400">{route.from}</td>
+                        <td className="px-2 py-1.5 font-mono text-amber-500">{route.to}</td>
+                        <td className="px-2 py-1.5">
+                          {isCombined ? (
+                            <span className="text-zinc-600">multiple</span>
+                          ) : (
+                            <>
+                              <span className="font-mono text-zinc-300">{route.events[0].itemSku}</span>{" "}
+                              <span className="text-zinc-600">{route.events[0].itemName}</span>
+                            </>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-mono">{route.totalQty.toLocaleString()}</td>
+                        <td className="px-2 py-1.5 text-right font-mono text-zinc-500">{route.count}</td>
+                        <td className="px-2 py-1.5 text-right">
+                          {isCombined && (
+                            <button
+                              onClick={() => onToggleRoute(userId, cat.category, routeKey)}
+                              className="text-[10px] text-amber-500 hover:text-amber-400"
+                            >
+                              {routeOpen ? "Hide" : "Details"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+
+                      {isCombined && routeOpen && (
+                        <tr className="bg-zinc-900/40">
+                          <td colSpan={6} className="px-2 py-2">
+                            <table className="w-full text-[11px]">
+                              <thead>
+                                <tr className="text-zinc-600 text-left">
+                                  <th className="px-2 py-1 font-medium">Item</th>
+                                  <th className="px-2 py-1 font-medium text-right">Qty</th>
+                                  <th className="px-2 py-1 font-medium text-right">When</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {route.events.map((ev) => (
+                                  <tr key={ev.id} className="border-t border-zinc-900">
+                                    <td className="px-2 py-1">
+                                      <span className="font-mono text-zinc-300">{ev.itemSku}</span>{" "}
+                                      <span className="text-zinc-600">{ev.itemName}</span>
+                                    </td>
+                                    <td className="px-2 py-1 text-right font-mono">
+                                      {ev.quantity.toLocaleString()}
+                                    </td>
+                                    <td className="px-2 py-1 text-right text-zinc-500">
+                                      {new Date(ev.createdAt).toLocaleString()}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
   );
 }

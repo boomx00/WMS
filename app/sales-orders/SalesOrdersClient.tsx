@@ -12,8 +12,10 @@ type OrderLine = {
   quantity: number;
   itemSku: string;
   itemName: string;
+  itemId: number;
   palletCartonQty: number;
   shipped: number;
+  picked: number;
   status: "PENDING" | "PICKING" | "SHIPPED";
   pickedFrom: PickSource[];
   shippedBy: ShippedBy[];

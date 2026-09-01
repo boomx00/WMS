@@ -265,7 +265,7 @@ function OpnameSessionRow({ session }: { session: Session }) {
                             {(item.countedQty ?? 0).toLocaleString()}
                           </td>
                           <td className="py-1.5 text-right font-mono">
-  {(item.countedQty ?? 0).toLocaleString()}
+  {(item.systemQty ?? 0).toLocaleString()}
 </td>
 
 <td className="py-1.5 text-right font-mono">

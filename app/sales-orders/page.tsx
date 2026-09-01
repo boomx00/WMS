@@ -4,7 +4,7 @@ import { eq, inArray, desc, sql } from "drizzle-orm";
 import SalesOrdersClient from "./SalesOrdersClient";
 import { getSession } from "@/lib/auth";
 import { users, roles } from "@/db/schema";
-
+import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 async function getIsAdmin(): Promise<boolean> {
   const session = await getSession();
   if (!session) return false;
@@ -142,28 +142,30 @@ const lines = await db
     linesByOrder.get(l.salesOrderId)!.push(l);
   }
 
-  return orders.map((o) => {
-    const orderItems = (linesByOrder.get(o.id) ?? []).map((line) => {
-      const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
-      const status: "PENDING" | "PICKING" | "SHIPPED" =
-        shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
-      const pickedFrom = pickSourceMap.get(`${o.id}-${line.itemId}`) ?? [];
-      const shippedBy = shippedByMap.get(`${o.id}-${line.itemId}`) ?? [];
-      return { ...line, shipped, status, pickedFrom, shippedBy };
-    });
+return Promise.all(
+  orders.map(async (o) => {
+    const orderItems = await Promise.all(
+      (linesByOrder.get(o.id) ?? []).map(async (line) => {
+        const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
+        const picked = Math.max(0, await getPickedForSoQuantity(db, o.id, line.itemId));
 
-    // Overall SO status: COMPLETE if every item is fully shipped, PARTIAL
-    // if anything has shipped at all but not everything, NOT_STARTED if
-    // nothing has shipped yet.
+        const status: "PENDING" | "PICKING" | "SHIPPED" =
+          shipped >= line.quantity ? "SHIPPED" : shipped > 0 || picked > 0 ? "PICKING" : "PENDING";
+
+        const pickedFrom = pickSourceMap.get(`${o.id}-${line.itemId}`) ?? [];
+        const shippedBy = shippedByMap.get(`${o.id}-${line.itemId}`) ?? [];
+        return { ...line, shipped, picked, status, pickedFrom, shippedBy };
+      })
+    );
+
     const allComplete = orderItems.length > 0 && orderItems.every((l) => l.status === "SHIPPED");
-    const anyShipped = orderItems.some((l) => l.shipped > 0);
+    const anyActivity = orderItems.some((l) => l.shipped > 0 || l.picked > 0);
     const overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED" = allComplete
       ? "COMPLETE"
-      : anyShipped
+      : anyActivity
       ? "PARTIAL"
       : "NOT_STARTED";
 
-    // Distinct set of everyone who picked anything for this SO, across all items.
     const pickedByUsers = Array.from(
       new Set(orderItems.flatMap((l) => l.pickedFrom.map((p) => p.username)))
     );
@@ -174,7 +176,8 @@ const lines = await db
       overallStatus,
       pickedByUsers,
     };
-  });
+  })
+);
 }
 
 export default async function SalesOrdersPage({

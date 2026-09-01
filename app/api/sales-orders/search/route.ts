@@ -13,7 +13,7 @@ import {
 } from "@/db/schema";
 import { eq, and, inArray, ilike, desc, sql } from "drizzle-orm";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
-
+import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 // GET /api/sales-orders/search?q=...
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
@@ -57,11 +57,12 @@ export async function GET(req: NextRequest) {
 const results = await Promise.all(
   matchedOrders.map(async (o) => {
     const orderLines = linesByOrder.get(o.id) ?? [];
-    const withStatus = await Promise.all(
-      orderLines.map(async (line) => {
-        const shipped = await getShippedQuantity(db, o.id, line.itemId);
-        const status: "PENDING" | "PICKING" | "SHIPPED" =
-          shipped === 0 ? "PENDING" : shipped >= line.quantity ? "SHIPPED" : "PICKING";
+const withStatus = await Promise.all(
+  orderLines.map(async (line) => {
+    const shipped = await getShippedQuantity(db, o.id, line.itemId);
+    const picked = Math.max(0, await getPickedForSoQuantity(db, o.id, line.itemId));
+    const status: "PENDING" | "PICKING" | "SHIPPED" =
+      shipped >= line.quantity ? "SHIPPED" : shipped > 0 || picked > 0 ? "PICKING" : "PENDING";
 
         const pickedFromRows = await db
           .select({

@@ -7,21 +7,20 @@ import { alias } from "drizzle-orm/pg-core";
 const sourceLoc = alias(locations, "source_loc");
 const destLoc = alias(locations, "dest_loc");
 
-export type DriverActivityCategory = "INBOUND" | "PICKING" | "OTHER";
+export type DriverActivityCategory = "INBOUND" | "OUTBOUND" | "OTHER";
 
-// Categorization is derived from location types, not just the raw event
-// type — Move In (v2) is logged as a plain "MOVE" event with source
-// FLOOR / destination RACK, so it's only recognizable as Inbound by
-// checking those location types. PICKING / DEFAULT_PICKING is always
-// Picking. Everything else (rack-to-rack MOVE/DEFAULT_MOVE, ADJUSTMENT,
-// SHIP) buckets into "OTHER" so activity is never silently dropped.
+// Categorization is purely spatial — based on source/destination location
+// types, not the raw event `type` column:
+//   INBOUND  = Floor -> Rack
+//   OUTBOUND = Rack or Floor -> Outbound WH  (i.e. picking)
+//   OTHER    = anything else (rack-to-rack moves / "perpindahan lokasi",
+//              adjustments, ship, etc.)
 export function classifyDriverEvent(
-  type: string,
   sourceType: string | null,
   destType: string | null
 ): DriverActivityCategory {
   if (sourceType === "FLOOR" && destType === "RACK") return "INBOUND";
-  if (type === "PICKING" || type === "DEFAULT_PICKING") return "PICKING";
+  if ((sourceType === "RACK" || sourceType === "FLOOR") && destType === "OUTBOUND_WH") return "OUTBOUND";
   return "OTHER";
 }
 
@@ -60,7 +59,6 @@ export async function GET(req: NextRequest) {
   const events = await db
     .select({
       userId: locationStockEvents.userId,
-      type: locationStockEvents.type,
       quantity: locationStockEvents.quantity,
       sourceType: sourceLoc.type,
       destType: destLoc.type,
@@ -82,8 +80,8 @@ export async function GET(req: NextRequest) {
     username: string;
     inboundCount: number;
     inboundQty: number;
-    pickingCount: number;
-    pickingQty: number;
+    outboundCount: number;
+    outboundQty: number;
     otherCount: number;
     otherQty: number;
     lastActivityAt: string | null;
@@ -96,8 +94,8 @@ export async function GET(req: NextRequest) {
       username: driver.username,
       inboundCount: 0,
       inboundQty: 0,
-      pickingCount: 0,
-      pickingQty: 0,
+      outboundCount: 0,
+      outboundQty: 0,
       otherCount: 0,
       otherQty: 0,
       lastActivityAt: null,
@@ -108,15 +106,15 @@ export async function GET(req: NextRequest) {
     const row = summary.get(ev.userId);
     if (!row) continue;
 
-    const category = classifyDriverEvent(ev.type, ev.sourceType, ev.destType);
+    const category = classifyDriverEvent(ev.sourceType, ev.destType);
     const qty = Math.abs(ev.quantity);
 
     if (category === "INBOUND") {
       row.inboundCount += 1;
       row.inboundQty += qty;
-    } else if (category === "PICKING") {
-      row.pickingCount += 1;
-      row.pickingQty += qty;
+    } else if (category === "OUTBOUND") {
+      row.outboundCount += 1;
+      row.outboundQty += qty;
     } else {
       row.otherCount += 1;
       row.otherQty += qty;
@@ -129,7 +127,7 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = Array.from(summary.values())
-    .map((r) => ({ ...r, totalCount: r.inboundCount + r.pickingCount + r.otherCount }))
+    .map((r) => ({ ...r, totalCount: r.inboundCount + r.outboundCount + r.otherCount }))
     .sort((a, b) => b.totalCount - a.totalCount);
 
   return NextResponse.json(rows);
