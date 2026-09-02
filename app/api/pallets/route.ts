@@ -14,14 +14,15 @@ function sanitize(input: string): string {
 // A real printed pallet label is exactly one scan of
 // "*SKU*palletSeq*qty*workOrder" — e.g. *14013024102*0004*5000*MO007449.
 // SKU length varies by product (checked against the item DB separately),
-// but everything after it is fixed-width. Anchored start-to-end so a
-// double/concatenated scan (two valid labels stuck together) — which
-// would otherwise slip through since sku/workOrderNumber/quantity are
-// submitted as separate fields the server never cross-checks against the
-// raw label — is rejected instead of silently becoming the pallet's
-// permanent identifier. The work order may optionally carry a 2-letter
-// suffix (e.g. "MO007449-DY").
-const REAL_LABEL_REGEX = /^\*?[^*]+\*\d{4}\*\d{4}\*MO\d{6}(-[A-Za-z]{2})?$/;
+// and the work order's digit count varies too (e.g. "MO0001" and
+// "MO007449" are both valid) — palletSeq and qty stay fixed-width, and
+// the work order keeps its "MO" prefix plus an optional 2-letter suffix
+// (e.g. "MO007449-DY"). Anchored start-to-end so a double/concatenated
+// scan (two valid labels stuck together) — which would otherwise slip
+// through since sku/workOrderNumber/quantity are submitted as separate
+// fields the server never cross-checks against the raw label — is
+// rejected instead of silently becoming the pallet's permanent identifier.
+const REAL_LABEL_REGEX = /^\*?[^*]+\*\d{4}\*\d{4}\*MO\d{1,10}(-[A-Za-z]{2})?$/;
 
 function isValidRealLabel(label: string): boolean {
   return REAL_LABEL_REGEX.test(label);
