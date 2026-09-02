@@ -201,7 +201,7 @@ type ReportItem = {
 type ReportLocation = {
   locationCode: string;
   counted: boolean;
-  currentSystemSku: string;
+  currentSystemStock: { sku: string; name: string; quantity: number }[];
   currentSystemQty: number;
   items: ReportItem[];
 };
@@ -213,6 +213,22 @@ type ReportResponse = {
   countedLocations: number;
   report: ReportLocation[];
 };
+
+function CurrentSystemCell({ entries }: { entries: { sku: string; name: string; quantity: number }[] }) {
+  if (entries.length === 0) {
+    return <span className="text-zinc-700">—</span>;
+  }
+  return (
+    <div className="space-y-0.5">
+      {entries.map((e, i) => (
+        <div key={i}>
+          <span className="font-mono text-zinc-300">{e.sku}</span>{" "}
+          <span className="text-zinc-500">{e.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function DifferenceBadge({ difference }: { difference: number }) {
   if (difference === 0) {
@@ -325,70 +341,76 @@ function OpnameSessionRow({ session }: { session: Session }) {
           ) : !report ? (
             <p className="text-xs text-red-400">Failed to load report</p>
           ) : (
-            <table className="w-full text-xs">
+            <table className="w-full text-xs border-separate border-spacing-0">
               <thead>
-                <tr className="text-zinc-500 text-left border-t border-zinc-800 pt-2">
-                  <th className="py-2 font-medium">Location</th>
-                  <th className="py-2 font-medium">Counted SKU</th>
-                  <th className="py-2 font-medium">System SKU (at Count)</th>
-                  <th className="py-2 font-medium">SKU Match</th>
-                  <th className="py-2 font-medium text-right">Counted SKU Qty</th>
-                  <th className="py-2 font-medium text-right">System SKU Qty (at Count)</th>
-                  <th className="py-2 font-medium text-right">Difference</th>
-                  <th className="py-2 font-medium text-right">Current System SKU</th>
-                  <th className="py-2 font-medium text-right">Current System Qty</th>
-                  <th className="py-2 font-medium">By</th>
-                  <th className="py-2 font-medium"></th>
+                <tr className="text-zinc-500 text-left border-t border-zinc-800">
+                  <th className="py-2 px-3 font-medium">Location</th>
+                  <th className="py-2 px-3 font-medium">Counted SKU</th>
+                  <th className="py-2 px-3 font-medium">System SKU (at Count)</th>
+                  <th className="py-2 px-3 font-medium">SKU Match</th>
+                  <th className="py-2 px-3 font-medium text-right">Counted SKU Qty</th>
+                  <th className="py-2 px-3 font-medium text-right">System SKU Qty (at Count)</th>
+                  <th className="py-2 px-3 font-medium text-right">Difference</th>
+                  <th className="py-2 px-3 font-medium">Current System SKU</th>
+                  <th className="py-2 px-3 font-medium text-right">Current System Qty</th>
+                  <th className="py-2 px-3 font-medium">By</th>
+                  <th className="py-2 px-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
                 {report.report.flatMap((loc) =>
                   loc.items.length === 0 ? (
                     <tr key={loc.locationCode} className="border-t border-zinc-800/60">
-                      <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
-                      <td className="py-1.5 text-zinc-700">—</td>
-                      <td className="py-1.5 text-zinc-700">—</td>
-                      <td className="py-1.5 text-zinc-700">—</td>
-                      <td className="py-1.5 text-right text-zinc-700">—</td>
-                      <td className="py-1.5 text-right text-zinc-700">—</td>
-                      <td className="py-1.5 text-right text-zinc-700">—</td>
-                      <td className="py-1.5 text-right font-mono text-zinc-400 ">{loc.currentSystemSku}</td>
-                      <td className="py-1.5 text-right font-mono text-zinc-400">
+                      <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
+                      <td className="py-1.5 px-3 text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 px-3">
+                        <CurrentSystemCell entries={loc.currentSystemStock} />
+                      </td>
+                      <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
                         {loc.currentSystemQty.toLocaleString()}
                       </td>
-                      <td colSpan={2} className="py-1.5 text-zinc-700">
+                      <td colSpan={2} className="py-1.5 px-3 text-zinc-700">
                         Not counted yet
                       </td>
                     </tr>
                   ) : (
                     loc.items.map((item, i) => (
                       <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60">
-                        <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
-                        <td className="py-1.5">
+                        <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
+                        <td className="py-1.5 px-3">
                           <span className="font-mono text-zinc-300">{item.itemSku}</span>{" "}
                           <span className="text-zinc-500">{item.itemName}</span>
                         </td>
-                        <td className="py-1.5 font-mono text-zinc-400">{item.systemSku}</td>
-                        <td className="py-1.5">
+                        <td className="py-1.5 px-3 font-mono text-zinc-400">{item.systemSku}</td>
+                        <td className="py-1.5 px-3">
                           {item.skuMatch === "MATCH" ? (
                             <span className="text-emerald-400">Match</span>
                           ) : (
                             <span className="text-red-400">Mismatch</span>
                           )}
                         </td>
-                        <td className="py-1.5 text-right font-mono">{item.countedQty.toLocaleString()}</td>
-                        <td className="py-1.5 text-right font-mono text-zinc-400">
+                        <td className="py-1.5 px-3 text-right font-mono">
+                          {item.countedQty.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
                           {item.systemQty.toLocaleString()}
                         </td>
-                        <td className="py-1.5 text-right">
+                        <td className="py-1.5 px-3 text-right">
                           <DifferenceBadge difference={item.difference} />
                         </td>
-                        <td className="py-1.5 font-mono text-zinc-400">{loc.currentSystemSku}</td>
-                        <td className="py-1.5 text-right font-mono text-zinc-400">
+                        <td className="py-1.5 px-3">
+                          <CurrentSystemCell entries={loc.currentSystemStock} />
+                        </td>
+                        <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
                           {loc.currentSystemQty.toLocaleString()}
                         </td>
-                        <td className="py-1.5 text-zinc-500">{item.countedByUsername ?? "—"}</td>
-                        <td className="py-1.5 text-right">
+                        <td className="py-1.5 px-3 text-zinc-500">{item.countedByUsername ?? "—"}</td>
+                        <td className="py-1.5 px-3 text-right">
                           <AdjustLineButton
                             opnameNumber={session.opnameNumber}
                             locationCode={loc.locationCode}

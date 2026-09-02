@@ -148,14 +148,12 @@ export async function GET(
   const report = allLocations.map((loc) => {
     const counts = countedByLocation.get(loc.locationId) ?? [];
     const liveEntries = liveByLocation.get(loc.locationId) ?? [];
-    const currentSystemSku =
-      liveEntries.length > 0 ? liveEntries.map((e) => `${e.sku} ${e.name}`.trim()).join(", ") : "—";
     const currentSystemQty = liveEntries.reduce((sum, e) => sum + e.quantity, 0);
 
     return {
       locationCode: loc.locationCode,
       counted: counts.length > 0,
-      currentSystemSku,
+      currentSystemStock: liveEntries.map((e) => ({ sku: e.sku, name: e.name, quantity: e.quantity })),
       currentSystemQty,
       items: counts.map((c) => {
         const cleanedSystemSku = cleanSystemSku(c.systemSku);
