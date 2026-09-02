@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Line = {
@@ -46,22 +46,32 @@ export default function WorkOrdersTable({
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<WorkOrder[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return workOrders;
+  // Searches the whole database, not just the 50 work orders on this page —
+  // same debounced pattern used on Sales Orders and Movement History (v2).
+  useEffect(() => {
+    if (!search.trim()) {
+      setSearchResults(null);
+      return;
+    }
 
-    return workOrders.filter(
-      (wo) =>
-        wo.workOrderNumber.toLowerCase().includes(q) ||
-        wo.lines.some(
-          (l) =>
-            l.itemSku.toLowerCase().includes(q) ||
-            l.itemName.toLowerCase().includes(q)
-        )
-    );
-  }, [workOrders, search]);
+    const handle = setTimeout(async () => {
+      setSearching(true);
+      const res = await fetch(`/api/work-orders/search?q=${encodeURIComponent(search.trim())}`);
+      setSearching(false);
+      if (res.ok) {
+        setSearchResults(await res.json());
+      }
+    }, 300);
+
+    return () => clearTimeout(handle);
+  }, [search]);
+
+  const displayed = searchResults ?? workOrders;
+  const isSearching = search.trim().length > 0;
 
   function toggle(workOrderNumber: string) {
     setExpanded((prev) => {
@@ -82,22 +92,25 @@ export default function WorkOrdersTable({
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Filter this page by work order or SKU..."
+        placeholder="Search all work orders by number or SKU..."
         className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm mb-4 focus:outline-none focus:border-amber-500"
       />
 
       <p className="text-xs text-zinc-600 mb-3">
-        Page {page} of {totalPages} · {totalCount.toLocaleString()} work orders total
-        {search.trim() && ` · ${filtered.length} matching on this page`}
+        {searching
+          ? "Searching..."
+          : isSearching
+            ? `${displayed.length.toLocaleString()} result(s) for "${search.trim()}"`
+            : `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} work orders total`}
       </p>
 
       <div className="space-y-3 mb-4">
-        {filtered.length === 0 ? (
+        {displayed.length === 0 ? (
           <div className="border border-dashed border-zinc-800 rounded-lg px-8 py-12 text-center text-zinc-600 text-sm">
-            No matching work orders on this page.
+            {isSearching ? "No matching work orders." : "No work orders yet."}
           </div>
         ) : (
-          filtered.map((wo) => {
+          displayed.map((wo) => {
             const isOpen = expanded.has(wo.workOrderNumber);
 
             return (
@@ -181,7 +194,7 @@ export default function WorkOrdersTable({
         )}
       </div>
 
-      {totalPages > 1 && (
+      {!isSearching && totalPages > 1 && (
         <div className="flex items-center justify-between">
           <button
             onClick={() => goToPage(page - 1)}

@@ -1,21 +1,59 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locationStockEvents, items, locations, users, salesOrders } from "@/db/schema";
-import { eq, desc, or, ilike } from "drizzle-orm";
+import { eq, desc, or, and, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 const sourceLoc = alias(locations, "source_loc");
 const destLoc = alias(locations, "dest_loc");
 
-// GET /api/movement-history-v2/search?q=...
+// GET /api/movement-history-v2/search
+//
+// Two modes:
+//   - Simple: ?q=... — one term, OR-matched across SKU/product/location/
+//     SO/user (the original quick-search behavior).
+//   - Advanced: any of ?sku=&location=&user=&so=&type= — each provided
+//     field is ANDed together, so "sku=ABC&user=john" finds events that
+//     match BOTH, not either.
+// If any advanced param is present, it takes priority over `q`.
 export async function GET(req: NextRequest) {
-  const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
+  const params = req.nextUrl.searchParams;
+  const q = params.get("q")?.trim() ?? "";
+  const sku = params.get("sku")?.trim() ?? "";
+  const location = params.get("location")?.trim() ?? "";
+  const user = params.get("user")?.trim() ?? "";
+  const so = params.get("so")?.trim() ?? "";
+  const type = params.get("type")?.trim() ?? "";
 
-  if (!q) {
+  const isAdvanced = Boolean(sku || location || user || so || type);
+
+  if (!q && !isAdvanced) {
     return NextResponse.json([]);
   }
 
-  const pattern = `%${q}%`;
+  const whereClause = isAdvanced
+    ? and(
+        ...[
+          sku ? or(ilike(items.sku, `%${sku}%`), ilike(items.name, `%${sku}%`)) : undefined,
+          location
+            ? or(ilike(sourceLoc.code, `%${location}%`), ilike(destLoc.code, `%${location}%`))
+            : undefined,
+          user ? ilike(users.username, `%${user}%`) : undefined,
+          so ? ilike(salesOrders.soNumber, `%${so}%`) : undefined,
+          type ? eq(locationStockEvents.type, type) : undefined,
+        ].filter((c): c is NonNullable<typeof c> => c !== undefined)
+      )
+    : (() => {
+        const pattern = `%${q}%`;
+        return or(
+          ilike(items.sku, pattern),
+          ilike(items.name, pattern),
+          ilike(sourceLoc.code, pattern),
+          ilike(destLoc.code, pattern),
+          ilike(salesOrders.soNumber, pattern),
+          ilike(users.username, pattern)
+        );
+      })();
 
   const rows = await db
     .select({
@@ -36,16 +74,7 @@ export async function GET(req: NextRequest) {
     .leftJoin(destLoc, eq(locationStockEvents.destinationLocationId, destLoc.id))
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
-    .where(
-      or(
-        ilike(items.sku, pattern),
-        ilike(items.name, pattern),
-        ilike(sourceLoc.code, pattern),
-        ilike(destLoc.code, pattern),
-        ilike(salesOrders.soNumber, pattern),
-        ilike(users.username, pattern)
-      )
-    )
+    .where(whereClause)
     .orderBy(desc(locationStockEvents.createdAt))
     .limit(200);
 
