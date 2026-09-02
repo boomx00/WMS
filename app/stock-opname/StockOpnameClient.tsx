@@ -352,7 +352,7 @@ function OpnameSessionRow({ session }: { session: Session }) {
                       <td className="py-1.5 text-right text-zinc-700">—</td>
                       <td className="py-1.5 text-right text-zinc-700">—</td>
                       <td className="py-1.5 text-right text-zinc-700">—</td>
-                      <td className="py-1.5 font-mono text-zinc-400 text-right">{loc.currentSystemSku}</td>
+                      <td className="py-1.5 text-right font-mono text-zinc-400 ">{loc.currentSystemSku}</td>
                       <td className="py-1.5 text-right font-mono text-zinc-400">
                         {loc.currentSystemQty.toLocaleString()}
                       </td>
