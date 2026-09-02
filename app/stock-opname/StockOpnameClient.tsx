@@ -187,6 +187,7 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
 }
 
 type ReportItem = {
+  itemId: number;
   itemSku: string;
   itemName: string;
   systemQty: number;
@@ -229,12 +230,16 @@ function OpnameSessionRow({ session }: { session: Session }) {
 
   async function toggle() {
     if (!open && !report) {
-      setLoading(true);
-      const res = await fetch(`/api/stock-opname/${session.opnameNumber}/report`);
-      if (res.ok) setReport(await res.json());
-      setLoading(false);
+      await refetchReport();
     }
     setOpen((prev) => !prev);
+  }
+
+  async function refetchReport() {
+    setLoading(true);
+    const res = await fetch(`/api/stock-opname/${session.opnameNumber}/report`);
+    if (res.ok) setReport(await res.json());
+    setLoading(false);
   }
 
   async function handleAdjust() {
@@ -262,6 +267,7 @@ function OpnameSessionRow({ session }: { session: Session }) {
     if (data.failed > 0) {
       console.warn("Stock opname adjust failures:", data.failures);
     }
+    await refetchReport();
     router.refresh();
   }
 
@@ -315,12 +321,13 @@ function OpnameSessionRow({ session }: { session: Session }) {
               <thead>
                 <tr className="text-zinc-500 text-left border-t border-zinc-800 pt-2">
                   <th className="py-2 font-medium">Location</th>
-                  <th className="py-2 font-medium">SKU</th>
+                  <th className="py-2 font-medium">Counted SKU</th>
                   <th className="py-2 font-medium">Product</th>
                   <th className="py-2 font-medium text-right">System Qty</th>
                   <th className="py-2 font-medium text-right">Counted Qty</th>
                   <th className="py-2 font-medium text-right">Difference</th>
                   <th className="py-2 font-medium">By</th>
+                  <th className="py-2 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
@@ -328,7 +335,7 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   loc.items.length === 0 ? (
                     <tr key={loc.locationCode} className="border-t border-zinc-800/60">
                       <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
-                      <td colSpan={6} className="py-1.5 text-zinc-700">
+                      <td colSpan={7} className="py-1.5 text-zinc-700">
                         Not counted yet
                       </td>
                     </tr>
@@ -346,6 +353,16 @@ function OpnameSessionRow({ session }: { session: Session }) {
                           <DifferenceBadge difference={item.difference} />
                         </td>
                         <td className="py-1.5 text-zinc-500">{item.countedByUsername ?? "—"}</td>
+                        <td className="py-1.5 text-right">
+                          <AdjustLineButton
+                            opnameNumber={session.opnameNumber}
+                            locationCode={loc.locationCode}
+                            itemId={item.itemId}
+                            countedQty={item.countedQty}
+                            difference={item.difference}
+                            onAdjusted={refetchReport}
+                          />
+                        </td>
                       </tr>
                     ))
                   )
@@ -355,6 +372,70 @@ function OpnameSessionRow({ session }: { session: Session }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function AdjustLineButton({
+  opnameNumber,
+  locationCode,
+  itemId,
+  countedQty,
+  difference,
+  onAdjusted,
+}: {
+  opnameNumber: string;
+  locationCode: string;
+  itemId: number;
+  countedQty: number;
+  difference: number;
+  onAdjusted: () => void;
+}) {
+  const [adjusting, setAdjusting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (difference === 0) {
+    return <span className="text-[10px] text-zinc-700">Matched</span>;
+  }
+
+  async function handleClick() {
+    if (
+      !window.confirm(
+        `Set system quantity for this SKU at ${locationCode} to the counted amount (${countedQty.toLocaleString()})?`
+      )
+    ) {
+      return;
+    }
+
+    setAdjusting(true);
+    setError(null);
+
+    const res = await fetch(`/api/stock-opname/${opnameNumber}/adjust-line`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locationCode, itemId, countedQty }),
+    });
+    setAdjusting(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to adjust");
+      return;
+    }
+
+    onAdjusted();
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        onClick={handleClick}
+        disabled={adjusting}
+        className="text-[10px] text-amber-500 hover:text-amber-400 disabled:opacity-50"
+      >
+        {adjusting ? "Adjusting..." : "Adjust"}
+      </button>
+      {error && <span className="text-[10px] text-red-400">{error}</span>}
     </div>
   );
 }

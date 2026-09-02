@@ -1,19 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameItems, locationStock, locationStockEvents, locations, items } from "@/db/schema";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { locations, items, locationStock, locationStockEvents } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { adjustLocationStock } from "@/lib/locationStock";
 
-// POST /api/stock-opname/:opnameNumber/adjust
-// Applies every counted line in this (finished) session directly to
-// location_stock — computing each row's delta as countedQty minus
-// whatever's currently recorded there, so this is safe to run more than
-// once (a second run is a no-op for anything already synced). Routes
-// through adjustLocationStock, so the one-SKU-per-rack rule and the
-// 14-pallet cell cap are still enforced — a row that would violate either
-// is skipped and reported, not silently forced through.
-export async function POST(
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
+// PATCH /api/stock-opname/:opnameNumber/adjust-line
+// body: { locationCode, itemId, countedQty }
+//
+// A single-row version of the bulk /adjust endpoint's logic: sets
+// location_stock for this exact (location, item) pair to countedQty,
+// computed as a delta from whatever's currently there, and logs an
+// ADJUSTMENT event. It only ever touches the counted item itself — same
+// as the bulk endpoint, it never touches any other item that might be
+// recorded at that location. Unlike the bulk endpoint, this doesn't
+// require the session to be marked DONE first, since it's a deliberate
+// one-row correction the admin is choosing to apply right now.
+export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ opnameNumber: string }> }
 ) {
@@ -22,84 +29,67 @@ export async function POST(
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const { opnameNumber } = await params;
+  await params; // opnameNumber isn't needed for the write itself, but keeps this route scoped under the session for clarity
 
-  const [opname] = await db.select().from(stockOpname).where(eq(stockOpname.opnameNumber, opnameNumber));
-  if (!opname) {
-    return NextResponse.json({ error: "Opname session not found" }, { status: 404 });
-  }
+  const body = await req.json();
+  const locationCode = sanitize(body.locationCode ?? "");
+  const itemId = Number(body.itemId);
+  const countedQty = Number(body.countedQty);
 
-  if (!opname.completedAt) {
+  if (!locationCode || !itemId || isNaN(countedQty) || countedQty < 0) {
     return NextResponse.json(
-      { error: "This session hasn't been finished yet — finish it before adjusting inventory." },
-      { status: 409 }
+      { error: "locationCode, itemId, and a non-negative countedQty are required" },
+      { status: 400 }
     );
   }
 
-  const countedLines = await db
-    .select({
-      locationId: stockOpnameItems.locationId,
-      itemId: stockOpnameItems.itemId,
-      countedQty: stockOpnameItems.countedQty,
-      locationCode: locations.code,
-      itemSku: items.sku,
-    })
-    .from(stockOpnameItems)
-    .innerJoin(locations, eq(stockOpnameItems.locationId, locations.id))
-    .innerJoin(items, eq(stockOpnameItems.itemId, items.id))
-    .where(and(eq(stockOpnameItems.opnameNumber, opnameNumber), isNotNull(stockOpnameItems.countedQty)));
-
-  if (countedLines.length === 0) {
-    return NextResponse.json({ error: "No counted lines in this session to adjust" }, { status: 400 });
+  const [location] = await db.select().from(locations).where(eq(locations.code, locationCode));
+  if (!location) {
+    return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
   }
 
-  let applied = 0;
-  let skipped = 0;
-  const failures: { locationCode: string; itemSku: string; error: string }[] = [];
-
-  for (const line of countedLines) {
-    const countedQty = line.countedQty!;
-
-    try {
-      const [stockRow] = await db
-        .select()
-        .from(locationStock)
-        .where(and(eq(locationStock.locationId, line.locationId), eq(locationStock.itemId, line.itemId)));
-
-      const currentQty = stockRow?.quantity ?? 0;
-      const delta = countedQty - currentQty;
-
-      if (delta === 0) {
-        skipped++;
-        continue;
-      }
-
-      await db.transaction(async (tx) => {
-        await adjustLocationStock(tx, line.locationId, line.itemId, delta);
-
-        await tx.insert(locationStockEvents).values({
-          type: "ADJUSTMENT",
-          itemId: line.itemId,
-          sourceLocationId: null,
-          destinationLocationId: line.locationId,
-          quantity: delta,
-          userId: session.userId,
-        });
-      });
-
-      applied++;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to adjust";
-      failures.push({ locationCode: line.locationCode, itemSku: line.itemSku, error: message });
-    }
+  const [item] = await db.select().from(items).where(eq(items.id, itemId));
+  if (!item) {
+    return NextResponse.json({ error: "Unknown item" }, { status: 404 });
   }
+
+  const [stockRow] = await db
+    .select()
+    .from(locationStock)
+    .where(and(eq(locationStock.locationId, location.id), eq(locationStock.itemId, itemId)));
+
+  const currentQty = stockRow?.quantity ?? 0;
+  const delta = countedQty - currentQty;
+
+  if (delta === 0) {
+    return NextResponse.json({
+      locationCode: location.code,
+      itemSku: item.sku,
+      previousQuantity: currentQty,
+      newQuantity: countedQty,
+      delta: 0,
+      message: "Already matches — no change made.",
+    });
+  }
+
+  await db.transaction(async (tx) => {
+    await adjustLocationStock(tx, location.id, itemId, delta);
+
+    await tx.insert(locationStockEvents).values({
+      type: "ADJUSTMENT",
+      itemId,
+      sourceLocationId: null,
+      destinationLocationId: location.id,
+      quantity: delta,
+      userId: session.userId,
+    });
+  });
 
   return NextResponse.json({
-    opnameNumber,
-    totalLines: countedLines.length,
-    applied,
-    skipped,
-    failed: failures.length,
-    failures,
+    locationCode: location.code,
+    itemSku: item.sku,
+    previousQuantity: currentQty,
+    newQuantity: countedQty,
+    delta,
   });
 }
