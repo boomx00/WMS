@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { stockOpnameItems, stockOpnameLocations, locations, items, locationStock } from "@/db/schema";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, inArray } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
 
@@ -24,6 +24,12 @@ function extractSku(label: string): string | null {
 // system believed at count time, not whatever it happens to say later
 // (e.g. after other movements land). difference = countedQty - systemQty,
 // recomputed every time a line is (re)counted.
+//
+// It also separately snapshots which SKU(s) the system had recorded at
+// this location OVERALL at this exact moment (not just for the counted
+// item) — this is what the report's "System SKU (at Count)" column
+// reflects, a fixed historical record rather than something recomputed
+// live later.
 //
 // If this location isn't yet part of this opname session (e.g. a custom,
 // real-time session where locations are never pre-planned — only
@@ -105,6 +111,25 @@ export async function PATCH(
   const systemQty = stockRow?.quantity ?? 0;
   const difference = countedQty - systemQty;
 
+  // Also snapshot which SKU(s) the system had recorded at this location
+  // overall, at this exact moment — not just for the counted item, but
+  // whatever location_stock actually shows here right now. This is what
+  // "System SKU (at Count)" on the report reflects: a fixed record of
+  // what the system believed at count time, so it stays meaningful even
+  // if the location is later adjusted or moved before anyone reads the
+  // report.
+  const allStockAtLocation = await db
+    .select({ itemId: locationStock.itemId, quantity: locationStock.quantity })
+    .from(locationStock)
+    .where(eq(locationStock.locationId, location.id));
+
+  const nonZeroItemIds = allStockAtLocation.filter((r) => r.quantity !== 0).map((r) => r.itemId);
+  let systemSku: string | null = null;
+  if (nonZeroItemIds.length > 0) {
+    const systemItems = await db.select({ sku: items.sku }).from(items).where(inArray(items.id, nonZeroItemIds));
+    systemSku = systemItems.map((i) => i.sku).join(", ") || null;
+  }
+
   const [existingLine] = await db
     .select()
     .from(stockOpnameItems)
@@ -172,7 +197,7 @@ export async function PATCH(
   if (existingLine) {
     [result] = await db
       .update(stockOpnameItems)
-      .set({ systemQty, countedQty, difference, countedAt: new Date(), countedBy: session.userId })
+      .set({ systemQty, systemSku, countedQty, difference, countedAt: new Date(), countedBy: session.userId })
       .where(eq(stockOpnameItems.id, existingLine.id))
       .returning();
   } else {
@@ -183,6 +208,7 @@ export async function PATCH(
         locationId: location.id,
         itemId: item.id,
         systemQty,
+        systemSku,
         countedQty,
         difference,
         countedAt: new Date(),
