@@ -202,7 +202,7 @@ type ReportLocation = {
   locationCode: string;
   counted: boolean;
   currentSystemSku: string;
-  currentSystemProductName: string;
+  currentSystemQty: number;
   items: ReportItem[];
 };
 type ReportResponse = {
@@ -330,13 +330,13 @@ function OpnameSessionRow({ session }: { session: Session }) {
                 <tr className="text-zinc-500 text-left border-t border-zinc-800 pt-2">
                   <th className="py-2 font-medium">Location</th>
                   <th className="py-2 font-medium">Counted SKU</th>
-                  <th className="py-2 font-medium">Product</th>
                   <th className="py-2 font-medium">System SKU (at Count)</th>
                   <th className="py-2 font-medium">SKU Match</th>
-                  <th className="py-2 font-medium">Current System</th>
-                  <th className="py-2 font-medium text-right">System Qty</th>
-                  <th className="py-2 font-medium text-right">Counted Qty</th>
+                  <th className="py-2 font-medium text-right">Counted SKU Qty</th>
+                  <th className="py-2 font-medium text-right">System SKU Qty (at Count)</th>
                   <th className="py-2 font-medium text-right">Difference</th>
+                  <th className="py-2 font-medium">Current System SKU</th>
+                  <th className="py-2 font-medium text-right">Current System Qty</th>
                   <th className="py-2 font-medium">By</th>
                   <th className="py-2 font-medium"></th>
                 </tr>
@@ -349,12 +349,14 @@ function OpnameSessionRow({ session }: { session: Session }) {
                       <td className="py-1.5 text-zinc-700">—</td>
                       <td className="py-1.5 text-zinc-700">—</td>
                       <td className="py-1.5 text-zinc-700">—</td>
-                      <td className="py-1.5 text-zinc-700">—</td>
-                      <td className="py-1.5">
-                        <span className="font-mono text-zinc-400">{loc.currentSystemSku}</span>{" "}
-                        <span className="text-zinc-600">{loc.currentSystemProductName}</span>
+                      <td className="py-1.5 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 font-mono text-zinc-400">{loc.currentSystemSku}</td>
+                      <td className="py-1.5 text-right font-mono text-zinc-400">
+                        {loc.currentSystemQty.toLocaleString()}
                       </td>
-                      <td colSpan={5} className="py-1.5 text-zinc-700">
+                      <td colSpan={2} className="py-1.5 text-zinc-700">
                         Not counted yet
                       </td>
                     </tr>
@@ -362,8 +364,10 @@ function OpnameSessionRow({ session }: { session: Session }) {
                     loc.items.map((item, i) => (
                       <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60">
                         <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
-                        <td className="py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
-                        <td className="py-1.5 text-zinc-500">{item.itemName}</td>
+                        <td className="py-1.5">
+                          <span className="font-mono text-zinc-300">{item.itemSku}</span>{" "}
+                          <span className="text-zinc-500">{item.itemName}</span>
+                        </td>
                         <td className="py-1.5 font-mono text-zinc-400">{item.systemSku}</td>
                         <td className="py-1.5">
                           {item.skuMatch === "MATCH" ? (
@@ -372,16 +376,16 @@ function OpnameSessionRow({ session }: { session: Session }) {
                             <span className="text-red-400">Mismatch</span>
                           )}
                         </td>
-                        <td className="py-1.5">
-                          <span className="font-mono text-zinc-400">{loc.currentSystemSku}</span>{" "}
-                          <span className="text-zinc-600">{loc.currentSystemProductName}</span>
-                        </td>
+                        <td className="py-1.5 text-right font-mono">{item.countedQty.toLocaleString()}</td>
                         <td className="py-1.5 text-right font-mono text-zinc-400">
                           {item.systemQty.toLocaleString()}
                         </td>
-                        <td className="py-1.5 text-right font-mono">{item.countedQty.toLocaleString()}</td>
                         <td className="py-1.5 text-right">
                           <DifferenceBadge difference={item.difference} />
+                        </td>
+                        <td className="py-1.5 font-mono text-zinc-400">{loc.currentSystemSku}</td>
+                        <td className="py-1.5 text-right font-mono text-zinc-400">
+                          {loc.currentSystemQty.toLocaleString()}
                         </td>
                         <td className="py-1.5 text-zinc-500">{item.countedByUsername ?? "—"}</td>
                         <td className="py-1.5 text-right">

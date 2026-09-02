@@ -3,6 +3,31 @@ import { db } from "@/lib/db";
 import { stockOpname, stockOpnameItems, stockOpnameLocations, locations, items, users, locationStock } from "@/db/schema";
 import { eq, inArray } from "drizzle-orm";
 
+// A handful of code paths (and possibly older rows) can end up with the
+// literal 4-character string "null" instead of a true SQL NULL — that
+// isn't caught by `?? "—"`, which only handles a real null/undefined.
+// This normalizes both cases to a clean "—" for display.
+function cleanSystemSku(value: string | null | undefined): string {
+  if (value === null || value === undefined) return "—";
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === "null") return "—";
+  return trimmed;
+}
+
+// Product names aren't snapshotted historically — only the SKU codes are
+// (in stock_opname_items.systemSku). This looks up CURRENT names for
+// whatever SKU codes appear in any snapshot, purely for display, so
+// "System SKU (at Count)" can show "SKU Name" instead of a bare code.
+function formatSkuWithNames(csv: string, nameBySku: Map<string, string>): string {
+  if (csv === "—") return "—";
+  const skus = csv
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (skus.length === 0) return "—";
+  return skus.map((s) => `${s} ${nameBySku.get(s.toUpperCase()) ?? ""}`.trim()).join(", ");
+}
+
 // GET /api/stock-opname/:opnameNumber/report
 // The full picture for one session: who it's assigned to, every location
 // in scope, and — for each one — whatever's actually been counted there
@@ -73,6 +98,29 @@ export async function GET(
     countedByLocation.get(row.locationId)!.push(row);
   }
 
+  // Every distinct SKU code referenced in any historical snapshot, so we
+  // can resolve their current names for display (only the SKU codes were
+  // ever snapshotted, not names).
+  const snapshotSkuSet = new Set<string>();
+  for (const row of countedRows) {
+    const cleaned = cleanSystemSku(row.systemSku);
+    if (cleaned === "—") continue;
+    cleaned
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((s) => snapshotSkuSet.add(s));
+  }
+
+  const snapshotNameBySku = new Map<string, string>();
+  if (snapshotSkuSet.size > 0) {
+    const snapshotItems = await db
+      .select({ sku: items.sku, name: items.name })
+      .from(items)
+      .where(inArray(items.sku, Array.from(snapshotSkuSet)));
+    for (const i of snapshotItems) snapshotNameBySku.set(i.sku.toUpperCase(), i.name);
+  }
+
   // Live current-system lookup — computed fresh every time this report
   // loads, deliberately independent of the historical snapshot above.
   const locationIds = allLocations.map((l) => l.locationId);
@@ -90,35 +138,40 @@ export async function GET(
           .where(inArray(locationStock.locationId, locationIds))
       : [];
 
-  const liveByLocation = new Map<number, { sku: string; name: string }[]>();
+  const liveByLocation = new Map<number, { sku: string; name: string; quantity: number }[]>();
   for (const row of liveStockRows) {
     if (row.quantity === 0) continue;
     if (!liveByLocation.has(row.locationId)) liveByLocation.set(row.locationId, []);
-    liveByLocation.get(row.locationId)!.push({ sku: row.itemSku, name: row.itemName });
+    liveByLocation.get(row.locationId)!.push({ sku: row.itemSku, name: row.itemName, quantity: row.quantity });
   }
 
   const report = allLocations.map((loc) => {
     const counts = countedByLocation.get(loc.locationId) ?? [];
     const liveEntries = liveByLocation.get(loc.locationId) ?? [];
-    const currentSystemSku = liveEntries.length > 0 ? liveEntries.map((e) => e.sku).join(", ") : "—";
-    const currentSystemProductName = liveEntries.length > 0 ? liveEntries.map((e) => e.name).join(", ") : "—";
+    const currentSystemSku =
+      liveEntries.length > 0 ? liveEntries.map((e) => `${e.sku} ${e.name}`.trim()).join(", ") : "—";
+    const currentSystemQty = liveEntries.reduce((sum, e) => sum + e.quantity, 0);
 
     return {
       locationCode: loc.locationCode,
       counted: counts.length > 0,
       currentSystemSku,
-      currentSystemProductName,
+      currentSystemQty,
       items: counts.map((c) => {
-        const systemSkuList = (c.systemSku ?? "")
-          .split(",")
-          .map((s) => s.trim().toUpperCase())
-          .filter(Boolean);
+        const cleanedSystemSku = cleanSystemSku(c.systemSku);
+        const systemSkuList =
+          cleanedSystemSku === "—"
+            ? []
+            : cleanedSystemSku
+                .split(",")
+                .map((s) => s.trim().toUpperCase())
+                .filter(Boolean);
         return {
           itemId: c.itemId,
           itemSku: c.itemSku,
           itemName: c.itemName,
           systemQty: c.systemQty,
-          systemSku: c.systemSku ?? "—",
+          systemSku: formatSkuWithNames(cleanedSystemSku, snapshotNameBySku),
           countedQty: c.countedQty,
           difference: c.difference,
           countedAt: c.countedAt,
