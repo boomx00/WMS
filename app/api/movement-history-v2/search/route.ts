@@ -7,6 +7,28 @@ import { alias } from "drizzle-orm/pg-core";
 const sourceLoc = alias(locations, "source_loc");
 const destLoc = alias(locations, "dest_loc");
 
+// Mirrors the locationStockEvents.type pgEnum in the schema. Query params
+// are always plain strings, so this list is used to validate + narrow the
+// value before passing it to eq(), which otherwise won't accept a bare
+// `string` for an enum column.
+const VALID_EVENT_TYPES = [
+  "INBOUND",
+  "DEFAULT_INBOUND",
+  "ADJUSTMENT",
+  "PICKING",
+  "DEFAULT_PICKING",
+  "SHIP",
+  "MOVE",
+  "DEFAULT_MOVE",
+  "RELEASE",
+  "CLAIM",
+] as const;
+type EventType = (typeof VALID_EVENT_TYPES)[number];
+
+function asEventType(value: string): EventType | null {
+  return (VALID_EVENT_TYPES as readonly string[]).includes(value) ? (value as EventType) : null;
+}
+
 // GET /api/movement-history-v2/search
 //
 // Two modes:
@@ -24,8 +46,9 @@ export async function GET(req: NextRequest) {
   const user = params.get("user")?.trim() ?? "";
   const so = params.get("so")?.trim() ?? "";
   const type = params.get("type")?.trim() ?? "";
+  const validatedType = type ? asEventType(type) : null;
 
-  const isAdvanced = Boolean(sku || location || user || so || type);
+  const isAdvanced = Boolean(sku || location || user || so || validatedType);
 
   if (!q && !isAdvanced) {
     return NextResponse.json([]);
@@ -40,7 +63,7 @@ export async function GET(req: NextRequest) {
             : undefined,
           user ? ilike(users.username, `%${user}%`) : undefined,
           so ? ilike(salesOrders.soNumber, `%${so}%`) : undefined,
-          type ? eq(locationStockEvents.type, type) : undefined,
+          validatedType ? eq(locationStockEvents.type, validatedType) : undefined,
         ].filter((c): c is NonNullable<typeof c> => c !== undefined)
       )
     : (() => {
