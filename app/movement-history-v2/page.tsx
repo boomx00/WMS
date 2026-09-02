@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { locationStockEvents, items, locations, users, salesOrders } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { finalStockAtDestinationSql } from "@/lib/finalStock";
 import MovementHistoryV2Table from "./MovementHistoryV2Table";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,9 @@ async function getEventsForPage(page: number) {
       quantity: locationStockEvents.quantity,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
+      // Resulting location_stock balance at the "To" location immediately
+      // after this event — null for events with no destination (SHIP).
+      finalStock: finalStockAtDestinationSql,
     })
     .from(locationStockEvents)
     .innerJoin(items, eq(locationStockEvents.itemId, items.id))

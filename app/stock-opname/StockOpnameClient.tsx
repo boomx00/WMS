@@ -8,6 +8,7 @@ type Session = {
   opnameNumber: string;
   notes: string | null;
   createdAt: string | Date;
+  commencedAt: string | Date | null;
   totalLines: number;
   countedLines: number;
   discrepancies: number;
@@ -307,6 +308,9 @@ function OpnameSessionRow({ session }: { session: Session }) {
           {session.assignedToUsername && (
             <span className="text-xs text-zinc-500">· PIC: {session.assignedToUsername}</span>
           )}
+          <span className="text-xs text-zinc-600">
+            · Commenced: {session.commencedAt ? new Date(session.commencedAt).toLocaleString() : "Not started"}
+          </span>
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-zinc-500">

@@ -14,6 +14,7 @@ type Row = {
   quantity: number;
   username: string;
   createdAt: string | Date;
+  finalStock: number | null;
 };
 
 const TYPE_STYLES: Record<string, string> = {
@@ -263,6 +264,7 @@ export default function MovementHistoryV2Table({
               <th className="px-4 py-3 font-medium">From</th>
               <th className="px-4 py-3 font-medium">To</th>
               <th className="px-4 py-3 font-medium text-right">Qty</th>
+              <th className="px-4 py-3 font-medium text-right">Final Stock (To)</th>
               <th className="px-4 py-3 font-medium">User</th>
               <th className="px-4 py-3 font-medium text-right">When</th>
             </tr>
@@ -270,7 +272,7 @@ export default function MovementHistoryV2Table({
           <tbody>
             {(isSearchActive ? searchResults ?? [] : rows).length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={8} className="px-4 py-8 text-center text-zinc-600">
                   No matching events.
                 </td>
               </tr>
@@ -295,6 +297,9 @@ export default function MovementHistoryV2Table({
                     {row.type === "SHIP" ? (row.soNumber ?? "—") : (row.destinationCode ?? "—")}
                   </td>
                   <td className="px-4 py-3 text-right font-mono">{row.quantity.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right font-mono text-zinc-400">
+                    {row.finalStock === null ? "—" : row.finalStock.toLocaleString()}
+                  </td>
                   <td className="px-4 py-3 text-zinc-400">{row.username}</td>
                   <td className="px-4 py-3 text-right text-zinc-500 text-xs">
                     {new Date(row.createdAt).toLocaleString()}

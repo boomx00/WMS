@@ -20,12 +20,14 @@ async function getSessions() {
     .select({
       opnameNumber: stockOpnameItems.opnameNumber,
       counted: sql<number>`count(distinct ${stockOpnameItems.locationId})::int`,
+      commencedAt: sql<string | null>`min(${stockOpnameItems.countedAt})`,
     })
     .from(stockOpnameItems)
     .groupBy(stockOpnameItems.opnameNumber);
 
   const totalMap = new Map(locationRows.map((r) => [r.opnameNumber, r.total]));
   const countedMap = new Map(countedRows.map((r) => [r.opnameNumber, r.counted]));
+  const commencedMap = new Map(countedRows.map((r) => [r.opnameNumber, r.commencedAt]));
 
   const assigneeRows = await db.select().from(users);
   const usersById = new Map(assigneeRows.map((u) => [u.id, u.username]));
@@ -45,6 +47,11 @@ async function getSessions() {
       countedLines: counted,
       discrepancies: 0,
       status,
+      // The earliest actual scan/count timestamp for this session — not
+      // createdAt (when the session was set up), which can happen well
+      // before anyone actually starts counting. Null until the first
+      // count comes in.
+      commencedAt: commencedMap.get(s.opnameNumber) ?? null,
     };
   });
 }

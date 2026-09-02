@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { locationStockEvents, items, locations, users, salesOrders } from "@/db/schema";
 import { eq, desc, or, and, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { finalStockAtDestinationSql } from "@/lib/finalStock";
 
 const sourceLoc = alias(locations, "source_loc");
 const destLoc = alias(locations, "dest_loc");
@@ -90,6 +91,7 @@ export async function GET(req: NextRequest) {
       quantity: locationStockEvents.quantity,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
+      finalStock: finalStockAtDestinationSql,
     })
     .from(locationStockEvents)
     .innerJoin(items, eq(locationStockEvents.itemId, items.id))
