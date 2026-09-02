@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { pallets, items, locations, palletEvents } from "@/db/schema";
+import { pallets, items, locations, palletEvents, users } from "@/db/schema";
 import { eq, sql, inArray, desc } from "drizzle-orm";
 import WorkOrdersTable from "./WorkOrdersTable";
 
@@ -70,10 +70,14 @@ async function getWorkOrderSummary(workOrderNumbers: string[]) {
       itemSku: items.sku,
       locationCode: locations.code,
       inboundAt: pallets.inboundAt,
+      // Who scanned this pallet in — left join since older/legacy pallets
+      // may not have an inboundUserId recorded.
+      inboundByUsername: users.username,
     })
     .from(pallets)
     .innerJoin(items, eq(pallets.itemId, items.id))
     .innerJoin(locations, eq(pallets.locationId, locations.id))
+    .leftJoin(users, eq(pallets.inboundUserId, users.id))
     .where(inArray(pallets.workOrderNumber, workOrderNumbers))
     .orderBy(pallets.inboundAt);
 
@@ -90,22 +94,31 @@ async function getWorkOrderSummary(workOrderNumbers: string[]) {
   }
 
   // Preserve the page's intended order (desc by workOrderNumber)
- return workOrderNumbers.map((wo) => {
-  const lines = byWorkOrder.get(wo) ?? [];
-  const linesWithInbound = lines.map((line) => ({
-    ...line,
-    originalInbound: originalInboundMap.get(`${wo}-${line.itemSku}`) ?? 0,
-  }));
+  return workOrderNumbers.map((wo) => {
+    const lines = byWorkOrder.get(wo) ?? [];
+    const linesWithInbound = lines.map((line) => ({
+      ...line,
+      originalInbound: originalInboundMap.get(`${wo}-${line.itemSku}`) ?? 0,
+    }));
 
-  return {
-    workOrderNumber: wo,
-    lines: linesWithInbound,
-    totalQuantity: lines.reduce((sum, l) => sum + l.totalQuantity, 0),
-    totalPallets: lines.reduce((sum, l) => sum + l.palletCount, 0),
-    totalOriginalInbound: linesWithInbound.reduce((sum, l) => sum + l.originalInbound, 0),
-    pallets: palletsByWo.get(wo) ?? [],
-  };
-});
+    const woPallets = palletsByWo.get(wo) ?? [];
+    // Earliest inbound timestamp across every pallet on this work order —
+    // shown on the card itself, not just inside the expanded detail.
+    const firstInboundAt = woPallets.reduce<Date | null>((earliest, p) => {
+      const at = new Date(p.inboundAt);
+      return !earliest || at < earliest ? at : earliest;
+    }, null);
+
+    return {
+      workOrderNumber: wo,
+      lines: linesWithInbound,
+      totalQuantity: lines.reduce((sum, l) => sum + l.totalQuantity, 0),
+      totalPallets: lines.reduce((sum, l) => sum + l.palletCount, 0),
+      totalOriginalInbound: linesWithInbound.reduce((sum, l) => sum + l.originalInbound, 0),
+      firstInboundAt,
+      pallets: woPallets,
+    };
+  });
 }
 
 export default async function WorkOrdersPage({

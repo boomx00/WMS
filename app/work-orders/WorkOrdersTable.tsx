@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 type Line = {
   workOrderNumber: string;
@@ -20,15 +20,19 @@ type Pallet = {
   itemSku: string;
   locationCode: string;
   inboundAt: string | Date;
+  inboundByUsername: string | null;
 };
+
 type WorkOrder = {
   workOrderNumber: string;
   lines: Line[];
   totalQuantity: number;
   totalPallets: number;
   totalOriginalInbound: number;
+  firstInboundAt: string | Date | null;
   pallets: Pallet[];
 };
+
 export default function WorkOrdersTable({
   workOrders,
   page,
@@ -111,25 +115,23 @@ export default function WorkOrdersTable({
                     >
                       ▶
                     </span>
-                    <span className="font-mono text-amber-500 text-sm">
-                      {wo.workOrderNumber}
-                    </span>
+                    <span className="font-mono text-amber-500 text-sm">{wo.workOrderNumber}</span>
                   </span>
                   <span className="text-xs text-zinc-500 text-right">
-  <div>
-    {wo.totalPallets.toLocaleString()} pallet(s) ·{" "}
-    <span className="text-zinc-300 font-mono">
-      {wo.totalQuantity.toLocaleString()}
-    </span>{" "}
-    total units
-  </div>
-  <div className="text-zinc-600 text-[10px]">
-    Originally inbounded: {wo.totalOriginalInbound.toLocaleString()}
-  </div>
-</span>
+                    <div>
+                      {wo.totalPallets.toLocaleString()} pallet(s) ·{" "}
+                      <span className="text-zinc-300 font-mono">{wo.totalQuantity.toLocaleString()}</span>{" "}
+                      total units
+                    </div>
+                    <div className="text-zinc-600 text-[10px]">
+                      Originally inbounded: {wo.totalOriginalInbound.toLocaleString()}
+                    </div>
+                    <div className="text-zinc-600 text-[10px]">
+                      First inbound:{" "}
+                      {wo.firstInboundAt ? new Date(wo.firstInboundAt).toLocaleString() : "—"}
+                    </div>
+                  </span>
                 </button>
-
-               
 
                 {isOpen && (
                   <div className="border-t border-zinc-800 bg-zinc-950/50">
@@ -141,6 +143,7 @@ export default function WorkOrdersTable({
                           <th className="px-4 py-2 font-medium text-right">Qty</th>
                           <th className="px-4 py-2 font-medium">Location</th>
                           <th className="px-4 py-2 font-medium">Status</th>
+                          <th className="px-4 py-2 font-medium">Inbound By</th>
                           <th className="px-4 py-2 font-medium text-right">Inbound</th>
                         </tr>
                       </thead>
@@ -149,12 +152,8 @@ export default function WorkOrdersTable({
                           <tr key={p.palletId} className="border-t border-zinc-800/60">
                             <td className="px-4 py-2 font-mono text-zinc-400">{p.label}</td>
                             <td className="px-4 py-2 font-mono text-zinc-300">{p.itemSku}</td>
-                            <td className="px-4 py-2 text-right font-mono">
-                              {p.quantity.toLocaleString()}
-                            </td>
-                            <td className="px-4 py-2 font-mono text-amber-500">
-                              {p.locationCode}
-                            </td>
+                            <td className="px-4 py-2 text-right font-mono">{p.quantity.toLocaleString()}</td>
+                            <td className="px-4 py-2 font-mono text-amber-500">{p.locationCode}</td>
                             <td className="px-4 py-2">
                               <span
                                 className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
@@ -166,6 +165,7 @@ export default function WorkOrdersTable({
                                 {p.status}
                               </span>
                             </td>
+                            <td className="px-4 py-2 text-zinc-400">{p.inboundByUsername ?? "—"}</td>
                             <td className="px-4 py-2 text-right text-zinc-500">
                               {new Date(p.inboundAt).toLocaleString()}
                             </td>
