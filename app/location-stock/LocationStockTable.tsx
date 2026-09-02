@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Row = {
   id: number;
@@ -19,9 +19,10 @@ const formatPallet = (value: number | string) => {
   return Number.isInteger(num) ? num.toString() : num.toFixed(2).replace(/\.?0+$/, "");
 };
 
-// Rack areas A-H first, then the special non-rack location types, in this
-// order. Anything unexpected falls after these, alphabetically.
-const GROUP_ORDER = ["A", "B", "C", "D", "E", "F", "G", "H", "FLOOR", "DESTROY", "LEFTOVER", "OUTBOUND_WH"];
+// Floor and Outbound WH always first (highest-traffic, highest-visibility
+// locations), then rack areas A-H, then the remaining special types.
+// Anything unexpected falls after these, alphabetically.
+const GROUP_ORDER = ["FLOOR", "OUTBOUND_WH", "A", "B", "C", "D", "E", "F", "G", "H", "DESTROY", "LEFTOVER"];
 
 const GROUP_LABELS: Record<string, string> = {
   FLOOR: "Floor",
@@ -42,24 +43,37 @@ function labelForGroup(key: string): string {
 
 export default function LocationStockTable({ rows }: { rows: Row[] }) {
   const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<Row[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter(
-      (r) =>
-        r.locationCode.toLowerCase().includes(q) ||
-        r.itemSku.toLowerCase().includes(q) ||
-        r.itemName.toLowerCase().includes(q)
-    );
-  }, [rows, search]);
+  // Searches the whole location_stock table in the database, not just
+  // whatever's already loaded on this page — same debounced pattern used
+  // on Work Orders, Sales Orders, and Movement History (v2).
+  useEffect(() => {
+    if (!search.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    const handle = setTimeout(async () => {
+      setSearching(true);
+      const res = await fetch(`/api/location-stock/search?q=${encodeURIComponent(search.trim())}`);
+      setSearching(false);
+      if (res.ok) {
+        setSearchResults(await res.json());
+      }
+    }, 300);
+
+    return () => clearTimeout(handle);
+  }, [search]);
 
   const isSearching = search.trim().length > 0;
+  const baseRows = searchResults ?? rows;
 
   const groups = useMemo(() => {
     const byKey = new Map<string, Row[]>();
-    for (const row of filtered) {
+    for (const row of baseRows) {
       const key = groupKeyFor(row);
       if (!byKey.has(key)) byKey.set(key, []);
       byKey.get(key)!.push(row);
@@ -82,7 +96,7 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
         }
         return a.key.localeCompare(b.key);
       });
-  }, [filtered]);
+  }, [baseRows]);
 
   function toggleGroup(key: string) {
     setExpandedGroups((prev) => {
@@ -99,18 +113,21 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by location or SKU..."
+        placeholder="Search all location stock by location or SKU..."
         className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm mb-4 focus:outline-none focus:border-amber-500"
       />
 
       <p className="text-xs text-zinc-600 mb-3">
-        {filtered.length.toLocaleString()} of {rows.length.toLocaleString()} rows
-        {isSearching && " · matching groups expanded automatically"}
+        {searching
+          ? "Searching..."
+          : isSearching
+            ? `${baseRows.length.toLocaleString()} result(s) for "${search.trim()}" · matching groups expanded automatically`
+            : `${rows.length.toLocaleString()} rows`}
       </p>
 
       {groups.length === 0 ? (
         <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center text-zinc-600 text-sm">
-          No stock recorded yet.
+          {isSearching ? "No matching stock." : "No stock recorded yet."}
         </div>
       ) : (
         <div className="space-y-2">
