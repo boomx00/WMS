@@ -16,7 +16,7 @@ function extractSku(label: string): string | null {
 }
 
 // PATCH /api/stock-opname/:opnameNumber/count
-// body: { locationCode, scanned, countedQty }
+// body: { locationCode, scanned, countedQty, originalLocationCode?, originalSku? }
 //
 // Alongside the blind physical count, this also snapshots whatever
 // location_stock says is there for this exact location+item *at the
@@ -29,6 +29,15 @@ function extractSku(label: string): string | null {
 // real-time session where locations are never pre-planned — only
 // discovered as the PIC actually visits them), it's registered into
 // stock_opname_locations automatically here.
+//
+// originalLocationCode/originalSku identify the row as it existed BEFORE
+// this edit — sent by the PDA whenever the PIC corrects a mis-scanned
+// location or wrong SKU on an already-saved line, so it can be edited in
+// place rather than leaving the stale original behind as a duplicate:
+//   - RACK locations hold exactly one SKU at a time, so the original row
+//     is found by location alone (whatever item is currently there).
+//   - FLOOR (and other non-RACK types) can hold several different SKUs
+//     at once, so the original row must be matched by location + item.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ opnameNumber: string }> }
@@ -42,6 +51,8 @@ export async function PATCH(
   const body = await req.json();
   const locationCode = sanitize(body.locationCode ?? "");
   const rawScanned = sanitize(body.scanned ?? "");
+  const originalLocationCode = sanitize(body.originalLocationCode ?? "");
+  const originalRawScanned = sanitize(body.originalSku ?? "");
   const { countedQty } = body;
 
   if (!locationCode || !rawScanned || countedQty === undefined || countedQty < 0) {
@@ -104,6 +115,58 @@ export async function PATCH(
         eq(stockOpnameItems.itemId, item.id)
       )
     );
+
+  // If this is an edit of an already-saved line, find that original row
+  // (by the rack/floor rule above) and, if it isn't the same row we
+  // already resolved for the (possibly new) location+item, remove it so
+  // the edit doesn't leave a stale duplicate behind.
+  if (originalLocationCode) {
+    const [originalLocation] = await db
+      .select()
+      .from(locations)
+      .where(eq(locations.code, originalLocationCode));
+
+    if (originalLocation) {
+      let originalLine;
+
+      if (originalLocation.type === "RACK") {
+        [originalLine] = await db
+          .select()
+          .from(stockOpnameItems)
+          .where(
+            and(
+              eq(stockOpnameItems.opnameNumber, opnameNumber),
+              eq(stockOpnameItems.locationId, originalLocation.id)
+            )
+          );
+      } else if (originalRawScanned) {
+        const originalLabel = await normalizeLabel(db, originalRawScanned);
+        const originalSku = extractSku(originalLabel);
+        if (originalSku) {
+          const [originalItem] = await db
+            .select()
+            .from(items)
+            .where(or(eq(items.sku, originalSku), eq(items.legacySku, originalSku)));
+          if (originalItem) {
+            [originalLine] = await db
+              .select()
+              .from(stockOpnameItems)
+              .where(
+                and(
+                  eq(stockOpnameItems.opnameNumber, opnameNumber),
+                  eq(stockOpnameItems.locationId, originalLocation.id),
+                  eq(stockOpnameItems.itemId, originalItem.id)
+                )
+              );
+          }
+        }
+      }
+
+      if (originalLine && (!existingLine || originalLine.id !== existingLine.id)) {
+        await db.delete(stockOpnameItems).where(eq(stockOpnameItems.id, originalLine.id));
+      }
+    }
+  }
 
   let result;
   if (existingLine) {

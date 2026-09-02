@@ -19,8 +19,9 @@ function sanitize(input: string): string {
 // would otherwise slip through since sku/workOrderNumber/quantity are
 // submitted as separate fields the server never cross-checks against the
 // raw label — is rejected instead of silently becoming the pallet's
-// permanent identifier.
-const REAL_LABEL_REGEX = /^\*?[^*]+\*\d{4}\*\d{4}\*MO\d{6}$/;
+// permanent identifier. The work order may optionally carry a 2-letter
+// suffix (e.g. "MO007449-DY").
+const REAL_LABEL_REGEX = /^\*?[^*]+\*\d{4}\*\d{4}\*MO\d{6}(-[A-Za-z]{2})?$/;
 
 function isValidRealLabel(label: string): boolean {
   return REAL_LABEL_REGEX.test(label);
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "PERIKSA ULANG LABEL YANG DI SCAN!! HAPUS TERUS SCAN LAGI!!",
+          "This doesn't look like a single valid pallet label (expected *SKU*seq*qty*workOrder, e.g. *14013024102*0004*5000*MO007449). It may be a double or corrupted scan — try scanning it again.",
       },
       { status: 400 }
     );
@@ -90,7 +91,7 @@ export async function POST(req: NextRequest) {
   if (existingElsewhere) {
     return NextResponse.json(
       {
-        error: `PALLET INI SUDAH DI INBOUND!!`,
+        error: `This pallet has already been inbounded — it's currently at ${existingElsewhere.locationCode}.`,
         matchType: "already_exists_elsewhere",
         actualLocationCode: existingElsewhere.locationCode,
       },
