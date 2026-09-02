@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import RefreshButton from "@/components/RefreshButton";
 
 type Row = {
   id: number;
@@ -77,18 +78,22 @@ export default function MovementHistoryV2Table({
       return;
     }
 
-    const handle = setTimeout(async () => {
-      setSearching(true);
-      const res = await fetch(`/api/movement-history-v2/search?q=${encodeURIComponent(search.trim())}`);
-      setSearching(false);
-      if (res.ok) {
-        setSearchResults(await res.json());
-        setActiveSearchLabel(`"${search.trim()}"`);
-      }
+    const handle = setTimeout(() => {
+      runQuickSearch(search.trim());
     }, 300);
 
     return () => clearTimeout(handle);
   }, [search, advancedMode]);
+
+  async function runQuickSearch(query: string) {
+    setSearching(true);
+    const res = await fetch(`/api/movement-history-v2/search?q=${encodeURIComponent(query)}`);
+    setSearching(false);
+    if (res.ok) {
+      setSearchResults(await res.json());
+      setActiveSearchLabel(`"${query}"`);
+    }
+  }
 
   async function runAdvancedSearch() {
     const params = new URLSearchParams();
@@ -109,6 +114,18 @@ export default function MovementHistoryV2Table({
     if (res.ok) {
       setSearchResults(await res.json());
       setActiveSearchLabel("advanced filters");
+    }
+  }
+
+  // Re-runs whichever search is currently active (advanced or quick), or
+  // refreshes the server-rendered default page if neither is active.
+  function handleRefresh() {
+    if (advancedMode) {
+      runAdvancedSearch();
+    } else if (search.trim()) {
+      runQuickSearch(search.trim());
+    } else {
+      router.refresh();
     }
   }
 
@@ -150,6 +167,7 @@ export default function MovementHistoryV2Table({
           >
             Advanced Search
           </button>
+          <RefreshButton onClick={handleRefresh} loading={searching} />
         </div>
       ) : (
         <div className="border border-zinc-800 rounded-lg bg-zinc-900/30 p-4 mb-4">
@@ -243,6 +261,7 @@ export default function MovementHistoryV2Table({
             >
               Clear
             </button>
+            <RefreshButton onClick={handleRefresh} loading={searching} />
           </div>
         </div>
       )}

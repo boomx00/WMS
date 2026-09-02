@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import RefreshButton from "@/components/RefreshButton";
 
 type Line = {
   workOrderNumber: string;
@@ -58,17 +59,31 @@ export default function WorkOrdersTable({
       return;
     }
 
-    const handle = setTimeout(async () => {
-      setSearching(true);
-      const res = await fetch(`/api/work-orders/search?q=${encodeURIComponent(search.trim())}`);
-      setSearching(false);
-      if (res.ok) {
-        setSearchResults(await res.json());
-      }
+    const handle = setTimeout(() => {
+      runSearch(search.trim());
     }, 300);
 
     return () => clearTimeout(handle);
   }, [search]);
+
+  async function runSearch(query: string) {
+    setSearching(true);
+    const res = await fetch(`/api/work-orders/search?q=${encodeURIComponent(query)}`);
+    setSearching(false);
+    if (res.ok) {
+      setSearchResults(await res.json());
+    }
+  }
+
+  // If a search is active, re-run it against the database; otherwise
+  // refresh the server-rendered page — either way, no full reload needed.
+  function handleRefresh() {
+    if (search.trim()) {
+      runSearch(search.trim());
+    } else {
+      router.refresh();
+    }
+  }
 
   const displayed = searchResults ?? workOrders;
   const isSearching = search.trim().length > 0;
@@ -88,13 +103,16 @@ export default function WorkOrdersTable({
 
   return (
     <div>
-      <input
-        type="text"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search all work orders by number or SKU..."
-        className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm mb-4 focus:outline-none focus:border-amber-500"
-      />
+      <div className="flex items-center gap-2 mb-4">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search all work orders by number or SKU..."
+          className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        />
+        <RefreshButton onClick={handleRefresh} loading={searching} />
+      </div>
 
       <p className="text-xs text-zinc-600 mb-3">
         {searching
