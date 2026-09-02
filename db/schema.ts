@@ -377,6 +377,7 @@ export const stockOpnameItems = pgTable("stock_opname_items", {
     .notNull()
     .references(() => items.id),
   palletId: integer("pallet_id").references(() => pallets.id),
+  systemSku: text("system_sku"), // nullable — snapshot of system SKU(s) at count time
   systemQty: integer("system_qty").notNull(),
   countedQty: integer("counted_qty"),
   difference: integer("difference"),

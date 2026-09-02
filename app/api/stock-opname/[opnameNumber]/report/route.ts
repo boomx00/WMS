@@ -6,8 +6,19 @@ import { eq, inArray } from "drizzle-orm";
 // GET /api/stock-opname/:opnameNumber/report
 // The full picture for one session: who it's assigned to, every location
 // in scope, and — for each one — whatever's actually been counted there
-// so far (SKU, the system quantity as it stood at the moment of that
-// count, the counted quantity, and the resulting difference).
+// so far.
+//
+// Two distinct "system" comparisons are shown, on purpose:
+//   - System SKU / System Qty: read from the snapshot stored on
+//     stock_opname_items at count time — a faithful record of what the
+//     system believed THEN, unaffected by anything that's happened since
+//     (including this session's own Adjust actions). Rows counted before
+//     this snapshot existed will show "—" here; that's expected, not a
+//     bug — there's no way to retroactively know a past system state.
+//   - Current System SKU / Current System Product: a fresh, live lookup
+//     of location_stock at report-view time — what's actually there
+//     RIGHT NOW, which may differ from the snapshot if anything moved,
+//     shipped, or was adjusted since the count was taken.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ opnameNumber: string }> }
@@ -45,6 +56,7 @@ export async function GET(
       itemSku: items.sku,
       itemName: items.name,
       systemQty: stockOpnameItems.systemQty,
+      systemSku: stockOpnameItems.systemSku,
       countedQty: stockOpnameItems.countedQty,
       difference: stockOpnameItems.difference,
       countedAt: stockOpnameItems.countedAt,
@@ -61,16 +73,16 @@ export async function GET(
     countedByLocation.get(row.locationId)!.push(row);
   }
 
-  // Ground truth: whatever the system's location_stock actually has
-  // recorded at each of this session's locations, independent of what was
-  // counted. This is what each count is really being checked against.
+  // Live current-system lookup — computed fresh every time this report
+  // loads, deliberately independent of the historical snapshot above.
   const locationIds = allLocations.map((l) => l.locationId);
-  const stockRows =
+  const liveStockRows =
     locationIds.length > 0
       ? await db
           .select({
             locationId: locationStock.locationId,
             itemSku: items.sku,
+            itemName: items.name,
             quantity: locationStock.quantity,
           })
           .from(locationStock)
@@ -78,35 +90,44 @@ export async function GET(
           .where(inArray(locationStock.locationId, locationIds))
       : [];
 
-  const systemSkusByLocation = new Map<number, string[]>();
-  for (const row of stockRows) {
+  const liveByLocation = new Map<number, { sku: string; name: string }[]>();
+  for (const row of liveStockRows) {
     if (row.quantity === 0) continue;
-    if (!systemSkusByLocation.has(row.locationId)) systemSkusByLocation.set(row.locationId, []);
-    systemSkusByLocation.get(row.locationId)!.push(row.itemSku);
+    if (!liveByLocation.has(row.locationId)) liveByLocation.set(row.locationId, []);
+    liveByLocation.get(row.locationId)!.push({ sku: row.itemSku, name: row.itemName });
   }
 
   const report = allLocations.map((loc) => {
     const counts = countedByLocation.get(loc.locationId) ?? [];
-    const systemSkus = systemSkusByLocation.get(loc.locationId) ?? [];
-    const systemSkuAtLocation = systemSkus.length > 0 ? systemSkus.join(", ") : "—";
+    const liveEntries = liveByLocation.get(loc.locationId) ?? [];
+    const currentSystemSku = liveEntries.length > 0 ? liveEntries.map((e) => e.sku).join(", ") : "—";
+    const currentSystemProductName = liveEntries.length > 0 ? liveEntries.map((e) => e.name).join(", ") : "—";
 
     return {
       locationCode: loc.locationCode,
       counted: counts.length > 0,
-      systemSkuAtLocation,
-      items: counts.map((c) => ({
-        itemId: c.itemId,
-        itemSku: c.itemSku,
-        itemName: c.itemName,
-        systemQty: c.systemQty,
-        countedQty: c.countedQty,
-        difference: c.difference,
-        countedAt: c.countedAt,
-        countedByUsername: c.countedByUsername,
-        skuMatch: systemSkus.some((s) => s.toUpperCase() === c.itemSku.toUpperCase())
-          ? ("MATCH" as const)
-          : ("MISMATCH" as const),
-      })),
+      currentSystemSku,
+      currentSystemProductName,
+      items: counts.map((c) => {
+        const systemSkuList = (c.systemSku ?? "")
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean);
+        return {
+          itemId: c.itemId,
+          itemSku: c.itemSku,
+          itemName: c.itemName,
+          systemQty: c.systemQty,
+          systemSku: c.systemSku ?? "—",
+          countedQty: c.countedQty,
+          difference: c.difference,
+          countedAt: c.countedAt,
+          countedByUsername: c.countedByUsername,
+          skuMatch: systemSkuList.includes(c.itemSku.toUpperCase())
+            ? ("MATCH" as const)
+            : ("MISMATCH" as const),
+        };
+      }),
     };
   });
 
