@@ -335,7 +335,7 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   <th className="py-2 font-medium text-right">Counted SKU Qty</th>
                   <th className="py-2 font-medium text-right">System SKU Qty (at Count)</th>
                   <th className="py-2 font-medium text-right">Difference</th>
-                  <th className="py-2 font-medium">Current System SKU</th>
+                  <th className="py-2 font-medium text-right">Current System SKU</th>
                   <th className="py-2 font-medium text-right">Current System Qty</th>
                   <th className="py-2 font-medium">By</th>
                   <th className="py-2 font-medium"></th>
@@ -352,7 +352,7 @@ function OpnameSessionRow({ session }: { session: Session }) {
                       <td className="py-1.5 text-right text-zinc-700">—</td>
                       <td className="py-1.5 text-right text-zinc-700">—</td>
                       <td className="py-1.5 text-right text-zinc-700">—</td>
-                      <td className="py-1.5 font-mono text-zinc-400">{loc.currentSystemSku}</td>
+                      <td className="py-1.5 font-mono text-zinc-400 text-right">{loc.currentSystemSku}</td>
                       <td className="py-1.5 text-right font-mono text-zinc-400">
                         {loc.currentSystemQty.toLocaleString()}
                       </td>
