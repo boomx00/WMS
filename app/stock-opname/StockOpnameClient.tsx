@@ -195,8 +195,9 @@ type ReportItem = {
   difference: number;
   countedAt: string | null;
   countedByUsername: string | null;
+  skuMatch: "MATCH" | "MISMATCH";
 };
-type ReportLocation = { locationCode: string; counted: boolean; items: ReportItem[] };
+type ReportLocation = { locationCode: string; counted: boolean; systemSkuAtLocation: string; items: ReportItem[] };
 type ReportResponse = {
   opnameNumber: string;
   notes: string | null;
@@ -322,6 +323,8 @@ function OpnameSessionRow({ session }: { session: Session }) {
                 <tr className="text-zinc-500 text-left border-t border-zinc-800 pt-2">
                   <th className="py-2 font-medium">Location</th>
                   <th className="py-2 font-medium">Counted SKU</th>
+                  <th className="py-2 font-medium">System SKU</th>
+                  <th className="py-2 font-medium">SKU Match</th>
                   <th className="py-2 font-medium">Product</th>
                   <th className="py-2 font-medium text-right">System Qty</th>
                   <th className="py-2 font-medium text-right">Counted Qty</th>
@@ -335,6 +338,8 @@ function OpnameSessionRow({ session }: { session: Session }) {
                   loc.items.length === 0 ? (
                     <tr key={loc.locationCode} className="border-t border-zinc-800/60">
                       <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
+                      <td className="py-1.5 text-zinc-700">—</td>
+                      <td className="py-1.5 font-mono text-zinc-500">{loc.systemSkuAtLocation}</td>
                       <td colSpan={7} className="py-1.5 text-zinc-700">
                         Not counted yet
                       </td>
@@ -344,6 +349,14 @@ function OpnameSessionRow({ session }: { session: Session }) {
                       <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60">
                         <td className="py-1.5 font-mono text-amber-500">{loc.locationCode}</td>
                         <td className="py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
+                        <td className="py-1.5 font-mono text-zinc-400">{loc.systemSkuAtLocation}</td>
+                        <td className="py-1.5">
+                          {item.skuMatch === "MATCH" ? (
+                            <span className="text-emerald-400">Match</span>
+                          ) : (
+                            <span className="text-red-400">Mismatch</span>
+                          )}
+                        </td>
                         <td className="py-1.5 text-zinc-500">{item.itemName}</td>
                         <td className="py-1.5 text-right font-mono text-zinc-400">
                           {item.systemQty.toLocaleString()}
