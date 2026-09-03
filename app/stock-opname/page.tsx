@@ -20,7 +20,13 @@ async function getSessions() {
     .select({
       opnameNumber: stockOpnameItems.opnameNumber,
       counted: sql<number>`count(distinct ${stockOpnameItems.locationId})::int`,
-      commencedAt: sql<string | null>`min(${stockOpnameItems.countedAt})`,
+      // Explicitly formatted as an ISO string with a literal "Z" — a bare
+      // `min(counted_at)` can come back as a wall-clock string with no
+      // timezone marker, which the browser's `new Date(...)` can then
+      // misinterpret as local time instead of UTC, shifting the displayed
+      // hour depending on server/DB timezone assumptions. This removes
+      // that ambiguity at the source.
+      commencedAt: sql<string | null>`to_char(min(${stockOpnameItems.countedAt}) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`,
     })
     .from(stockOpnameItems)
     .groupBy(stockOpnameItems.opnameNumber);
