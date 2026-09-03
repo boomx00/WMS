@@ -49,15 +49,15 @@ export default function SiteNav() {
   const labels = usePageLabels("navbar")
 
   const navitem:{key: NavItems; label: string, href: string}[] = [
-    {key: "Inventory", label: labels.th_inventory, href:"/"},
+    {key: "Inventory", label: labels.inventory, href:"/"},
     {key: "Location_Stock", label: labels.location_stock, href:"/location-stock"},
-    {key: "Sales_Orders", label: labels.location_stock, href:"/sales-orders"},
-    {key: "Movement_History", label: labels.location_stock, href:"/movement-history-v2"},
-    {key: "Work_Orders", label: labels.location_stock, href:"/work-orders"},
-    {key: "System_Control", label: labels.location_stock, href:"/scan"},
-    {key: "Analytics", label: labels.location_stock, href:"/analytics"},
-    {key: "Stock_Opname", label: labels.location_stock, href:"/stock-opname"},
-    {key: "Settings", label: labels.location_stock, href:"/settings"},
+    {key: "Sales_Orders", label: labels.sales_order, href:"/sales-orders"},
+    {key: "Movement_History", label: labels.movement_history, href:"/movement-history-v2"},
+    {key: "Work_Orders", label: labels.work_order, href:"/work-orders"},
+    {key: "System_Control", label: labels.system_control, href:"/scan"},
+    {key: "Analytics", label: labels.analytics, href:"/analytics"},
+    {key: "Stock_Opname", label: labels.stock_opname, href:"/stock-opname"},
+    {key: "Settings", label: labels.settings, href:"/settings"},
   ]
 
   return (
