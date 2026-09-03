@@ -27,6 +27,22 @@ export const DEFAULT_LABELS = {
     th_inbound: "Inbound",
     th_adjust: "Adjust Location",
     th_correct: "Adjust Pallet Qty",
+  },
+  navbar: {
+    th_inventory: "Inventory",
+    th_location_stock: "Location Stock",
+    th_sales_order: "Sales Order",
+    th_movement_history: "Movement History",
+    th_work_order: "Work order",
+    th_system_control: "System Control",
+    th_analytics: "Analytics",
+    th_stock_opname: "Stock Opname",
+    th_settings: "settings",
+    th_master_data: "Master Data",
+    th_items: "Product List",
+    th_locations: "Location List",
+    th_users: "User List",
+    th_roles: "Roles List"
   }
 } as const;
 

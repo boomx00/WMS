@@ -3,23 +3,37 @@
 import { useState } from "react";
 import { useLanguage } from "@/lib/LanguageContext";
 import { LANGUAGE_OPTIONS } from "@/lib/pageLabels";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
-const navItems = [
-  { href: "/", label: "Inventory" },
-  { href: "/location-stock", label: "Location Stock (v2)" },
-  { href: "/sales-orders", label: "Sales Orders" },
-  { href: "/movement-history-v2", label: "Movement History (v2)" },
-  // { href: "/rack-contents", label: "Location Contents" },
-  // { href: "/default-stock", label: "Default Stock" },
-  // { href: "/pallets", label: "Pallets" },
-  { href: "/work-orders", label: "Work Orders" },
-  // { href: "/transactions", label: "History" },
-  { href: "/scan", label: "Scan" },
-  // { href: "/pending", label: "Pending" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/stock-opname", label: "Stock Opname" },
-  { href: "/settings", label: "Settings" },
-];
+// const navItems = [
+//   { href: "/", label: "Inventory" },
+//   { href: "/location-stock", label: "Location Stock (v2)" },
+//   { href: "/sales-orders", label: "Sales Orders" },
+//   { href: "/movement-history-v2", label: "Movement History (v2)" },
+//   // { href: "/rack-contents", label: "Location Contents" },
+//   // { href: "/default-stock", label: "Default Stock" },
+//   // { href: "/pallets", label: "Pallets" },
+//   { href: "/work-orders", label: "Work Orders" },
+//   // { href: "/transactions", label: "History" },
+//   { href: "/scan", label: "System Control" },
+//   // { href: "/pending", label: "Pending" },
+//   { href: "/analytics", label: "Analytics" },
+//   { href: "/stock-opname", label: "Stock Opname" },
+//   { href: "/settings", label: "Settings" },
+// ];
+
+type NavItems =
+  | "Inventory"
+  | "Location_Stock"
+  | "Sales_Orders"
+  | "Movement_History"
+  | "Work_Orders"
+  | "System_Control"
+  | "Analytics"
+  | "Stock_Opname"
+  | "Settings";
+
+
 
 const adminItems = [
   { href: "/items", label: "Items" },
@@ -32,6 +46,19 @@ export default function SiteNav() {
   const [open, setOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const { language, setLanguage } = useLanguage();
+  const labels = usePageLabels("navbar")
+
+  const navitem:{key: NavItems; label: string, href: string}[] = [
+    {key: "Inventory", label: labels.th_inventory, href:"/"},
+    {key: "Location_Stock", label: labels.location_stock, href:"/location-stock"},
+    {key: "Sales_Orders", label: labels.location_stock, href:"/sales-orders"},
+    {key: "Movement_History", label: labels.location_stock, href:"/movement-history-v2"},
+    {key: "Work_Orders", label: labels.location_stock, href:"/work-orders"},
+    {key: "System_Control", label: labels.location_stock, href:"/scan"},
+    {key: "Analytics", label: labels.location_stock, href:"/analytics"},
+    {key: "Stock_Opname", label: labels.location_stock, href:"/stock-opname"},
+    {key: "Settings", label: labels.location_stock, href:"/settings"},
+  ]
 
   return (
     <>
@@ -54,9 +81,9 @@ export default function SiteNav() {
 
         <nav className="flex-1 px-3 py-4 space-y-1">
           {/* Main navigation */}
-          {navItems.map((item) => (
+          {navitem.map((item) => (
             <a
-              key={item.href}
+              key={item.key}
               href={item.href}
               className="block px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
             >
@@ -172,7 +199,7 @@ export default function SiteNav() {
         {open && (
           <nav className="border-t border-zinc-800 px-3 py-3 space-y-1 max-h-[calc(100vh-57px)] overflow-y-auto">
             {/* Main navigation */}
-            {navItems.map((item) => (
+            {navitem.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
