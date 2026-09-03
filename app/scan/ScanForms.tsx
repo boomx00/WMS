@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
-type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST" | "CORRECT_QTY" | "CHECK_SO";// Parses "SKU*palletSeq*qty*workOrder" into its parts.
 function parseLabel(raw: string) {
   const parts = raw.trim().split("*");
   if (parts.length !== 4) return null;
@@ -12,34 +12,41 @@ function parseLabel(raw: string) {
   if (!sku || !palletSeq || Number.isNaN(quantity) || !workOrderNumber) return null;
   return { sku, palletSeq, quantity, workOrderNumber };
 }
+type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST_LOCATION" | "ADJUST_PALLET_QTY" | "CHECK_SO";// Parses "SKU*palletSeq*qty*workOrder" into its parts.
 
 export default function ScanForms() {
   const [tab, setTab] = useState<Tab>("INBOUND");
-
+  const labels = usePageLabels("scan")
+  const tabs: { key: Tab; label: string }[] = [
+    { key: "INBOUND", label: labels.th_inbound },
+    { key: "ADJUST_LOCATION", label: labels.th_adjust_location },
+    { key: "ADJUST_PALLET_QTY", label: labels.th_adjust_pallet_qty },
+    { key: "CHECK_SO", label: labels.th_check_so },
+  ];
   return (
     <div>
       <div className="flex gap-1 mb-6 border border-zinc-800 rounded-lg p-1 w-fit">
-{(["INBOUND", "TO_OUTBOUND", "SPLIT", "CONFIRM", "ADJUST", "CORRECT_QTY", "CHECK_SO"] as Tab[]).map((t) => (
+{tabs.map((t) => (
   <button
-    key={t}
-    onClick={() => setTab(t)}
+    key={t.key}
+    onClick={() => setTab(t.key)}
     className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-      tab === t
+      tab === t.key
         ? "bg-amber-500 text-zinc-950"
         : "text-zinc-400 hover:text-zinc-100"
     }`}
   >
-    {t.replace(/_/g, " ")}
+    {t.label}
   </button>
 ))}
       </div>
-{tab === "ADJUST" && <AdjustForm />}
+{tab === "ADJUST_LOCATION" && <AdjustForm />}
 {tab === "INBOUND" && <InboundForm />}
 {tab === "SHIP" && <ShipForm />}
 {tab === "INITIAL_STOCK" && <InitialStockForm />}
 {tab === "CONFIRM" && <ConfirmInboundForm />}
 {tab === "CHECK_SO" && <CheckSoForm />}
-{tab === "CORRECT_QTY" && <CorrectQtyForm />}
+{tab === "ADJUST_PALLET_QTY" && <CorrectQtyForm />}
     </div>
   );
 }

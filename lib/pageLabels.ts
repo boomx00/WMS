@@ -22,13 +22,22 @@ export const DEFAULT_LABELS = {
     th_quantity: "Quantity",
     th_updated: "Updated",
     search_placeholder: "Search all location stock by location or SKU ..."
+  },
+  scan: {
+    th_inbound: "Inbound",
+    th_adjust: "Adjust Location",
+    th_correct: "Adjust Pallet Qty",
   }
 } as const;
 
 export type PageKey = keyof typeof DEFAULT_LABELS;
 export type LabelKey<P extends PageKey> = keyof (typeof DEFAULT_LABELS)[P];
 
-export const PAGE_OPTIONS: { key: PageKey; label: string }[] = [{ key: "stock_opname", label: "Stock Opname" }];
+export const PAGE_OPTIONS: { key: PageKey; label: string }[] = [
+    { key: "stock_opname", label: "Stock Opname" }, 
+    { key: "location_stock", label: "Location Stock (v2)"},
+    { key: "scan", label: "System Control"}
+];
 
 export type Language = "en" | "id" | "zh";
 
