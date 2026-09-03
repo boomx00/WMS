@@ -29,20 +29,20 @@ export const DEFAULT_LABELS = {
     th_correct: "Adjust Pallet Qty",
   },
   navbar: {
-    th_inventory: "Inventory",
-    th_location_stock: "Location Stock",
-    th_sales_order: "Sales Order",
-    th_movement_history: "Movement History",
-    th_work_order: "Work order",
-    th_system_control: "System Control",
-    th_analytics: "Analytics",
-    th_stock_opname: "Stock Opname",
-    th_settings: "settings",
-    th_master_data: "Master Data",
-    th_items: "Product List",
-    th_locations: "Location List",
-    th_users: "User List",
-    th_roles: "Roles List"
+    inventory: "Inventory",
+    location_stock: "Location Stock",
+    sales_order: "Sales Order",
+    movement_history: "Movement History",
+    work_order: "Work order",
+    system_control: "System Control",
+    analytics: "Analytics",
+    stock_opname: "Stock Opname",
+    settings: "settings",
+    master_data: "Master Data",
+    items: "Product List",
+    locations: "Location List",
+    users: "User List",
+    roles: "Roles List"
   }
 } as const;
 
@@ -50,9 +50,11 @@ export type PageKey = keyof typeof DEFAULT_LABELS;
 export type LabelKey<P extends PageKey> = keyof (typeof DEFAULT_LABELS)[P];
 
 export const PAGE_OPTIONS: { key: PageKey; label: string }[] = [
+    { key: "navbar", label: "NavBar"},
     { key: "stock_opname", label: "Stock Opname" }, 
     { key: "location_stock", label: "Location Stock (v2)"},
     { key: "scan", label: "System Control"}
+    
 ];
 
 export type Language = "en" | "id" | "zh";
