@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import PageLabelsSettings from "./PageLabelsSettings";
 
 export default function SettingsForm({
   initial,
@@ -15,6 +16,8 @@ export default function SettingsForm({
     allowNegativeRackStock: boolean;
   };
 }) {
+  const [activeTab, setActiveTab] = useState<"general" | "translations">("general");
+
   const [allowDefaultCode, setAllowDefaultCode] = useState(initial.allowDefaultCodeTransactions);
   const [automaticInbound, setAutomaticInbound] = useState(initial.automaticInbound);
   const [automaticInboundFromRack, setAutomaticInboundFromRack] = useState(
@@ -37,223 +40,251 @@ export default function SettingsForm({
   }
 
   return (
-    <div className="space-y-4 max-w-2xl">
-      <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Allow default-code transactions</div>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-              Enables scanning a SKU&apos;s <code>*default</code> barcode for
-              bulk-entering pre-existing stock without individual pallet
-              labels.
-            </p>
-          </div>
-          <button
-            onClick={() => {
-              const next = !allowDefaultCode;
-              setAllowDefaultCode(next);
-              updateSetting("allowDefaultCodeTransactions", next);
-            }}
-            disabled={saving}
-            className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
-              allowDefaultCode ? "bg-amber-500" : "bg-zinc-700"
-            }`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                allowDefaultCode ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
+    <div className="max-w-2xl">
+      <div className="flex gap-1 mb-6 border-b border-zinc-800">
+        <TabButton label="General" active={activeTab === "general"} onClick={() => setActiveTab("general")} />
+        <TabButton
+          label="Translations"
+          active={activeTab === "translations"}
+          onClick={() => setActiveTab("translations")}
+        />
       </div>
 
-      <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Automatic Inbound (from Floor)</div>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-              Lets Move auto-create a missing INBOUND record when moving an
-              untracked pallet off the Floor — for migrating pre-existing
-              stock. Turn off once existing floor stock is migrated.
-            </p>
+      {activeTab === "translations" ? (
+        <PageLabelsSettings />
+      ) : (
+        <div className="space-y-4">
+          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Allow default-code transactions</div>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                  Enables scanning a SKU&apos;s <code>*default</code> barcode for
+                  bulk-entering pre-existing stock without individual pallet
+                  labels.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const next = !allowDefaultCode;
+                  setAllowDefaultCode(next);
+                  updateSetting("allowDefaultCodeTransactions", next);
+                }}
+                disabled={saving}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                  allowDefaultCode ? "bg-amber-500" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                    allowDefaultCode ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => {
-              const next = !automaticInbound;
-              setAutomaticInbound(next);
-              updateSetting("automaticInbound", next);
-            }}
-            disabled={saving}
-            className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
-              automaticInbound ? "bg-amber-500" : "bg-zinc-700"
-            }`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                automaticInbound ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-      </div>
 
-      <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Automatic Inbound (from Rack)</div>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-              Same as above, but for pallets already sitting on a rack that
-              were never scanned in. Applies when moving Rack → Floor or
-              Rack → Rack. Turn off once existing rack stock is migrated.
-            </p>
+          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Automatic Inbound (from Floor)</div>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                  Lets Move auto-create a missing INBOUND record when moving an
+                  untracked pallet off the Floor — for migrating pre-existing
+                  stock. Turn off once existing floor stock is migrated.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const next = !automaticInbound;
+                  setAutomaticInbound(next);
+                  updateSetting("automaticInbound", next);
+                }}
+                disabled={saving}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                  automaticInbound ? "bg-amber-500" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                    automaticInbound ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => {
-              const next = !automaticInboundFromRack;
-              setAutomaticInboundFromRack(next);
-              updateSetting("automaticInboundFromRack", next);
-            }}
-            disabled={saving}
-            className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
-              automaticInboundFromRack ? "bg-amber-500" : "bg-zinc-700"
-            }`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                automaticInboundFromRack ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-      </div>
 
-      <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Allow untracked outbound</div>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-              Lets staff log an outbound scan for a location with zero
-              tracked stock, without affecting any stock numbers — for
-              recording activity on cells that were never stock-counted.
-            </p>
+          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Automatic Inbound (from Rack)</div>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                  Same as above, but for pallets already sitting on a rack that
+                  were never scanned in. Applies when moving Rack → Floor or
+                  Rack → Rack. Turn off once existing rack stock is migrated.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const next = !automaticInboundFromRack;
+                  setAutomaticInboundFromRack(next);
+                  updateSetting("automaticInboundFromRack", next);
+                }}
+                disabled={saving}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                  automaticInboundFromRack ? "bg-amber-500" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                    automaticInboundFromRack ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => {
-              const next = !allowUntrackedOutbound;
-              setAllowUntrackedOutbound(next);
-              updateSetting("allowUntrackedOutbound", next);
-            }}
-            disabled={saving}
-            className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
-              allowUntrackedOutbound ? "bg-amber-500" : "bg-zinc-700"
-            }`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                allowUntrackedOutbound ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-      </div>
 
-      <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Default Picking (Picking v2)</div>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-              Lets Picking (v2) proceed when a scanned rack cell has no
-              recorded stock, or not enough of the expected SKU — the
-              source is clamped to 0 rather than blocking or going
-              negative, and the destination still receives the full
-              amount. A different product occupying the cell always
-              blocks regardless of this setting.
-            </p>
+          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Allow untracked outbound</div>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                  Lets staff log an outbound scan for a location with zero
+                  tracked stock, without affecting any stock numbers — for
+                  recording activity on cells that were never stock-counted.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const next = !allowUntrackedOutbound;
+                  setAllowUntrackedOutbound(next);
+                  updateSetting("allowUntrackedOutbound", next);
+                }}
+                disabled={saving}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                  allowUntrackedOutbound ? "bg-amber-500" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                    allowUntrackedOutbound ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => {
-              const next = !allowDefaultPicking;
-              setAllowDefaultPicking(next);
-              updateSetting("allowDefaultPicking", next);
-            }}
-            disabled={saving}
-            className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
-              allowDefaultPicking ? "bg-amber-500" : "bg-zinc-700"
-            }`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                allowDefaultPicking ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-      </div>
 
-      <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Allow negative floor stock</div>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-              Lets Move In (v2) reduce Floor&apos;s recorded total below
-              zero, instead of blocking when the requested quantity
-              exceeds what&apos;s currently tracked there. Floor is
-              clamped to exactly 0 rather than going negative.
-            </p>
+          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Default Picking (Picking v2)</div>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                  Lets Picking (v2) proceed when a scanned rack cell has no
+                  recorded stock, or not enough of the expected SKU — the
+                  source is clamped to 0 rather than blocking or going
+                  negative, and the destination still receives the full
+                  amount. A different product occupying the cell always
+                  blocks regardless of this setting.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const next = !allowDefaultPicking;
+                  setAllowDefaultPicking(next);
+                  updateSetting("allowDefaultPicking", next);
+                }}
+                disabled={saving}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                  allowDefaultPicking ? "bg-amber-500" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                    allowDefaultPicking ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => {
-              const next = !allowNegativeFloorStock;
-              setAllowNegativeFloorStock(next);
-              updateSetting("allowNegativeFloorStock", next);
-            }}
-            disabled={saving}
-            className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
-              allowNegativeFloorStock ? "bg-amber-500" : "bg-zinc-700"
-            }`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                allowNegativeFloorStock ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
-        </div>
-      </div>
 
-      <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Default Move (Perpindahan Lokasi v2)</div>
-            <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-              Lets Rack → Rack (v2) proceed even when the source cell
-              doesn&apos;t have enough tracked stock — the destination
-              still receives the full counted amount, and the source is
-              clamped to 0 rather than blocking or going negative. Also
-              governs Picking (v2) the same way, since they share this
-              one setting.
-            </p>
+          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Allow negative floor stock</div>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                  Lets Move In (v2) reduce Floor&apos;s recorded total below
+                  zero, instead of blocking when the requested quantity
+                  exceeds what&apos;s currently tracked there. Floor is
+                  clamped to exactly 0 rather than going negative.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const next = !allowNegativeFloorStock;
+                  setAllowNegativeFloorStock(next);
+                  updateSetting("allowNegativeFloorStock", next);
+                }}
+                disabled={saving}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                  allowNegativeFloorStock ? "bg-amber-500" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                    allowNegativeFloorStock ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => {
-              const next = !allowNegativeRackStock;
-              setAllowNegativeRackStock(next);
-              updateSetting("allowNegativeRackStock", next);
-            }}
-            disabled={saving}
-            className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
-              allowNegativeRackStock ? "bg-amber-500" : "bg-zinc-700"
-            }`}
-          >
-            <span
-              className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                allowNegativeRackStock ? "translate-x-5" : ""
-              }`}
-            />
-          </button>
+
+          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium">Default Move (Perpindahan Lokasi v2)</div>
+                <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+                  Lets Rack → Rack (v2) proceed even when the source cell
+                  doesn&apos;t have enough tracked stock — the destination
+                  still receives the full counted amount, and the source is
+                  clamped to 0 rather than blocking or going negative. Also
+                  governs Picking (v2) the same way, since they share this
+                  one setting.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  const next = !allowNegativeRackStock;
+                  setAllowNegativeRackStock(next);
+                  updateSetting("allowNegativeRackStock", next);
+                }}
+                disabled={saving}
+                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                  allowNegativeRackStock ? "bg-amber-500" : "bg-zinc-700"
+                }`}
+              >
+                <span
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                    allowNegativeRackStock ? "translate-x-5" : ""
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
+  );
+}
+
+function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+        active ? "border-amber-500 text-amber-500" : "border-transparent text-zinc-500 hover:text-zinc-300"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
