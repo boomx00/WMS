@@ -1,10 +1,11 @@
 import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items } from "@/db/schema";
-import { eq, inArray, desc, sql } from "drizzle-orm";
+import { eq, inArray, desc, sql, and } from "drizzle-orm";
 import SalesOrdersClient from "./SalesOrdersClient";
 import { getSession } from "@/lib/auth";
 import { users, roles } from "@/db/schema";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
+import { tambahanOrders } from "@/db/schema";
 async function getIsAdmin(): Promise<boolean> {
   const session = await getSession();
   if (!session) return false;
@@ -65,7 +66,11 @@ const lines = await db
       sql`${palletEvents.type} = 'OUTBOUND' AND ${inArray(palletEvents.salesOrderId, orderIds)}`
     )
     .groupBy(palletEvents.salesOrderId, pallets.itemId);
-
+  const activeTambahanRows = await db
+    .select({ parentSalesOrderId: tambahanOrders.parentSalesOrderId })
+    .from(tambahanOrders)
+    .where(and(inArray(tambahanOrders.parentSalesOrderId, orderIds), eq(tambahanOrders.status, "ACTIVE")));
+  const activeTambahanSet = new Set(activeTambahanRows.map((r) => r.parentSalesOrderId));
   // Who picked what, from where — one row per (SO, item, location, user).
   const pickSourceRows = await db
     .select({
@@ -160,12 +165,15 @@ return Promise.all(
 
     const allComplete = orderItems.length > 0 && orderItems.every((l) => l.status === "SHIPPED");
     const anyActivity = orderItems.some((l) => l.shipped > 0 || l.picked > 0);
-    const overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED" = allComplete
-      ? "COMPLETE"
-      : anyActivity
-      ? "PARTIAL"
-      : "NOT_STARTED";
-
+    // An active Tambahan means there's still an outstanding batch on this
+    // SO, even if every original line has shipped.
+    const hasActiveTambahan = activeTambahanSet.has(o.id);
+    const overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED" =
+      allComplete && !hasActiveTambahan
+        ? "COMPLETE"
+        : anyActivity || hasActiveTambahan
+        ? "PARTIAL"
+        : "NOT_STARTED";
     const pickedByUsers = Array.from(
       new Set(orderItems.flatMap((l) => l.pickedFrom.map((p) => p.username)))
     );

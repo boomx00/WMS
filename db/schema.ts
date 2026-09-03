@@ -353,6 +353,9 @@ export const locationStockEvents = pgTable("location_stock_events", {
     .notNull()
     .references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // nullable — set instead of salesOrderId for picking/shipping done under a
+// Tambahan batch, before the real new SO number exists
+tambahanOrderId: integer("tambahan_order_id").references(() => tambahanOrders.id),
 });
 
 export const stockOpname = pgTable("stock_opname", {
@@ -413,3 +416,42 @@ export const stockOpnameLocations = pgTable(
   },
   (table) => [uniqueIndex("stock_opname_locations_unique_idx").on(table.opnameNumber, table.locationId)]
 );
+
+// ============================================================
+// Tambahan (extra picks against an already-fulfilled SO, pending
+// a real new SO number)
+// ============================================================
+
+export const tambahanStatusEnum = pgEnum("tambahan_status", ["ACTIVE", "CONVERTED"]);
+
+export const tambahanOrders = pgTable(
+  "tambahan_orders",
+  {
+    id: serial("id").primaryKey(),
+    tambahanNumber: text("tambahan_number").notNull(), // "TBH-<parent so_number>"
+    parentSalesOrderId: integer("parent_sales_order_id")
+      .notNull()
+      .references(() => salesOrders.id),
+    status: tambahanStatusEnum("status").notNull().default("ACTIVE"),
+    // Filled in once the real new SO number is issued and this is converted.
+    convertedSalesOrderId: integer("converted_sales_order_id").references(() => salesOrders.id),
+    convertedAt: timestamp("converted_at"),
+    convertedBy: integer("converted_by").references(() => users.id),
+    createdBy: integer("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("tambahan_orders_number_idx").on(table.tambahanNumber)]
+);
+
+export const tambahanOrdersRelations = relations(tambahanOrders, ({ one }) => ({
+  parentSalesOrder: one(salesOrders, {
+    fields: [tambahanOrders.parentSalesOrderId],
+    references: [salesOrders.id],
+  }),
+  convertedSalesOrder: one(salesOrders, {
+    fields: [tambahanOrders.convertedSalesOrderId],
+    references: [salesOrders.id],
+  }),
+}));

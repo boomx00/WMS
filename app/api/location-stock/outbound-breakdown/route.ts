@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStock, locations, items, locationStockEvents, salesOrders, salesOrderItems } from "@/db/schema";
+import {
+  locationStock,
+  locations,
+  items,
+  locationStockEvents,
+  salesOrders,
+  salesOrderItems,
+  tambahanOrders,
+} from "@/db/schema";
 import { eq, and, isNotNull } from "drizzle-orm";
 import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
+import { getPickedForTambahanQuantity } from "@/lib/pickedForTambahan";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
 
 // Whether THIS specific (SO, item) line has already fully shipped —
@@ -53,12 +62,7 @@ export async function GET(req: NextRequest) {
     })
     .from(locationStockEvents)
     .innerJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
-    .where(
-      and(
-        eq(locationStockEvents.itemId, item.id),
-        isNotNull(locationStockEvents.salesOrderId)
-      )
-    );
+    .where(and(eq(locationStockEvents.itemId, item.id), isNotNull(locationStockEvents.salesOrderId)));
 
   const markedBySo = [];
   for (const row of distinctSoRows) {
@@ -77,11 +81,37 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const distinctTambahanRows = await db
+    .selectDistinct({
+      tambahanOrderId: locationStockEvents.tambahanOrderId,
+      tambahanNumber: tambahanOrders.tambahanNumber,
+      status: tambahanOrders.status,
+    })
+    .from(locationStockEvents)
+    .innerJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
+    .where(and(eq(locationStockEvents.itemId, item.id), isNotNull(locationStockEvents.tambahanOrderId)));
+
+  const markedByTambahan = [];
+  for (const row of distinctTambahanRows) {
+    if (row.tambahanOrderId === null) continue;
+    if (row.status === "CONVERTED") continue; // its history moved to the new real SO already
+
+    const quantity = await getPickedForTambahanQuantity(db, row.tambahanOrderId, item.id);
+    if (quantity !== 0) {
+      markedByTambahan.push({
+        tambahanOrderId: row.tambahanOrderId,
+        tambahanNumber: row.tambahanNumber,
+        quantity,
+      });
+    }
+  }
+
   return NextResponse.json({
     itemSku: item.sku,
     itemName: item.name,
     totalInOutboundWh,
     unmarked,
     markedBySo,
+    markedByTambahan,
   });
 }

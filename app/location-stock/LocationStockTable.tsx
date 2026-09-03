@@ -236,6 +236,7 @@ type BreakdownResponse = {
   totalInOutboundWh: number;
   unmarked: number;
   markedBySo: { salesOrderId: number; soNumber: string; quantity: number }[];
+  markedByTambahan: { tambahanOrderId: number; tambahanNumber: string; quantity: number }[];
 };
 
 function OutboundRow({ row }: { row: Row }) {
@@ -318,29 +319,52 @@ function BreakdownDetail({ breakdown: initial }: { breakdown: BreakdownResponse 
         </span>
       </div>
 
-      {breakdown.markedBySo.length === 0 ? (
+           {breakdown.markedBySo.length === 0 && breakdown.markedByTambahan.length === 0 ? (
         <p className="text-xs text-zinc-600">Nothing marked to any SO yet.</p>
       ) : (
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="text-zinc-500 text-left">
-              <th className="py-1 font-medium">SO Number</th>
-              <th className="py-1 font-medium text-right">Marked Qty</th>
-              <th className="py-1 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {breakdown.markedBySo.map((m) => (
-              <CorrectableRow
-                key={m.salesOrderId}
-                itemSku={breakdown.itemSku}
-                soNumber={m.soNumber}
-                quantity={m.quantity}
-                onSaved={refresh}
-              />
-            ))}
-          </tbody>
-        </table>
+        <>
+          {breakdown.markedBySo.length > 0 && (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-zinc-500 text-left">
+                  <th className="py-1 font-medium">SO Number</th>
+                  <th className="py-1 font-medium text-right">Marked Qty</th>
+                  <th className="py-1 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.markedBySo.map((m) => (
+                  <CorrectableRow
+                    key={m.salesOrderId}
+                    itemSku={breakdown.itemSku}
+                    soNumber={m.soNumber}
+                    quantity={m.quantity}
+                    onSaved={refresh}
+                  />
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {breakdown.markedByTambahan.length > 0 && (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-zinc-500 text-left">
+                  <th className="py-1 font-medium">Tambahan</th>
+                  <th className="py-1 font-medium text-right">Marked Qty</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.markedByTambahan.map((m) => (
+                  <tr key={m.tambahanOrderId} className="border-t border-zinc-900">
+                    <td className="py-1 font-mono text-amber-400">{m.tambahanNumber}</td>
+                    <td className="py-1 text-right font-mono">{m.quantity}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
       )}
     </div>
   );

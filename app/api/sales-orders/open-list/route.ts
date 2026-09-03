@@ -8,7 +8,7 @@ import {
   locationStockEvents,
 } from "@/db/schema";
 import { eq, inArray, sql } from "drizzle-orm";
-
+import { tambahanOrders } from "@/db/schema";
 export async function GET() {
   const orders = await db.select().from(salesOrders);
 
@@ -58,7 +58,11 @@ export async function GET() {
       palletEvents.salesOrderId,
       pallets.itemId
     );
-
+  const activeTambahanRows = await db
+    .select({ parentSalesOrderId: tambahanOrders.parentSalesOrderId })
+    .from(tambahanOrders)
+    .where(eq(tambahanOrders.status, "ACTIVE"));
+  const activeTambahanSet = new Set(activeTambahanRows.map((r) => r.parentSalesOrderId));
   const pickedMap = new Map<string, number>();
 
   for (const r of pickedRows) {
@@ -120,7 +124,12 @@ export async function GET() {
           allDone = false;
         }
       }
-
+      // An active Tambahan means this SO isn't really done — there's
+      // more to pick/ship, even though its original lines are complete.
+      if (allDone && activeTambahanSet.has(order.id)) {
+        allDone = false;
+        anyActivity = true;
+      }
       const status = allDone
         ? "DONE"
         : anyActivity

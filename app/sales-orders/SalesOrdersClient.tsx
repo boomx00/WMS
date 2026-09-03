@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-
+import TambahanPanel from "./TambahanPanel";
 type ItemOption = { sku: string; name: string };
 
 type PickSource = { locationCode: string; quantity: number; type: string; username: string };
@@ -290,7 +290,9 @@ const sortedOrders = useMemo(() => {
                                 ))}
                               </tbody>
                             </table>
+                            
                           )}
+                          <TambahanPanel soNumber={order.soNumber} />
                         </td>
                       </tr>
                     )}
