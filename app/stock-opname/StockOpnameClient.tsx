@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import VerifyStockIntegrityPanel from "./VerifyStockIntegrityPanel";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 type Session = {
   opnameNumber: string;
@@ -31,6 +32,7 @@ export default function StockOpnameClient({
 }) {
   const [activeTab, setActiveTab] = useState<"opname" | "verify">("opname");
   const router = useRouter();
+  const labels = usePageLabels("stock_opname");
   const [opnameNumber, setOpnameNumber] = useState("");
   const [locationCodes, setLocationCodes] = useState("");
   const [assignedToUsername, setAssignedToUsername] = useState("");
@@ -163,7 +165,7 @@ export default function StockOpnameClient({
             No opname sessions yet.
           </div>
         ) : (
-          sessions.map((s) => <OpnameSessionRow key={s.opnameNumber} session={s} />)
+          sessions.map((s) => <OpnameSessionRow key={s.opnameNumber} session={s} labels={labels} />)
         )}
       </div>
         </div>
@@ -244,7 +246,7 @@ function DifferenceBadge({ difference }: { difference: number }) {
   );
 }
 
-function OpnameSessionRow({ session }: { session: Session }) {
+function OpnameSessionRow({ session, labels }: { session: Session; labels: Record<string, string> }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<ReportResponse | null>(null);
@@ -348,16 +350,16 @@ function OpnameSessionRow({ session }: { session: Session }) {
             <table className="w-full text-xs border-separate border-spacing-0">
               <thead>
                 <tr className="text-zinc-500 text-left border-t border-zinc-800">
-                  <th className="py-2 px-3 font-medium">Location</th>
-                  <th className="py-2 px-3 font-medium">Counted SKU</th>
-                  <th className="py-2 px-3 font-medium">System SKU (at Count)</th>
-                  <th className="py-2 px-3 font-medium">SKU Match</th>
-                  <th className="py-2 px-3 font-medium text-right">Counted SKU Qty</th>
-                  <th className="py-2 px-3 font-medium text-right">System SKU Qty (at Count)</th>
-                  <th className="py-2 px-3 font-medium text-right">Difference</th>
-                  <th className="py-2 px-3 font-medium">Current System SKU</th>
-                  <th className="py-2 px-3 font-medium text-right">Current System Qty</th>
-                  <th className="py-2 px-3 font-medium">By</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_location}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_counted_sku}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_system_sku_at_count}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_sku_match}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_counted_qty}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_system_qty_at_count}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_difference}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_current_system_sku}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_current_system_qty}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_by}</th>
                   <th className="py-2 px-3 font-medium"></th>
                 </tr>
               </thead>

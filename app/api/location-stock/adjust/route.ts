@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locations, items, locationStock, locationStockEvents, salesOrders, salesOrderItems } from "@/db/schema";
-import { eq, and, isNotNull } from "drizzle-orm";
+import { eq, and, ne, inArray, isNotNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
@@ -22,6 +22,14 @@ function sanitize(input: string): string {
 //
 // For every other location type, newQuantity is the plain grand total,
 // same as before — there's no marked/unmarked concept anywhere else.
+//
+// RACK-only safety check: a rack is expected to hold exactly one SKU at a
+// time. If the rack already has a DIFFERENT item with nonzero stock
+// recorded, the adjustment is blocked entirely rather than letting two
+// different SKUs both show quantity at the same rack — that's very
+// likely a sign the wrong SKU was entered, not a legitimate multi-SKU
+// rack. Floor, Outbound WH, and other non-RACK types are exempt, since
+// they're expected to genuinely hold multiple SKUs at once.
 export async function PATCH(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -51,6 +59,32 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
 
+  if (location.type === "RACK") {
+    const conflictingStock = await db
+      .select()
+      .from(locationStock)
+      .where(
+        and(
+          eq(locationStock.locationId, location.id),
+          ne(locationStock.itemId, item.id),
+          ne(locationStock.quantity, 0)
+        )
+      );
+
+    if (conflictingStock.length > 0) {
+      const conflictingItemIds = conflictingStock.map((r) => r.itemId);
+      const conflictingItems = await db.select().from(items).where(inArray(items.id, conflictingItemIds));
+      const conflictingSkus = conflictingItems.map((i) => i.sku).join(", ");
+
+      return NextResponse.json(
+        {
+          error: `The SKU in that rack is not the same. ${location.code} currently holds ${conflictingSkus}, not ${item.sku}.`,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const [existing] = await db
     .select()
     .from(locationStock)
@@ -63,7 +97,10 @@ export async function PATCH(req: NextRequest) {
     const ledgerDelta = newQuantity - currentUnmarked;
 
     if (ledgerDelta === 0) {
-      return NextResponse.json({ error: "New quantity is the same as the current unmarked quantity" }, { status: 400 });
+      return NextResponse.json(
+        { error: "New quantity is the same as the current unmarked quantity" },
+        { status: 400 }
+      );
     }
 
     // Sum of everything still marked to an OPEN SO — reserved stock,
@@ -79,9 +116,7 @@ export async function PATCH(req: NextRequest) {
       const [orderLine] = await db
         .select()
         .from(salesOrderItems)
-        .where(
-          and(eq(salesOrderItems.salesOrderId, row.salesOrderId), eq(salesOrderItems.itemId, item.id))
-        );
+        .where(and(eq(salesOrderItems.salesOrderId, row.salesOrderId), eq(salesOrderItems.itemId, item.id)));
       if (!orderLine) continue;
 
       const shipped = await getShippedQuantity(db, row.salesOrderId, item.id);

@@ -1,77 +1,107 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { settings } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { pageLabels } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { DEFAULT_LABELS, PageKey } from "@/lib/pageLabels";
 
-export async function GET() {
-  const [row] = await db.select().from(settings).limit(1);
-  return NextResponse.json(
-    row ?? {
-      allowDefaultCodeTransactions: true,
-      automaticInbound: false,
-      automaticInboundFromRack: false,
-      allowUntrackedOutbound: false,
-      allowDefaultPicking: true,
-      allowNegativeFloorStock: false,
-      allowNegativeRackStock: false,
-    }
-  );
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
 }
 
-export async function PATCH(req: Request) {
+function isValidPage(page: string): page is PageKey {
+  return page in DEFAULT_LABELS;
+}
+
+// GET /api/settings/labels?page=stock_opname
+// Returns the full label set for a page — defaults, with any saved
+// overrides applied on top. The client never has to know which keys are
+// customized vs default; it just gets the final text to render.
+export async function GET(req: NextRequest) {
+  const page = sanitize(req.nextUrl.searchParams.get("page") ?? "");
+
+  if (!isValidPage(page)) {
+    return NextResponse.json({ error: "Unknown or unsupported page" }, { status: 400 });
+  }
+
+  const overrides = await db.select().from(pageLabels).where(eq(pageLabels.page, page));
+
+  const merged: Record<string, string> = { ...DEFAULT_LABELS[page] };
+  for (const row of overrides) {
+    merged[row.key] = row.value;
+  }
+
+  return NextResponse.json(merged);
+}
+
+// PUT /api/settings/labels
+// body: { page, labels: { key: value, ... } }
+// Upserts every provided key for that page. A value equal to the default
+// is still stored as an explicit override (simplest, most predictable
+// behavior) — use DELETE to actually reset a key back to following
+// future default changes automatically.
+export async function PUT(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
   const body = await req.json();
-  const {
-    allowDefaultCodeTransactions,
-    automaticInbound,
-    automaticInboundFromRack,
-    allowUntrackedOutbound,
-    allowDefaultPicking,
-    allowNegativeFloorStock,
-    allowNegativeRackStock,
-  } = body;
+  const page = sanitize(body.page ?? "");
+  const labels = body.labels;
 
-  const [existing] = await db.select().from(settings).limit(1);
-
-  const updates: Record<string, boolean> = {};
-  if (allowDefaultCodeTransactions !== undefined) updates.allowDefaultCodeTransactions = allowDefaultCodeTransactions;
-  if (automaticInbound !== undefined) updates.automaticInbound = automaticInbound;
-  if (automaticInboundFromRack !== undefined) updates.automaticInboundFromRack = automaticInboundFromRack;
-  if (allowUntrackedOutbound !== undefined) updates.allowUntrackedOutbound = allowUntrackedOutbound;
-  if (allowDefaultPicking !== undefined) updates.allowDefaultPicking = allowDefaultPicking;
-  if (allowNegativeFloorStock !== undefined) updates.allowNegativeFloorStock = allowNegativeFloorStock;
-  if (allowNegativeRackStock !== undefined) updates.allowNegativeRackStock = allowNegativeRackStock;
-
-  if (Object.keys(updates).length === 0) {
-    return NextResponse.json({ error: "No recognized settings fields in request body" }, { status: 400 });
+  if (!isValidPage(page) || typeof labels !== "object" || labels === null) {
+    return NextResponse.json({ error: "page and a labels object are required" }, { status: 400 });
   }
 
-  let result;
-  if (existing) {
-    [result] = await db
-      .update(settings)
-      .set(updates)
-      .where(eq(settings.id, existing.id))
-      .returning();
-  } else {
-    [result] = await db
-      .insert(settings)
-      .values({
-        allowDefaultCodeTransactions: allowDefaultCodeTransactions ?? true,
-        automaticInbound: automaticInbound ?? false,
-        automaticInboundFromRack: automaticInboundFromRack ?? false,
-        allowUntrackedOutbound: allowUntrackedOutbound ?? false,
-        allowDefaultPicking: allowDefaultPicking ?? true,
-        allowNegativeFloorStock: allowNegativeFloorStock ?? false,
-        allowNegativeRackStock: allowNegativeRackStock ?? false,
-      })
-      .returning();
+  const validKeys = new Set(Object.keys(DEFAULT_LABELS[page]));
+  const entries = Object.entries(labels).filter(([key]) => validKeys.has(key));
+
+  if (entries.length === 0) {
+    return NextResponse.json({ error: "No recognized label keys for this page" }, { status: 400 });
   }
 
-  return NextResponse.json(result);
+  await db.transaction(async (tx) => {
+    for (const [key, value] of entries) {
+      const cleanValue = sanitize(String(value ?? ""));
+      const [existing] = await tx
+        .select()
+        .from(pageLabels)
+        .where(and(eq(pageLabels.page, page), eq(pageLabels.key, key)));
+
+      if (existing) {
+        await tx
+          .update(pageLabels)
+          .set({ value: cleanValue, updatedAt: new Date() })
+          .where(eq(pageLabels.id, existing.id));
+      } else {
+        await tx.insert(pageLabels).values({ page, key, value: cleanValue });
+      }
+    }
+  });
+
+  return NextResponse.json({ saved: entries.length });
+}
+
+// DELETE /api/settings/labels
+// body: { page, key }
+// Removes a single override, reverting that one string back to whatever
+// DEFAULT_LABELS says (including any future code changes to the default).
+export async function DELETE(req: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+  }
+
+  const body = await req.json();
+  const page = sanitize(body.page ?? "");
+  const key = sanitize(body.key ?? "");
+
+  if (!isValidPage(page) || !key) {
+    return NextResponse.json({ error: "page and key are required" }, { status: 400 });
+  }
+
+  await db.delete(pageLabels).where(and(eq(pageLabels.page, page), eq(pageLabels.key, key)));
+
+  return NextResponse.json({ reverted: key });
 }

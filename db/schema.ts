@@ -7,7 +7,8 @@ import {
   uniqueIndex,
   pgEnum,
   boolean,
-  varchar
+  varchar,
+  unique
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -364,6 +365,18 @@ export const stockOpname = pgTable("stock_opname", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
 });
+
+
+export const pageLabels = pgTable("page_labels", {
+  id: serial("id").primaryKey(),
+  page: text("page").notNull(),
+  key: text("key").notNull(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (table) => ({
+  pageKeyUnique: unique("page_labels_page_key_unique").on(table.page, table.key),
+}));
+
 
 export const stockOpnameItems = pgTable("stock_opname_items", {
   id: serial("id").primaryKey(),
