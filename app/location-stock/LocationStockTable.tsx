@@ -323,21 +323,21 @@ function BreakdownDetail({ breakdown: initial }: { breakdown: BreakdownResponse 
         <p className="text-xs text-zinc-600">Nothing marked to any SO yet.</p>
       ) : (
         <>
-          {breakdown.markedBySo.length > 0 && (
+          {breakdown.markedByTambahan.length > 0 && (
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-zinc-500 text-left">
-                  <th className="py-1 font-medium">SO Number</th>
+                  <th className="py-1 font-medium">Tambahan</th>
                   <th className="py-1 font-medium text-right">Marked Qty</th>
                   <th className="py-1 font-medium"></th>
                 </tr>
               </thead>
               <tbody>
-                {breakdown.markedBySo.map((m) => (
-                  <CorrectableRow
-                    key={m.salesOrderId}
+                {breakdown.markedByTambahan.map((m) => (
+                  <CorrectableTambahanRow
+                    key={m.tambahanOrderId}
                     itemSku={breakdown.itemSku}
-                    soNumber={m.soNumber}
+                    tambahanNumber={m.tambahanNumber}
                     quantity={m.quantity}
                     onSaved={refresh}
                   />
@@ -436,6 +436,87 @@ function CorrectableRow({
             Edit
           </button>
         )}
+      </td>
+    </tr>
+  );
+}
+
+function CorrectableTambahanRow({
+  itemSku,
+  tambahanNumber,
+  quantity,
+  onSaved,
+}: {
+  itemSku: string;
+  tambahanNumber: string;
+  quantity: number;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(quantity.toString());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    const res = await fetch("/api/location-stock/outbound-breakdown/correct-tambahan", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemSku, tambahanNumber, newQuantity: Number(value) }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to save");
+      return;
+    }
+    setEditing(false);
+    onSaved();
+  }
+
+  return (
+    <tr className="border-t border-zinc-900">
+      <td className="py-1 font-mono text-amber-400">{tambahanNumber}</td>
+      <td className="py-1 text-right font-mono">
+        {editing ? (
+          <input
+            type="number"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-20 px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-right font-mono text-xs"
+          />
+        ) : (
+          quantity
+        )}
+      </td>
+      <td className="py-1 text-right">
+        {editing ? (
+          <div className="flex gap-1 justify-end">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
+            >
+              {saving ? "..." : "Save"}
+            </button>
+            <button
+              onClick={() => {
+                setEditing(false);
+                setValue(quantity.toString());
+                setError(null);
+              }}
+              className="text-zinc-500 hover:text-zinc-300"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setEditing(true)} className="text-zinc-500 hover:text-zinc-300">
+            Edit
+          </button>
+        )}
+        {error && <div className="text-red-400 mt-0.5">{error}</div>}
       </td>
     </tr>
   );
