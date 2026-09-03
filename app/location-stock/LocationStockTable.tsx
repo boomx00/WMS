@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 type Row = {
   id: number;
@@ -46,6 +47,7 @@ function labelForGroup(key: string): string {
 export default function LocationStockTable({ rows }: { rows: Row[] }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
+    const labels = usePageLabels("location_stock");
   const [searchResults, setSearchResults] = useState<Row[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -159,6 +161,7 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
               open={isSearching || expandedGroups.has(group.key)}
               onToggle={() => toggleGroup(group.key)}
               searchable={isSearching}
+              labels={labels}
             />
           ))}
         </div>
@@ -172,11 +175,13 @@ function GroupSection({
   open,
   onToggle,
   searchable,
+  labels,
 }: {
   group: { key: string; label: string; rows: Row[]; locationCount: number };
   open: boolean;
   onToggle: () => void;
   searchable: boolean;
+  labels: Record <string, string>
 }) {
   const totalQuantity = group.rows.reduce((sum, r) => sum + r.quantity, 0);
 
@@ -207,11 +212,11 @@ function GroupSection({
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-zinc-950/40 text-zinc-500 text-left">
-              <th className="px-4 py-2 font-medium">Location</th>
-              <th className="px-4 py-2 font-medium">SKU</th>
-              <th className="px-4 py-2 font-medium">Product</th>
-              <th className="px-4 py-2 font-medium text-right">Quantity</th>
-              <th className="px-4 py-2 font-medium text-right">Updated</th>
+              <th className="px-4 py-2 font-medium">{labels.th_location}</th>
+              <th className="px-4 py-2 font-medium">{labels.th_sku}</th>
+              <th className="px-4 py-2 font-medium">{labels.th_product}</th>
+              <th className="px-4 py-2 font-medium text-right">{labels.th_quantity}</th>
+              <th className="px-4 py-2 font-medium text-right">{labels.th_updated}</th>
             </tr>
           </thead>
           <tbody>

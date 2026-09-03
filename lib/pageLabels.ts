@@ -15,6 +15,14 @@ export const DEFAULT_LABELS = {
     th_current_system_qty: "Current System Qty",
     th_by: "By",
   },
+  location_stock: {
+    th_location: "Location",
+    th_sku: "SKU",
+    th_product: "Product",
+    th_quantity: "Quantity",
+    th_updated: "Updated",
+    search_placeholder: "Search all location stock by location or SKU ..."
+  }
 } as const;
 
 export type PageKey = keyof typeof DEFAULT_LABELS;
