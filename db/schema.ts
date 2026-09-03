@@ -371,7 +371,9 @@ export const pageLabels = pgTable("page_labels", {
   id: serial("id").primaryKey(),
   page: text("page").notNull(),
   key: text("key").notNull(),
-  value: text("value").notNull(),
+  textEn: text("text_en"),
+  textId: text("text_id"),
+  textZh: text("text_zh"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
   pageKeyUnique: unique("page_labels_page_key_unique").on(table.page, table.key),

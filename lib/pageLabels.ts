@@ -1,4 +1,4 @@
-// Default label text per page, keyed by a stable identifier per string.
+// Default English text per page, keyed by a stable identifier per string.
 // A page's customizable strings are exactly the keys listed here — adding
 // a new customizable page/string later just means adding an entry here
 // and using usePageLabels(page).key wherever that string is rendered.
@@ -21,3 +21,11 @@ export type PageKey = keyof typeof DEFAULT_LABELS;
 export type LabelKey<P extends PageKey> = keyof (typeof DEFAULT_LABELS)[P];
 
 export const PAGE_OPTIONS: { key: PageKey; label: string }[] = [{ key: "stock_opname", label: "Stock Opname" }];
+
+export type Language = "en" | "id" | "zh";
+
+export const LANGUAGE_OPTIONS: { code: Language; label: string }[] = [
+  { code: "en", label: "EN" },
+  { code: "id", label: "ID" },
+  { code: "zh", label: "中文" },
+];

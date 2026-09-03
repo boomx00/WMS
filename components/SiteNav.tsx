@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useLanguage } from "@/lib/LanguageContext";
+import { LANGUAGE_OPTIONS } from "@/lib/pageLabels";
 
 const navItems = [
   { href: "/", label: "Inventory" },
@@ -25,6 +27,7 @@ const navItems = [
 
 export default function SiteNav() {
   const [open, setOpen] = useState(false);
+  const { language, setLanguage } = useLanguage();
 
   return (
     <>
@@ -38,7 +41,10 @@ export default function SiteNav() {
           <div className="font-mono text-xs tracking-widest text-amber-500 uppercase">
             Rack&nbsp;/&nbsp;Bin
           </div>
-          <div className="text-lg font-semibold mt-0.5">WMS</div>
+          <div className="flex items-center justify-between mt-0.5">
+            <div className="text-lg font-semibold">WMS</div>
+            <LanguageSwitcher language={language} onChange={setLanguage} />
+          </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
           {navItems.map((item) => (
@@ -64,7 +70,10 @@ export default function SiteNav() {
             <div className="font-mono text-[10px] tracking-widest text-amber-500 uppercase">
               Rack&nbsp;/&nbsp;Bin
             </div>
-            <div className="text-base font-semibold -mt-0.5">WMS</div>
+            <div className="flex items-center gap-2">
+              <div className="text-base font-semibold">WMS</div>
+              <LanguageSwitcher language={language} onChange={setLanguage} />
+            </div>
           </div>
           <button
             onClick={() => setOpen((prev) => !prev)}
@@ -114,5 +123,28 @@ export default function SiteNav() {
         )}
       </div>
     </>
+  );
+}
+
+function LanguageSwitcher({
+  language,
+  onChange,
+}: {
+  language: "en" | "id" | "zh";
+  onChange: (lang: "en" | "id" | "zh") => void;
+}) {
+  return (
+    <select
+      value={language}
+      onChange={(e) => onChange(e.target.value as "en" | "id" | "zh")}
+      aria-label="Language"
+      className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300 focus:outline-none focus:border-amber-500"
+    >
+      {LANGUAGE_OPTIONS.map((opt) => (
+        <option key={opt.code} value={opt.code}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
   );
 }
