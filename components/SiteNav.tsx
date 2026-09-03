@@ -5,22 +5,22 @@ import { useLanguage } from "@/lib/LanguageContext";
 import { LANGUAGE_OPTIONS } from "@/lib/pageLabels";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
-const navItems = [
-  { href: "/", label: "Inventory" },
-  { href: "/location-stock", label: "Location Stock (v2)" },
-  { href: "/sales-orders", label: "Sales Orders" },
-  { href: "/movement-history-v2", label: "Movement History (v2)" },
-  // { href: "/rack-contents", label: "Location Contents" },
-  // { href: "/default-stock", label: "Default Stock" },
-  // { href: "/pallets", label: "Pallets" },
-  { href: "/work-orders", label: "Work Orders" },
-  // { href: "/transactions", label: "History" },
-  { href: "/scan", label: "System Control" },
-  // { href: "/pending", label: "Pending" },
-  { href: "/analytics", label: "Analytics" },
-  { href: "/stock-opname", label: "Stock Opname" },
-  { href: "/settings", label: "Settings" },
-];
+// const navItems = [
+//   { href: "/", label: "Inventory" },
+//   { href: "/location-stock", label: "Location Stock (v2)" },
+//   { href: "/sales-orders", label: "Sales Orders" },
+//   { href: "/movement-history-v2", label: "Movement History (v2)" },
+//   // { href: "/rack-contents", label: "Location Contents" },
+//   // { href: "/default-stock", label: "Default Stock" },
+//   // { href: "/pallets", label: "Pallets" },
+//   { href: "/work-orders", label: "Work Orders" },
+//   // { href: "/transactions", label: "History" },
+//   { href: "/scan", label: "System Control" },
+//   // { href: "/pending", label: "Pending" },
+//   { href: "/analytics", label: "Analytics" },
+//   { href: "/stock-opname", label: "Stock Opname" },
+//   { href: "/settings", label: "Settings" },
+// ];
 
 type NavItems =
   | "Inventory"
@@ -47,7 +47,7 @@ export default function SiteNav() {
   const [adminOpen, setAdminOpen] = useState(false);
   const { language, setLanguage } = useLanguage();
   const labels = usePageLabels("navbar")
-console.log("navbar labels:", labels);
+
   const navItem:{key: NavItems; label: string, href: string}[] = [
     {key: "Inventory", label: labels.inventory, href:"/"},
     {key: "Location_Stock", label: labels.location_stock, href:"/location-stock"},
@@ -81,9 +81,9 @@ console.log("navbar labels:", labels);
 
         <nav className="flex-1 px-3 py-4 space-y-1">
           {/* Main navigation */}
-          {navItems.map((item) => (
+          {navItem.map((item) => (
             <a
-              key={item.label}
+              key={item.key}
               href={item.href}
               className="block px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
             >
