@@ -19,9 +19,9 @@ export default function ScanForms() {
   const labels = usePageLabels("scan")
   const tabs: { key: Tab; label: string }[] = [
     { key: "INBOUND", label: labels.th_inbound },
-    { key: "ADJUST_LOCATION", label: labels.th_adjust_location },
-    { key: "ADJUST_PALLET_QTY", label: labels.th_adjust_pallet_qty },
-    { key: "CHECK_SO", label: labels.th_check_so },
+    { key: "ADJUST_LOCATION", label: labels.th_adjust},
+    { key: "ADJUST_PALLET_QTY", label: labels.th_correct },
+    // { key: "CHECK_SO", label: labels.th_check_so },
   ];
   return (
     <div>

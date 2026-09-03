@@ -27,6 +27,8 @@ export const DEFAULT_LABELS = {
     th_inbound: "Inbound",
     th_adjust: "Adjust Location",
     th_correct: "Adjust Pallet Qty",
+    // th_check_so: "Check SO",
+
   },
   navbar: {
     inventory: "Inventory",
@@ -37,7 +39,7 @@ export const DEFAULT_LABELS = {
     system_control: "System Control",
     analytics: "Analytics",
     stock_opname: "Stock Opname",
-    settings: "settings",
+    settings: "Settings",
     master_data: "Master Data",
     items: "Product List",
     locations: "Location List",
