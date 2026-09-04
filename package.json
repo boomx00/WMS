@@ -16,6 +16,7 @@
     "jsbarcode": "^3.12.3",
     "next": "16.3.0",
     "postgres": "^3.4.9",
+    "puppeteer": "^24.43.1",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",

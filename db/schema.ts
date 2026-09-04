@@ -337,6 +337,8 @@ export const locationStockEventTypeEnum = pgEnum("location_stock_event_type", [
   "ADJUSTMENT",
   "RELEASE",
   "CLAIM",
+    "OTHER_INBOUND",
+  "OTHER_OUTBOUND",
 ]);
 
 export const locationStockEvents = pgTable("location_stock_events", {
@@ -356,6 +358,7 @@ export const locationStockEvents = pgTable("location_stock_events", {
   // nullable — set instead of salesOrderId for picking/shipping done under a
 // Tambahan batch, before the real new SO number exists
 tambahanOrderId: integer("tambahan_order_id").references(() => tambahanOrders.id),
+  otherTransactionId: integer("other_transaction_id").references(() => otherTransactions.id),
 });
 
 export const stockOpname = pgTable("stock_opname", {
@@ -422,6 +425,11 @@ export const stockOpnameLocations = pgTable(
 // a real new SO number)
 // ============================================================
 
+// ============================================================
+// Tambahan (extra picks against an already-fulfilled SO, pending
+// a real new SO number)
+// ============================================================
+
 export const tambahanStatusEnum = pgEnum("tambahan_status", ["ACTIVE", "CONVERTED"]);
 
 export const tambahanOrders = pgTable(
@@ -454,4 +462,39 @@ export const tambahanOrdersRelations = relations(tambahanOrders, ({ one }) => ({
     fields: [tambahanOrders.convertedSalesOrderId],
     references: [salesOrders.id],
   }),
+}));
+
+// ============================================================
+// Other Transactions (manual inbound/outbound corrections outside
+// the normal Inbound/Picking/Shipping flows)
+// ============================================================
+
+export const otherTransactionTypeEnum = pgEnum("other_transaction_type", ["INBOUND", "OUTBOUND"]);
+
+export const otherTransactions = pgTable(
+  "other_transactions",
+  {
+    id: serial("id").primaryKey(),
+    transactionCode: text("transaction_code").notNull(), // "ZXCKWMS-<id>"
+    type: otherTransactionTypeEnum("type").notNull(),
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => items.id),
+    locationId: integer("location_id")
+      .notNull()
+      .references(() => locations.id),
+    quantity: integer("quantity").notNull(),
+    notes: text("notes"),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("other_transactions_code_idx").on(table.transactionCode)]
+);
+
+export const otherTransactionsRelations = relations(otherTransactions, ({ one }) => ({
+  item: one(items, { fields: [otherTransactions.itemId], references: [items.id] }),
+  location: one(locations, { fields: [otherTransactions.locationId], references: [locations.id] }),
+  user: one(users, { fields: [otherTransactions.userId], references: [users.id] }),
 }));
