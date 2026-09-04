@@ -208,8 +208,7 @@ async function loginWithPuppeteer(): Promise<MesSession> {
       throw new Error("MES login failed — check MES_USERNAME/MES_PASSWORD.");
     }
 
-    let token = capturedToken;
-    if (!token) {
+let token: string | null = capturedToken;    if (!token) {
       token = await page.evaluate(() => {
         const keys = ["token", "Token", "TOKEN", "accessToken", "access_token", "Authorization", "authorization"];
         for (const key of keys) {
