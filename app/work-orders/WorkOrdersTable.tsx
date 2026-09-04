@@ -274,13 +274,13 @@ export default function WorkOrdersTable({
                             <table className="flex-1 text-xs">
                               <thead>
                                 <tr className="text-zinc-500 text-left">
-                                  <th className="px-4 py-2 font-medium">Label</th>
-                                  <th className="px-4 py-2 font-medium">SKU</th>
-                                  <th className="px-4 py-2 font-medium text-right">Qty</th>
-                                  <th className="px-4 py-2 font-medium">Location</th>
-                                  <th className="px-4 py-2 font-medium">Status</th>
-                                  <th className="px-4 py-2 font-medium">Inbound By</th>
-                                  <th className="px-4 py-2 font-medium text-right">Inbound</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Label</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">SKU</th>
+                                  <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Qty</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Location</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Status</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Inbound By</th>
+                                  <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Inbound</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -288,17 +288,21 @@ export default function WorkOrdersTable({
                                   const p = row.wms;
                                   return (
                                     <tr key={row.label} className="border-t border-zinc-800/60">
-                                      <td className="px-4 py-2 font-mono text-zinc-400">{row.label}</td>
+                                      <td className="px-4 py-2 font-mono text-zinc-400 whitespace-nowrap">
+                                        {row.label}
+                                      </td>
                                       {p ? (
                                         <>
-                                          <td className="px-4 py-2 font-mono text-zinc-300">{p.itemSku}</td>
-                                          <td className="px-4 py-2 text-right font-mono">
+                                          <td className="px-4 py-2 font-mono text-zinc-300 whitespace-nowrap">
+                                            {p.itemSku}
+                                          </td>
+                                          <td className="px-4 py-2 text-right font-mono whitespace-nowrap">
                                             {p.quantity.toLocaleString()}
                                           </td>
-                                          <td className="px-4 py-2 font-mono text-amber-500">
+                                          <td className="px-4 py-2 font-mono text-amber-500 whitespace-nowrap">
                                             {p.locationCode}
                                           </td>
-                                          <td className="px-4 py-2">
+                                          <td className="px-4 py-2 whitespace-nowrap">
                                             <span
                                               className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
                                                 p.status === "ACTIVE"
@@ -309,21 +313,21 @@ export default function WorkOrdersTable({
                                               {p.status}
                                             </span>
                                           </td>
-                                          <td className="px-4 py-2 text-zinc-400">
+                                          <td className="px-4 py-2 text-zinc-400 whitespace-nowrap">
                                             {p.inboundByUsername ?? "—"}
                                           </td>
-                                          <td className="px-4 py-2 text-right text-zinc-500">
+                                          <td className="px-4 py-2 text-right text-zinc-500 whitespace-nowrap">
                                             {new Date(p.inboundAt).toLocaleString()}
                                           </td>
                                         </>
                                       ) : (
                                         <>
-                                          <td className="px-4 py-2 text-zinc-700">-</td>
-                                          <td className="px-4 py-2 text-right text-zinc-700">-</td>
-                                          <td className="px-4 py-2 text-zinc-700">-</td>
-                                          <td className="px-4 py-2 text-zinc-700">-</td>
-                                          <td className="px-4 py-2 text-zinc-700">-</td>
-                                          <td className="px-4 py-2 text-right text-zinc-700">-</td>
+                                          <td className="px-4 py-2 text-zinc-700 whitespace-nowrap">-</td>
+                                          <td className="px-4 py-2 text-right text-zinc-700 whitespace-nowrap">-</td>
+                                          <td className="px-4 py-2 text-zinc-700 whitespace-nowrap">-</td>
+                                          <td className="px-4 py-2 text-zinc-700 whitespace-nowrap">-</td>
+                                          <td className="px-4 py-2 text-zinc-700 whitespace-nowrap">-</td>
+                                          <td className="px-4 py-2 text-right text-zinc-700 whitespace-nowrap">-</td>
                                         </>
                                       )}
                                     </tr>
@@ -333,30 +337,33 @@ export default function WorkOrdersTable({
                             </table>
 
                             {showMesColumn && (
-                              <table className="w-64 text-xs border-l border-zinc-800">
+                              <table className="w-72 text-xs border-l border-zinc-800">
                                 <thead>
                                   <tr className="text-zinc-500 text-left">
-                                    <th className="px-4 py-2 font-medium">Label (MES)</th>
-                                    <th className="px-4 py-2 font-medium">Match</th>
+                                    <th className="px-4 py-2 font-medium whitespace-nowrap">Label (MES)</th>
+                                    <th className="px-4 py-2 font-medium whitespace-nowrap">Match</th>
                                   </tr>
                                 </thead>
                                 <tbody>
                                   {rows.map((row) => (
                                     <tr key={row.label} className="border-t border-zinc-800/60">
-                                      <td className="px-4 py-2 font-mono text-zinc-400">
+                                      <td
+                                        className="px-4 py-2 font-mono text-zinc-400 truncate max-w-[140px]"
+                                        title={row.mes ? row.mes.LABEL_NO : undefined}
+                                      >
                                         {row.mes ? row.mes.LABEL_NO : "-"}
                                       </td>
-                                      <td className="px-4 py-2">
+                                      <td className="px-4 py-2 whitespace-nowrap">
                                         {row.wms && row.mes ? (
-                                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300">
+                                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 whitespace-nowrap">
                                             Match
                                           </span>
                                         ) : row.mes ? (
-                                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-950 text-red-300">
+                                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-950 text-red-300 whitespace-nowrap">
                                             Missing in WMS
                                           </span>
                                         ) : (
-                                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-950 text-amber-300">
+                                          <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 whitespace-nowrap">
                                             Missing in MES
                                           </span>
                                         )}
