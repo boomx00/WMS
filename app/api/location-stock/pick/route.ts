@@ -110,14 +110,27 @@ export async function PATCH(req: NextRequest) {
   let eventType: "PICKING" | "DEFAULT_PICKING" = "PICKING";
 
   if (!sufficient) {
+    // Default Picking is only ever allowed from FLOOR — racks hold a
+    // single, exactly-known SKU and quantity, so an insufficient-stock
+    // pick there always means the recorded stock is wrong, not that an
+    // untracked "extra" pick is legitimate.
+    if (sourceLocation.type !== "FLOOR") {
+      return NextResponse.json(
+        {
+          error: `Hanya ada ${availableAtSource} karton untuk ${itemSku} di ${locationCode} (${sourceLocation.type}).`,
+        },
+        { status: 409 }
+      );
+    }
+
     const [settingsRow] = await db.select().from(settings).limit(1);
     if (!settingsRow?.allowDefaultPicking) {
       return NextResponse.json(
         {
           error:
             availableAtSource === 0
-              ? `No stock recorded at ${locationCode} for ${itemSku}. Enable Default Picking in Settings to allow this.`
-              : `Only ${availableAtSource} of ${itemSku} available at ${locationCode}. Enable Default Picking in Settings to allow taking more.`,
+              ? `Di ${locationCode} tidak terdeteksi ${itemSku}. Enable Default Picking in Settings to allow this.`
+              : `Hanya ada ${availableAtSource} karton untuk ${itemSku} di ${locationCode}. Enable Default Picking in Settings to allow taking more.`,
         },
         { status: 409 }
       );
