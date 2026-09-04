@@ -279,7 +279,7 @@ export default function WorkOrdersTable({
                                   <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Qty</th>
                                   <th className="px-4 py-2 font-medium whitespace-nowrap">Location</th>
                                   <th className="px-4 py-2 font-medium whitespace-nowrap">Status</th>
-                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Inbound By</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap w-20">Inbound By</th>
                                   <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Inbound</th>
                                 </tr>
                               </thead>
@@ -313,7 +313,10 @@ export default function WorkOrdersTable({
                                               {p.status}
                                             </span>
                                           </td>
-                                          <td className="px-4 py-2 text-zinc-400 whitespace-nowrap">
+                                          <td
+                                            className="px-4 py-2 text-zinc-400 truncate w-20"
+                                            title={p.inboundByUsername ?? undefined}
+                                          >
                                             {p.inboundByUsername ?? "—"}
                                           </td>
                                           <td className="px-4 py-2 text-right text-zinc-500 whitespace-nowrap">
@@ -326,7 +329,7 @@ export default function WorkOrdersTable({
                                           <td className="px-4 py-2 text-right text-zinc-700 whitespace-nowrap">-</td>
                                           <td className="px-4 py-2 text-zinc-700 whitespace-nowrap">-</td>
                                           <td className="px-4 py-2 text-zinc-700 whitespace-nowrap">-</td>
-                                          <td className="px-4 py-2 text-zinc-700 whitespace-nowrap">-</td>
+                                          <td className="px-4 py-2 text-zinc-700 w-20">-</td>
                                           <td className="px-4 py-2 text-right text-zinc-700 whitespace-nowrap">-</td>
                                         </>
                                       )}
@@ -337,7 +340,7 @@ export default function WorkOrdersTable({
                             </table>
 
                             {showMesColumn && (
-                              <table className="w-72 text-xs border-l border-zinc-800">
+                              <table className="shrink-0 text-xs border-l border-zinc-800">
                                 <thead>
                                   <tr className="text-zinc-500 text-left">
                                     <th className="px-4 py-2 font-medium whitespace-nowrap">Label (MES)</th>
@@ -347,10 +350,7 @@ export default function WorkOrdersTable({
                                 <tbody>
                                   {rows.map((row) => (
                                     <tr key={row.label} className="border-t border-zinc-800/60">
-                                      <td
-                                        className="px-4 py-2 font-mono text-zinc-400 truncate max-w-[140px]"
-                                        title={row.mes ? row.mes.LABEL_NO : undefined}
-                                      >
+                                      <td className="px-4 py-2 font-mono text-zinc-400 whitespace-nowrap">
                                         {row.mes ? row.mes.LABEL_NO : "-"}
                                       </td>
                                       <td className="px-4 py-2 whitespace-nowrap">
