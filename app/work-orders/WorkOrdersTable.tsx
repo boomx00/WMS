@@ -238,6 +238,13 @@ export default function WorkOrdersTable({
                       const onlyWms = showMesColumn ? rows.filter((r) => r.wms && !r.mes).length : 0;
                       const onlyMes = showMesColumn ? rows.filter((r) => !r.wms && r.mes).length : 0;
 
+                      const wmsCartonTotal = wo.totalQuantity;
+                      const wmsPalletTotal = wo.totalPallets;
+                      const mesCartonTotal = mesCheck?.records
+                        ? mesCheck.records.reduce((sum, r) => sum + (r.LABEL_QTY || 0), 0)
+                        : 0;
+                      const mesPalletTotal = mesCheck?.records ? mesCheck.records.length : 0;
+
                       return (
                         <>
                           <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/60 flex-wrap gap-2">
@@ -266,9 +273,43 @@ export default function WorkOrdersTable({
                             </button>
                           </div>
 
+                          <div className="flex items-center border-b border-zinc-800/60 text-[10px] uppercase tracking-wide text-zinc-600">
+                            <div className="flex-1 flex items-center gap-4 px-4 py-2">
+                              <span>
+                                Total Carton WMS:{" "}
+                                <span className="text-zinc-300 font-mono normal-case">
+                                  {wmsCartonTotal.toLocaleString()}
+                                </span>
+                              </span>
+                              <span>
+                                Total Pallet WMS:{" "}
+                                <span className="text-zinc-300 font-mono normal-case">
+                                  {wmsPalletTotal.toLocaleString()}
+                                </span>
+                              </span>
+                            </div>
+                            {showMesColumn && (
+                              <div className="shrink-0 flex items-center gap-4 px-4 py-2 border-l border-zinc-800">
+                                <span>
+                                  Total Carton MES:{" "}
+                                  <span className="text-zinc-300 font-mono normal-case">
+                                    {mesCartonTotal.toLocaleString()}
+                                  </span>
+                                </span>
+                                <span>
+                                  Total Pallet MES:{" "}
+                                  <span className="text-zinc-300 font-mono normal-case">
+                                    {mesPalletTotal.toLocaleString()}
+                                  </span>
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
                           {mesCheck?.error && (
                             <p className="px-4 py-2 text-xs text-red-400">{mesCheck.error}</p>
                           )}
+
 
                           <div className="flex">
                             <table className="flex-1 text-xs">
