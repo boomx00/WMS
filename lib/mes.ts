@@ -208,7 +208,8 @@ async function loginWithPuppeteer(): Promise<MesSession> {
       throw new Error("MES login failed — check MES_USERNAME/MES_PASSWORD.");
     }
 
-let token: string | null = capturedToken;    if (!token) {
+    let token: string | null = capturedToken;
+    if (!token) {
       token = await page.evaluate(() => {
         const keys = ["token", "Token", "TOKEN", "accessToken", "access_token", "Authorization", "authorization"];
         for (const key of keys) {
@@ -263,13 +264,26 @@ async function ensureSession(): Promise<MesSession> {
 // ------------------------------------------------------------
 
 function extractRecords(response: any): MesTagTransitRecord[] {
-  if (!response) return [];
-  if (Array.isArray(response.data)) return response.data;
-  if (Array.isArray(response.data?.data)) return response.data.data;
-  if (Array.isArray(response.data?.rows)) return response.data.rows;
-  if (Array.isArray(response.data?.list)) return response.data.list;
-  if (Array.isArray(response.rows)) return response.rows;
-  if (Array.isArray(response.list)) return response.list;
+  // MES's real response shape is:
+  //   { success, message, data: { Success, Data: { recordsTotal, data: [...] } } }
+  // i.e. one level deeper than a first glance suggests, and capitalized
+  // ("Data", not "data") at that middle level. The other shapes below are
+  // kept as fallbacks in case MES changes casing/nesting again.
+  const candidates: unknown[] = [
+    response?.data?.Data?.data,
+    response?.data?.Data?.rows,
+    response?.data?.Data?.list,
+    response?.data?.data,
+    response?.data?.rows,
+    response?.data?.list,
+    response?.data,
+    response?.rows,
+    response?.list,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate as MesTagTransitRecord[];
+  }
   return [];
 }
 
@@ -310,6 +324,8 @@ async function fetchAllPages(session: MesSession, moCode: string): Promise<MesTa
       response.recordsFiltered,
       response.data?.recordsTotal,
       response.data?.recordsFiltered,
+      response.data?.Data?.recordsTotal,
+      response.data?.Data?.recordsFiltered,
       response.data?.data?.recordsTotal,
       response.data?.data?.recordsFiltered,
     ];
