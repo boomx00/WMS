@@ -44,7 +44,8 @@ export const DEFAULT_LABELS = {
     items: "Product List",
     locations: "Location List",
     users: "User List",
-    roles: "Roles List"
+    roles: "Roles List",
+    other_transactions: "Other Transactions"
   }
 } as const;
 

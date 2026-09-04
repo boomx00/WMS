@@ -31,7 +31,8 @@ type NavItems =
   | "System_Control"
   | "Analytics"
   | "Stock_Opname"
-  | "Settings";
+  | "Settings"
+  | "Other_Transactions"
 
 
 
@@ -57,6 +58,7 @@ export default function SiteNav() {
     {key: "System_Control", label: labels.system_control, href:"/scan"},
     {key: "Analytics", label: labels.analytics, href:"/analytics"},
     {key: "Stock_Opname", label: labels.stock_opname, href:"/stock-opname"},
+    {key: "Other_Transactions", href: "/other-transactions", label: labels.other_transactions },
     {key: "Settings", label: labels.settings, href:"/settings"},
   ]
 
