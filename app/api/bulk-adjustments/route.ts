@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locations, items, locationStock, locationStockEvents, bulkAdjustments, bulkAdjustmentLines } from "@/db/schema";
-import { eq, and, ne, gt } from "drizzle-orm";
+import {
+  locations,
+  items,
+  locationStock,
+  locationStockEvents,
+  bulkAdjustments,
+  bulkAdjustmentLines,
+  users,
+} from "@/db/schema";
+import { eq, and, ne, gt, desc, inArray } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
 function sanitize(input: string): string {
@@ -9,6 +17,38 @@ function sanitize(input: string): string {
 }
 
 type IncomingLine = { locationCode: string; itemSku: string; newQuantity: number };
+
+// GET /api/bulk-adjustments — list every bulk adjustment ever created
+// (from the Scan page's Adjust Bulk tab, or attached to a Stock Opname
+// confirmation), newest first. Used both to render the list on the Adjust
+// Bulk tab and to populate the "Bulk Adjustment ID" picker on the Stock
+// Opname confirm popup.
+export async function GET() {
+  const rows = await db
+    .select({
+      id: bulkAdjustments.id,
+      adjustmentCode: bulkAdjustments.adjustmentCode,
+      source: bulkAdjustments.source,
+      description: bulkAdjustments.description,
+      opnameNumber: bulkAdjustments.opnameNumber,
+      lineCount: bulkAdjustments.lineCount,
+      createdAt: bulkAdjustments.createdAt,
+      userId: bulkAdjustments.userId,
+    })
+    .from(bulkAdjustments)
+    .orderBy(desc(bulkAdjustments.createdAt));
+
+  const userIds = Array.from(new Set(rows.map((r) => r.userId)));
+  const userRows = userIds.length > 0 ? await db.select().from(users).where(inArray(users.id, userIds)) : [];
+  const usernameById = new Map(userRows.map((u) => [u.id, u.username]));
+
+  return NextResponse.json(
+    rows.map((r) => ({
+      ...r,
+      username: usernameById.get(r.userId) ?? null,
+    }))
+  );
+}
 
 // POST /api/bulk-adjustments
 // body: { lines: [{ locationCode, itemSku, newQuantity }], description? }
@@ -113,7 +153,7 @@ export async function POST(req: NextRequest) {
 
     const [withCode] = await tx
       .update(bulkAdjustments)
-      .set({ adjustmentCode: `BADJ-${created.id}` })
+      .set({ adjustmentCode: `BULK-${String(created.id).padStart(2, "0")}` })
       .where(eq(bulkAdjustments.id, created.id))
       .returning();
 
