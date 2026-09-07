@@ -1072,6 +1072,15 @@ type BulkAdjustment = {
   username: string | null;
 };
 
+type BulkAdjustmentLine = {
+  locationCode: string;
+  itemSku: string;
+  itemName: string | null;
+  previousQuantity: number;
+  newQuantity: number;
+  delta: number;
+};
+
 function AdjustBulkForm() {
   const router = useRouter();
   const [rows, setRows] = useState([{ locationCode: "", itemSku: "", newQuantity: "" }]);
@@ -1082,7 +1091,26 @@ function AdjustBulkForm() {
 
   const [adjustments, setAdjustments] = useState<BulkAdjustment[]>([]);
   const [listLoading, setListLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [linesById, setLinesById] = useState<Record<number, BulkAdjustmentLine[]>>({});
+  const [linesLoadingId, setLinesLoadingId] = useState<number | null>(null);
 
+  async function toggleExpand(id: number) {
+    if (expandedId === id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(id);
+    if (!linesById[id]) {
+      setLinesLoadingId(id);
+      const res = await fetch(`/api/bulk-adjustments/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLinesById((prev) => ({ ...prev, [id]: data.lines }));
+      }
+      setLinesLoadingId(null);
+    }
+  }
   async function refreshList() {
     setListLoading(true);
     const res = await fetch("/api/bulk-adjustments");
@@ -1225,7 +1253,7 @@ function AdjustBulkForm() {
         )}
       </form>
 
-      <div className="border border-zinc-800 rounded-lg overflow-hidden">
+           <div className="border border-zinc-800 rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
           <h3 className="text-sm font-medium text-zinc-300">Bulk Adjustments</h3>
           {listLoading && <span className="text-xs text-zinc-600">Loading...</span>}
@@ -1236,6 +1264,7 @@ function AdjustBulkForm() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-zinc-500 text-xs border-b border-zinc-800">
+                <th className="py-2 px-4"></th>
                 <th className="py-2 px-4">ID</th>
                 <th className="py-2 px-4">Source</th>
                 <th className="py-2 px-4">Description</th>
@@ -1246,16 +1275,64 @@ function AdjustBulkForm() {
             </thead>
             <tbody>
               {adjustments.map((a) => (
-                <tr key={a.id} className="border-b border-zinc-900 last:border-0">
-                  <td className="py-2 px-4 font-mono text-amber-500">{a.adjustmentCode}</td>
-                  <td className="py-2 px-4 text-zinc-400">
-                    {a.source === "STOCK_OPNAME" ? `Stock Opname${a.opnameNumber ? ` (${a.opnameNumber})` : ""}` : "Scan"}
-                  </td>
-                  <td className="py-2 px-4 text-zinc-400">{a.description || "—"}</td>
-                  <td className="py-2 px-4 text-right font-mono">{a.lineCount}</td>
-                  <td className="py-2 px-4 text-zinc-500">{a.username ?? "—"}</td>
-                  <td className="py-2 px-4 text-zinc-500">{new Date(a.createdAt).toLocaleString()}</td>
-                </tr>
+                <>
+                  <tr
+                    key={a.id}
+                    onClick={() => toggleExpand(a.id)}
+                    className="border-b border-zinc-900 last:border-0 cursor-pointer hover:bg-zinc-900/60"
+                  >
+                    <td className="py-2 px-4 text-zinc-600 text-xs w-6">
+                      <span className={`inline-block transition-transform ${expandedId === a.id ? "rotate-90" : ""}`}>▶</span>
+                    </td>
+                    <td className="py-2 px-4 font-mono text-amber-500">{a.adjustmentCode}</td>
+                    <td className="py-2 px-4 text-zinc-400">
+                      {a.source === "STOCK_OPNAME" ? `Stock Opname${a.opnameNumber ? ` (${a.opnameNumber})` : ""}` : "Scan"}
+                    </td>
+                    <td className="py-2 px-4 text-zinc-400">{a.description || "—"}</td>
+                    <td className="py-2 px-4 text-right font-mono">{a.lineCount}</td>
+                    <td className="py-2 px-4 text-zinc-500">{a.username ?? "—"}</td>
+                    <td className="py-2 px-4 text-zinc-500">{new Date(a.createdAt).toLocaleString()}</td>
+                  </tr>
+                  {expandedId === a.id && (
+                    <tr key={`${a.id}-detail`} className="border-b border-zinc-900 last:border-0">
+                      <td colSpan={7} className="px-4 py-3 bg-zinc-950/50">
+                        {linesLoadingId === a.id ? (
+                          <p className="text-xs text-zinc-600">Loading details...</p>
+                        ) : !linesById[a.id] || linesById[a.id].length === 0 ? (
+                          <p className="text-xs text-zinc-600">No lines were changed in this adjustment.</p>
+                        ) : (
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-left text-zinc-600 border-b border-zinc-800">
+                                <th className="py-1.5 pr-4">Location</th>
+                                <th className="py-1.5 pr-4">SKU</th>
+                                <th className="py-1.5 pr-4">Product</th>
+                                <th className="py-1.5 pr-4 text-right">Previous</th>
+                                <th className="py-1.5 pr-4 text-right">New</th>
+                                <th className="py-1.5 pr-4 text-right">Delta</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {linesById[a.id].map((l, i) => (
+                                <tr key={i} className="border-b border-zinc-900 last:border-0">
+                                  <td className="py-1.5 pr-4 font-mono text-zinc-300">{l.locationCode}</td>
+                                  <td className="py-1.5 pr-4 font-mono text-zinc-300">{l.itemSku}</td>
+                                  <td className="py-1.5 pr-4 text-zinc-500">{l.itemName ?? "—"}</td>
+                                  <td className="py-1.5 pr-4 text-right font-mono text-zinc-400">{l.previousQuantity.toLocaleString()}</td>
+                                  <td className="py-1.5 pr-4 text-right font-mono text-zinc-300">{l.newQuantity.toLocaleString()}</td>
+                                  <td className={`py-1.5 pr-4 text-right font-mono ${l.delta > 0 ? "text-amber-400" : "text-red-400"}`}>
+                                    {l.delta > 0 ? "+" : ""}
+                                    {l.delta.toLocaleString()}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>
