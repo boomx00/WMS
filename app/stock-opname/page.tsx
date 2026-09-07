@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameItems, users, stockOpnameLocations } from "@/db/schema";
+import { stockOpname, stockOpnameItems, users, stockOpnameLocations, bulkAdjustments } from "@/db/schema";
 import { desc, sql } from "drizzle-orm";
 import StockOpnameClient from "./StockOpnameClient";
 
@@ -38,14 +38,19 @@ async function getSessions() {
   const assigneeRows = await db.select().from(users);
   const usersById = new Map(assigneeRows.map((u) => [u.id, u.username]));
 
+  const adjustmentRows = await db.select().from(bulkAdjustments);
+  const adjustmentCodeById = new Map(adjustmentRows.map((a) => [a.id, a.adjustmentCode]));
+
   return sessions.map((s) => {
     const total = totalMap.get(s.opnameNumber) ?? 0;
     const counted = countedMap.get(s.opnameNumber) ?? 0;
-    const status = s.completedAt
-      ? "DONE"
-      : total === 0 || counted === 0
-        ? "PENDING"
-        : "IN_PROGRESS";
+    const status = s.confirmedAt
+      ? "CONFIRMED"
+      : s.completedAt
+        ? "DONE"
+        : total === 0 || counted === 0
+          ? "PENDING"
+          : "IN_PROGRESS";
     return {
       ...s,
       assignedToUsername: s.assignedTo ? usersById.get(s.assignedTo) ?? null : null,
@@ -53,13 +58,13 @@ async function getSessions() {
       countedLines: counted,
       discrepancies: 0,
       status,
-      // The earliest actual scan/count timestamp for this session — not
-      // createdAt (when the session was set up), which can happen well
-      // before anyone actually starts counting. Null until the first
-      // count comes in.
       commencedAt: commencedMap.get(s.opnameNumber) ?? null,
+      confirmedAdjustmentCode: s.confirmedBulkAdjustmentId
+        ? adjustmentCodeById.get(s.confirmedBulkAdjustmentId) ?? null
+        : null,
     };
   });
+}
 }
 
 async function getUsers() {

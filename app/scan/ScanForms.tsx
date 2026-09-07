@@ -12,14 +12,15 @@ function parseLabel(raw: string) {
   if (!sku || !palletSeq || Number.isNaN(quantity) || !workOrderNumber) return null;
   return { sku, palletSeq, quantity, workOrderNumber };
 }
-type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST_LOCATION" | "ADJUST_PALLET_QTY" | "CHECK_SO";// Parses "SKU*palletSeq*qty*workOrder" into its parts.
-
+type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST_LOCATION" | "ADJUST_BULK" | "ADJUST_PALLET_QTY" | "CHECK_SO";
 export default function ScanForms() {
   const [tab, setTab] = useState<Tab>("INBOUND");
   const labels = usePageLabels("scan")
   const tabs: { key: Tab; label: string }[] = [
     { key: "INBOUND", label: labels.th_inbound },
     { key: "ADJUST_LOCATION", label: labels.th_adjust},
+      { key: "ADJUST_BULK", label: labels.th_adjust_bulk },
+
     { key: "ADJUST_PALLET_QTY", label: labels.th_correct },
     // { key: "CHECK_SO", label: labels.th_check_so },
   ];
@@ -47,6 +48,7 @@ export default function ScanForms() {
 {tab === "CONFIRM" && <ConfirmInboundForm />}
 {tab === "CHECK_SO" && <CheckSoForm />}
 {tab === "ADJUST_PALLET_QTY" && <CorrectQtyForm />}
+{tab === "ADJUST_BULK" && <AdjustBulkForm />}
     </div>
   );
 }
@@ -1055,6 +1057,145 @@ function CorrectQtyForm() {
       </button>
 
       <FeedbackBox error={error} success={success} />
+    </form>
+  );
+}
+
+function AdjustBulkForm() {
+  const router = useRouter();
+  const [rows, setRows] = useState([{ locationCode: "", itemSku: "", newQuantity: "" }]);
+  const [description, setDescription] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ adjustmentCode: string; appliedCount: number; skippedCount: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  function updateRow(index: number, field: "locationCode" | "itemSku" | "newQuantity", value: string) {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  }
+
+  function addRow() {
+    setRows((prev) => [...prev, { locationCode: "", itemSku: "", newQuantity: "" }]);
+  }
+
+  function removeRow(index: number) {
+    setRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setResult(null);
+
+    const lines = rows
+      .map((r) => ({
+        locationCode: r.locationCode.trim(),
+        itemSku: r.itemSku.trim(),
+        newQuantity: Number(r.newQuantity),
+      }))
+      .filter((r) => r.locationCode || r.itemSku || r.newQuantity);
+
+    if (lines.length === 0) {
+      setError("Add at least one row");
+      return;
+    }
+
+    setLoading(true);
+    const res = await fetch("/api/bulk-adjustments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lines, description: description.trim() }),
+    });
+    setLoading(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to apply bulk adjustment");
+      return;
+    }
+
+    const data = await res.json();
+    setResult({ adjustmentCode: data.adjustmentCode, appliedCount: data.appliedCount, skippedCount: data.skippedCount });
+    setRows([{ locationCode: "", itemSku: "", newQuantity: "" }]);
+    setDescription("");
+    router.refresh();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
+      <p className="text-xs text-zinc-500">
+        Directly set the stock quantity for multiple location + SKU pairs at once.
+        Each row&apos;s existing stock is removed and replaced with the value you
+        enter. The whole batch is logged together under one Adjustment ID.
+      </p>
+
+      <div className="space-y-2">
+        {rows.map((row, i) => (
+          <div key={i} className="flex gap-2 items-center">
+            <input
+              type="text"
+              value={row.locationCode}
+              onChange={(e) => updateRow(i, "locationCode", e.target.value)}
+              placeholder="Location"
+              className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+            />
+            <input
+              type="text"
+              value={row.itemSku}
+              onChange={(e) => updateRow(i, "itemSku", e.target.value)}
+              placeholder="SKU"
+              className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+            />
+            <input
+              type="number"
+              value={row.newQuantity}
+              onChange={(e) => updateRow(i, "newQuantity", e.target.value)}
+              placeholder="Qty"
+              min={0}
+              className="w-28 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+            />
+            <button
+              type="button"
+              onClick={() => removeRow(i)}
+              disabled={rows.length === 1}
+              className="text-zinc-600 hover:text-red-400 disabled:opacity-30 text-sm px-2"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button type="button" onClick={addRow} className="text-xs text-amber-500 hover:text-amber-400">
+        + Add row
+      </button>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Description (optional)</label>
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={loading}
+        className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+      >
+        {loading ? "Applying..." : "Apply Bulk Adjustment"}
+      </button>
+
+      {error && (
+        <p className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded-md px-3 py-2 mt-4">{error}</p>
+      )}
+      {result && (
+        <p className="text-sm text-emerald-400 bg-emerald-950/40 border border-emerald-900 rounded-md px-3 py-2 mt-4">
+          Adjustment <span className="font-mono">{result.adjustmentCode}</span> applied — {result.appliedCount} line(s)
+          changed, {result.skippedCount} already matched.
+        </p>
+      )}
     </form>
   );
 }

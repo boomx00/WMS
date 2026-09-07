@@ -26,6 +26,7 @@ export const DEFAULT_LABELS = {
   scan: {
     th_inbound: "Inbound",
     th_adjust: "Adjust Location",
+    th_adjust_bulk: "Adjust Bulk",
     th_correct: "Adjust Pallet Qty",
     // th_check_so: "Check SO",
 
