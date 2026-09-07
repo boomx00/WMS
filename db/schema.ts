@@ -359,7 +359,10 @@ export const locationStockEvents = pgTable("location_stock_events", {
 // Tambahan batch, before the real new SO number exists
 tambahanOrderId: integer("tambahan_order_id").references(() => tambahanOrders.id),
   otherTransactionId: integer("other_transaction_id").references(() => otherTransactions.id),
+  bulkAdjustmentId: integer("bulk_adjustment_id").references(() => bulkAdjustments.id), // ADD THIS LINE
 });
+  
+
 
 export const stockOpname = pgTable("stock_opname", {
   opnameNumber: varchar("opname_number", { length: 50 }).primaryKey(),
@@ -370,6 +373,10 @@ export const stockOpname = pgTable("stock_opname", {
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
+  confirmedAt: timestamp("confirmed_at"),                          // ADD
+  confirmedBy: integer("confirmed_by").references(() => users.id), // ADD
+  confirmDescription: text("confirm_description"),                 // ADD
+  confirmedBulkAdjustmentId: integer("confirmed_bulk_adjustment_id"), // ADD — no .references() here to avoid a same-file circular type issue; FK is enforced at the DB level by the migration above
 });
 
 
@@ -497,4 +504,58 @@ export const otherTransactionsRelations = relations(otherTransactions, ({ one })
   item: one(items, { fields: [otherTransactions.itemId], references: [items.id] }),
   location: one(locations, { fields: [otherTransactions.locationId], references: [locations.id] }),
   user: one(users, { fields: [otherTransactions.userId], references: [users.id] }),
+}));
+// ============================================================
+// Bulk Adjustments (multi-row stock overrides — from the Scan page's
+// Adjust Bulk tab, or attached to a Stock Opname confirmation)
+// ============================================================
+
+export const bulkAdjustmentSourceEnum = pgEnum("bulk_adjustment_source", ["SCAN", "STOCK_OPNAME"]);
+
+export const bulkAdjustments = pgTable(
+  "bulk_adjustments",
+  {
+    id: serial("id").primaryKey(),
+    adjustmentCode: text("adjustment_code").notNull(), // "BADJ-<id>" (scan) or "OPADJ-<id>" (stock opname)
+    source: bulkAdjustmentSourceEnum("source").notNull().default("SCAN"),
+    description: text("description"),
+    opnameNumber: varchar("opname_number", { length: 50 }).references(() => stockOpname.opnameNumber),
+    lineCount: integer("line_count").notNull().default(0),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("bulk_adjustments_code_idx").on(table.adjustmentCode)]
+);
+
+export const bulkAdjustmentLines = pgTable("bulk_adjustment_lines", {
+  id: serial("id").primaryKey(),
+  bulkAdjustmentId: integer("bulk_adjustment_id")
+    .notNull()
+    .references(() => bulkAdjustments.id),
+  locationId: integer("location_id")
+    .notNull()
+    .references(() => locations.id),
+  itemId: integer("item_id")
+    .notNull()
+    .references(() => items.id),
+  previousQuantity: integer("previous_quantity").notNull(),
+  newQuantity: integer("new_quantity").notNull(),
+  delta: integer("delta").notNull(),
+});
+
+export const bulkAdjustmentsRelations = relations(bulkAdjustments, ({ one, many }) => ({
+  user: one(users, { fields: [bulkAdjustments.userId], references: [users.id] }),
+  opname: one(stockOpname, { fields: [bulkAdjustments.opnameNumber], references: [stockOpname.opnameNumber] }),
+  lines: many(bulkAdjustmentLines),
+}));
+
+export const bulkAdjustmentLinesRelations = relations(bulkAdjustmentLines, ({ one }) => ({
+  bulkAdjustment: one(bulkAdjustments, {
+    fields: [bulkAdjustmentLines.bulkAdjustmentId],
+    references: [bulkAdjustments.id],
+  }),
+  location: one(locations, { fields: [bulkAdjustmentLines.locationId], references: [locations.id] }),
+  item: one(items, { fields: [bulkAdjustmentLines.itemId], references: [items.id] }),
 }));
