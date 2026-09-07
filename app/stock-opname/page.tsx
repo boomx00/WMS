@@ -65,7 +65,6 @@ async function getSessions() {
     };
   });
 }
-}
 
 async function getUsers() {
   return db.select({ username: users.username }).from(users).orderBy(users.username);
