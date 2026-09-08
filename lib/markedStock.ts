@@ -40,8 +40,8 @@ export async function getMarkedBreakdownForItem(
         .select({ salesOrderId: salesOrderItems.salesOrderId, quantity: salesOrderItems.quantity })
         .from(salesOrderItems)
         .where(and(inArray(salesOrderItems.salesOrderId, soIds), eq(salesOrderItems.itemId, itemId))),
-      db
-        .select({ id: salesOrders.id, soNumber: salesOrders.soNumber })
+   db
+        .select({ id: salesOrders.id, soNumber: salesOrders.soNumber, finishedAt: salesOrders.finishedAt })
         .from(salesOrders)
         .where(inArray(salesOrders.id, soIds)),
       db
@@ -76,12 +76,15 @@ export async function getMarkedBreakdownForItem(
 
     const orderedBySo = new Map<number, number>(orderLines.map((l: any) => [l.salesOrderId, l.quantity]));
     const soNumberById = new Map<number, string>(soRows.map((s: any) => [s.id, s.soNumber]));
+        const finishedById = new Map<number, boolean>(soRows.map((s: any) => [s.id, s.finishedAt !== null]));
     const addBySo = new Map<number, number>(addRows.map((r: any) => [r.salesOrderId, r.total]));
     const shipBySo = new Map<number, number>(shipRows.map((r: any) => [r.salesOrderId, r.total]));
 
     for (const soId of soIds) {
       const ordered = orderedBySo.get(soId);
       if (ordered === undefined) continue; // item isn't actually on this SO
+
+      if (finishedById.get(soId)) continue; // manually closed out — no longer reserving stock
 
       const shipped = shipBySo.get(soId) ?? 0;
       if (shipped >= ordered) continue; // fully shipped — no longer reserving stock
