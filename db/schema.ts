@@ -401,9 +401,10 @@ export const stockOpnameItems = pgTable("stock_opname_items", {
   locationId: integer("location_id")
     .notNull()
     .references(() => locations.id),
-  itemId: integer("item_id")
-    .notNull()
-    .references(() => items.id),
+  // Nullable — a null itemId represents a location the PIC confirmed was
+  // physically empty (they typed only the location and left SKU/qty
+  // blank), as opposed to a location that hasn't been visited at all yet.
+  itemId: integer("item_id").references(() => items.id),
   palletId: integer("pallet_id").references(() => pallets.id),
   systemSku: text("system_sku"), // nullable — snapshot of system SKU(s) at count time
   systemQty: integer("system_qty").notNull(),

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { stockOpnameItems, stockOpnameLocations, locations, items, locationStock } from "@/db/schema";
-import { eq, and, or, inArray } from "drizzle-orm";
+import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
 
@@ -17,6 +17,15 @@ function extractSku(label: string): string | null {
 
 // PATCH /api/stock-opname/:opnameNumber/count
 // body: { locationCode, scanned, countedQty, originalLocationCode?, originalSku? }
+//
+// `scanned` (and therefore `countedQty`) may be omitted/blank — that
+// records the location as CONFIRMED EMPTY (the PIC physically checked it
+// and found no stock), as distinct from a location that simply hasn't
+// been visited yet. An empty confirmation is stored as a stock_opname_items
+// row with itemId = null and countedQty = 0, compared against the SYSTEM'S
+// TOTAL quantity across every item at that location — so if the system
+// expected something there, the resulting difference still surfaces the
+// discrepancy on the report instead of silently disappearing.
 //
 // Alongside the blind physical count, this also snapshots whatever
 // location_stock says is there for this exact location+item *at the
@@ -59,11 +68,17 @@ export async function PATCH(
   const rawScanned = sanitize(body.scanned ?? "");
   const originalLocationCode = sanitize(body.originalLocationCode ?? "");
   const originalRawScanned = sanitize(body.originalSku ?? "");
-  const { countedQty } = body;
+  // Blank scanned + blank/zero countedQty means "confirmed empty" — a
+  // deliberate statement that nothing is here, not a malformed request.
+  const isEmptyConfirmation = !rawScanned;
+  const countedQty = isEmptyConfirmation ? 0 : Number(body.countedQty);
 
-  if (!locationCode || !rawScanned || countedQty === undefined || countedQty < 0) {
+  if (!locationCode) {
+    return NextResponse.json({ error: "locationCode is required" }, { status: 400 });
+  }
+  if (!isEmptyConfirmation && (body.countedQty === undefined || isNaN(countedQty) || countedQty < 0)) {
     return NextResponse.json(
-      { error: "locationCode, scanned, and a non-negative countedQty are required" },
+      { error: "scanned and a non-negative countedQty are required (or leave both blank to mark the location empty)" },
       { status: 400 }
     );
   }
@@ -73,15 +88,18 @@ export async function PATCH(
     return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
   }
 
-  const label = await normalizeLabel(db, rawScanned);
-  const sku = extractSku(label);
-  if (!sku) {
-    return NextResponse.json({ error: "Couldn't parse a SKU" }, { status: 400 });
-  }
+  let item: typeof items.$inferSelect | null = null;
+  if (!isEmptyConfirmation) {
+    const label = await normalizeLabel(db, rawScanned);
+    const sku = extractSku(label);
+    if (!sku) {
+      return NextResponse.json({ error: "Couldn't parse a SKU" }, { status: 400 });
+    }
 
-  const [item] = await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)));
-  if (!item) {
-    return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+    [item] = await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)));
+    if (!item) {
+      return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+    }
   }
 
   // Register this location into the session if it isn't already part of
@@ -101,14 +119,27 @@ export async function PATCH(
     await db.insert(stockOpnameLocations).values({ opnameNumber, locationId: location.id });
   }
 
-  // Snapshot the live system quantity for this exact location+item right
-  // now — this is the number the count is being checked against.
-  const [stockRow] = await db
-    .select()
-    .from(locationStock)
-    .where(and(eq(locationStock.locationId, location.id), eq(locationStock.itemId, item.id)));
+  // Snapshot the live system quantity to check the count against. For a
+  // normal count that's just this exact location+item. For an empty
+  // confirmation there's no single item to compare, so it's the SYSTEM'S
+  // TOTAL quantity across every item at the location — if that's nonzero,
+  // the resulting difference correctly flags "system expected stock here,
+  // PIC found none".
+  let systemQty: number;
+  if (item) {
+    const [stockRow] = await db
+      .select()
+      .from(locationStock)
+      .where(and(eq(locationStock.locationId, location.id), eq(locationStock.itemId, item.id)));
+    systemQty = stockRow?.quantity ?? 0;
+  } else {
+    const allStockRows = await db
+      .select({ quantity: locationStock.quantity })
+      .from(locationStock)
+      .where(eq(locationStock.locationId, location.id));
+    systemQty = allStockRows.reduce((sum, r) => sum + r.quantity, 0);
+  }
 
-  const systemQty = stockRow?.quantity ?? 0;
   const difference = countedQty - systemQty;
 
   // Also snapshot which SKU(s) the system had recorded at this location
@@ -137,7 +168,7 @@ export async function PATCH(
       and(
         eq(stockOpnameItems.opnameNumber, opnameNumber),
         eq(stockOpnameItems.locationId, location.id),
-        eq(stockOpnameItems.itemId, item.id)
+        item ? eq(stockOpnameItems.itemId, item.id) : isNull(stockOpnameItems.itemId)
       )
     );
 
@@ -162,6 +193,21 @@ export async function PATCH(
             and(
               eq(stockOpnameItems.opnameNumber, opnameNumber),
               eq(stockOpnameItems.locationId, originalLocation.id)
+            )
+          );
+      } else if (!originalRawScanned) {
+        // FLOOR (or other non-RACK) locations can hold several SKUs, but
+        // an empty confirmation is still unique per location — so if the
+        // line being edited WAS an empty confirmation (no original SKU
+        // sent), find it the same way regardless of location type.
+        [originalLine] = await db
+          .select()
+          .from(stockOpnameItems)
+          .where(
+            and(
+              eq(stockOpnameItems.opnameNumber, opnameNumber),
+              eq(stockOpnameItems.locationId, originalLocation.id),
+              isNull(stockOpnameItems.itemId)
             )
           );
       } else if (originalRawScanned) {
@@ -206,7 +252,7 @@ export async function PATCH(
       .values({
         opnameNumber,
         locationId: location.id,
-        itemId: item.id,
+        itemId: item?.id ?? null,
         systemQty,
         systemSku,
         countedQty,
@@ -217,5 +263,10 @@ export async function PATCH(
       .returning();
   }
 
-  return NextResponse.json({ ...result, itemSku: item.sku, itemName: item.name, locationCode: location.code });
+  return NextResponse.json({
+    ...result,
+    itemSku: item?.sku ?? null,
+    itemName: item?.name ?? null,
+    locationCode: location.code,
+  });
 }

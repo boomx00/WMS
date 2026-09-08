@@ -194,8 +194,8 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
 }
 
 type ReportItem = {
-  itemId: number;
-  itemSku: string;
+  itemId: number | null; // null = PIC confirmed this location was empty
+  itemSku: string | null;
   itemName: string;
   systemQty: number;
   systemSku: string;
@@ -426,8 +426,14 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                       <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60">
                         <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
                         <td className="py-1.5 px-3">
-                          <span className="font-mono text-zinc-300">{item.itemSku}</span>{" "}
-                          <span className="text-zinc-500">{item.itemName}</span>
+                          {item.itemSku ? (
+                            <>
+                              <span className="font-mono text-zinc-300">{item.itemSku}</span>{" "}
+                              <span className="text-zinc-500">{item.itemName}</span>
+                            </>
+                          ) : (
+                            <span className="text-zinc-500 italic">{item.itemName}</span>
+                          )}
                         </td>
                         <td className="py-1.5 px-3 font-mono text-zinc-400">{item.systemSku}</td>
                         <td className="py-1.5 px-3">
@@ -454,14 +460,25 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                         </td>
                         <td className="py-1.5 px-3 text-zinc-500">{item.countedByUsername ?? "—"}</td>
                         <td className="py-1.5 px-3 text-right">
-                          <AdjustLineButton
-                            opnameNumber={session.opnameNumber}
-                            locationCode={loc.locationCode}
-                            itemId={item.itemId}
-                            countedQty={item.countedQty}
-                            difference={item.difference}
-                            onAdjusted={refetchReport}
-                          />
+                          {item.itemId === null ? (
+                            // No single item to adjust for a confirmed-empty
+                            // location — any real discrepancy here needs a
+                            // manual look, not a one-click apply.
+                            item.difference === 0 ? (
+                              <span className="text-[10px] text-zinc-700">Matched</span>
+                            ) : (
+                              <span className="text-[10px] text-zinc-600">Manual review</span>
+                            )
+                          ) : (
+                            <AdjustLineButton
+                              opnameNumber={session.opnameNumber}
+                              locationCode={loc.locationCode}
+                              itemId={item.itemId}
+                              countedQty={item.countedQty}
+                              difference={item.difference}
+                              onAdjusted={refetchReport}
+                            />
+                          )}
                         </td>
                       </tr>
                     ))

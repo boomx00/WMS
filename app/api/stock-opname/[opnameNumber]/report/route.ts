@@ -74,6 +74,10 @@ export async function GET(
     .where(eq(stockOpnameLocations.opnameNumber, opnameNumber))
     .orderBy(locations.area, locations.x, locations.y);
 
+  // leftJoin (not innerJoin) — a confirmed-empty line has itemId = null,
+  // and an innerJoin would silently drop it from the report entirely,
+  // making a deliberately-checked-and-empty location indistinguishable
+  // from one nobody has visited yet.
   const countedRows = await db
     .select({
       locationId: stockOpnameItems.locationId,
@@ -88,7 +92,7 @@ export async function GET(
       countedByUsername: users.username,
     })
     .from(stockOpnameItems)
-    .innerJoin(items, eq(stockOpnameItems.itemId, items.id))
+    .leftJoin(items, eq(stockOpnameItems.itemId, items.id))
     .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
     .where(eq(stockOpnameItems.opnameNumber, opnameNumber));
 
@@ -164,19 +168,25 @@ export async function GET(
                 .split(",")
                 .map((s) => s.trim().toUpperCase())
                 .filter(Boolean);
+        // itemId/itemSku are null for a confirmed-empty location — there's
+        // no single SKU to compare against the snapshot, so skuMatch is
+        // just whether the system also expected nothing there.
+        const isEmptyConfirmation = c.itemId === null;
         return {
           itemId: c.itemId,
-          itemSku: c.itemSku,
-          itemName: c.itemName,
+          itemSku: c.itemSku ?? null,
+          itemName: c.itemName ?? "(Empty — no stock found)",
           systemQty: c.systemQty,
           systemSku: formatSkuWithNames(cleanedSystemSku, snapshotNameBySku),
           countedQty: c.countedQty,
           difference: c.difference,
           countedAt: c.countedAt,
           countedByUsername: c.countedByUsername,
-          skuMatch: systemSkuList.includes(c.itemSku.toUpperCase())
-            ? ("MATCH" as const)
-            : ("MISMATCH" as const),
+          skuMatch: isEmptyConfirmation
+            ? (systemSkuList.length === 0 ? ("MATCH" as const) : ("MISMATCH" as const))
+            : systemSkuList.includes((c.itemSku ?? "").toUpperCase())
+              ? ("MATCH" as const)
+              : ("MISMATCH" as const),
         };
       }),
     };
