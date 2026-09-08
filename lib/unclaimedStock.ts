@@ -50,14 +50,13 @@ export async function getUnclaimedQuantity(db: any, itemId: number): Promise<num
   }
 
   const distinctTambahanRows = await db
-    .selectDistinct({ tambahanOrderId: locationStockEvents.tambahanOrderId, status: tambahanOrders.status })
+    .selectDistinct({ tambahanOrderId: locationStockEvents.tambahanOrderId })
     .from(locationStockEvents)
-    .innerJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .where(and(eq(locationStockEvents.itemId, itemId), isNotNull(locationStockEvents.tambahanOrderId)));
 
   let totalMarkedTambahan = 0;
   for (const row of distinctTambahanRows) {
-    if (row.tambahanOrderId === null || row.status === "CONVERTED") continue;
+    if (row.tambahanOrderId === null) continue;
     totalMarkedTambahan += Math.max(0, await getPickedForTambahanQuantity(db, row.tambahanOrderId, itemId));
   }
 
