@@ -63,7 +63,13 @@ export async function GET(req: NextRequest) {
             ? or(ilike(sourceLoc.code, `%${location}%`), ilike(destLoc.code, `%${location}%`))
             : undefined,
           user ? ilike(users.username, `%${user}%`) : undefined,
-          so ? ilike(salesOrders.soNumber, `%${so}%`) : undefined,
+                    so
+            ? or(
+                ilike(salesOrders.soNumber, `%${so}%`),
+                ilike(tambahanOrders.tambahanNumber, `%${so}%`),
+                ilike(tambahanOrders.convertedSoNumber, `%${so}%`)
+              )
+            : undefined,
           validatedType ? eq(locationStockEvents.type, validatedType) : undefined,
         ].filter((c): c is NonNullable<typeof c> => c !== undefined)
       )
@@ -75,6 +81,8 @@ export async function GET(req: NextRequest) {
           ilike(sourceLoc.code, pattern),
           ilike(destLoc.code, pattern),
           ilike(salesOrders.soNumber, pattern),
+          ilike(tambahanOrders.tambahanNumber, pattern),
+          ilike(tambahanOrders.convertedSoNumber, pattern),
           ilike(users.username, pattern)
         );
       })();
