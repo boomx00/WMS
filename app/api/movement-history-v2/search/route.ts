@@ -4,7 +4,7 @@ import { locationStockEvents, items, locations, users, salesOrders } from "@/db/
 import { eq, desc, or, and, ilike } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { finalStockAtDestinationSql } from "@/lib/finalStock";
-
+import { tambahanOrders } from "@/db/schema";
 const sourceLoc = alias(locations, "source_loc");
 const destLoc = alias(locations, "dest_loc");
 
@@ -88,6 +88,7 @@ export async function GET(req: NextRequest) {
       sourceCode: sourceLoc.code,
       destinationCode: destLoc.code,
       soNumber: salesOrders.soNumber,
+            tambahanNumber: tambahanOrders.tambahanNumber,
       quantity: locationStockEvents.quantity,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
@@ -98,6 +99,7 @@ export async function GET(req: NextRequest) {
     .leftJoin(sourceLoc, eq(locationStockEvents.sourceLocationId, sourceLoc.id))
     .leftJoin(destLoc, eq(locationStockEvents.destinationLocationId, destLoc.id))
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
+        .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
     .where(whereClause)
     .orderBy(desc(locationStockEvents.createdAt))

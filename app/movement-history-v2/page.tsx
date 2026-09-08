@@ -4,7 +4,7 @@ import { eq, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { finalStockAtDestinationSql } from "@/lib/finalStock";
 import MovementHistoryV2Table from "./MovementHistoryV2Table";
-
+import { tambahanOrders } from "@/db/schema";
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
@@ -29,6 +29,7 @@ async function getEventsForPage(page: number) {
       sourceCode: sourceLoc.code,
       destinationCode: destLoc.code,
       soNumber: salesOrders.soNumber,
+      tambahanNumber: tambahanOrders.tambahanNumber,
       quantity: locationStockEvents.quantity,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
@@ -41,6 +42,7 @@ async function getEventsForPage(page: number) {
     .leftJoin(sourceLoc, eq(locationStockEvents.sourceLocationId, sourceLoc.id))
     .leftJoin(destLoc, eq(locationStockEvents.destinationLocationId, destLoc.id))
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
+        .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
     .orderBy(desc(locationStockEvents.createdAt))
     .limit(PAGE_SIZE)

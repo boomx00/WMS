@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
-
 type Row = {
   id: number;
   type: string;
@@ -12,6 +11,7 @@ type Row = {
   sourceCode: string | null;
   destinationCode: string | null;
   soNumber: string | null;
+  tambahanNumber: string | null;
   quantity: number;
   username: string;
   createdAt: string | Date;
@@ -313,7 +313,7 @@ export default function MovementHistoryV2Table({
                   </td>
                   <td className="px-4 py-3 font-mono text-amber-500">{row.sourceCode ?? "—"}</td>
                   <td className="px-4 py-3 font-mono text-amber-500">
-                    {row.type === "SHIP" ? (row.soNumber ?? "—") : (row.destinationCode ?? "—")}
+                    {row.type === "SHIP" ? (row.soNumber ?? row.tambahanNumber ?? "—") : (row.destinationCode ?? "—")}
                   </td>
                   <td className="px-4 py-3 text-right font-mono">{row.quantity.toLocaleString()}</td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-400">
