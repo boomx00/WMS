@@ -457,6 +457,7 @@ export const tambahanOrders = pgTable(
       .notNull()
       .references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+        convertedSoNumber: text("converted_so_number"), // just the paperwork number — no FK, no separate SO row
   },
   (table) => [uniqueIndex("tambahan_orders_number_idx").on(table.tambahanNumber)]
 );

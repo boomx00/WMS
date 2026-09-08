@@ -15,7 +15,7 @@ type TambahanData = {
     id: number;
     tambahanNumber: string;
     status: "ACTIVE" | "CONVERTED";
-    convertedSalesOrderId: number | null;
+    convertedSoNumber: string | null;
     convertedAt: string | null;
     createdAt: string;
   } | null;
@@ -107,7 +107,7 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
         <div className="mt-3">
           {tambahan.status === "CONVERTED" ? (
             <p className="text-xs text-emerald-400">
-              Converted to a new SO on{" "}
+              Converted to <span className="font-mono text-amber-400">{tambahan.convertedSoNumber}</span> on{" "}
               {tambahan.convertedAt ? new Date(tambahan.convertedAt).toLocaleDateString() : ""}.
             </p>
           ) : (

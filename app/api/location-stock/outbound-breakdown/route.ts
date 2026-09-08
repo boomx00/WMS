@@ -85,7 +85,6 @@ export async function GET(req: NextRequest) {
     .selectDistinct({
       tambahanOrderId: locationStockEvents.tambahanOrderId,
       tambahanNumber: tambahanOrders.tambahanNumber,
-      status: tambahanOrders.status,
     })
     .from(locationStockEvents)
     .innerJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
@@ -94,7 +93,6 @@ export async function GET(req: NextRequest) {
   const markedByTambahan = [];
   for (const row of distinctTambahanRows) {
     if (row.tambahanOrderId === null) continue;
-    if (row.status === "CONVERTED") continue; // its history moved to the new real SO already
 
     const quantity = await getPickedForTambahanQuantity(db, row.tambahanOrderId, item.id);
     if (quantity !== 0) {

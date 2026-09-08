@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { salesOrders, salesOrderItems, tambahanOrders, locationStockEvents } from "@/db/schema";
-import { eq, and, inArray, sql } from "drizzle-orm";
+import { salesOrders, tambahanOrders } from "@/db/schema";
+import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
 function sanitize(input: string): string {
@@ -9,15 +9,15 @@ function sanitize(input: string): string {
 }
 
 // POST /api/sales-orders/:soNumber/tambahan/convert
-// body: { newSoNumber, orderDate }
+// body: { newSoNumber }
 //
-// Turns everything picked/shipped under this SO's Tambahan into a normal,
-// independent sales order: creates a new sales_orders row with line items
-// matching what was picked (by SKU), re-tags every location_stock_events
-// row that happened under the Tambahan to point at the new SO instead (so
-// its Picking/Shipped history carries over and it shows up correctly
-// everywhere else in the system — Sales Orders page, PDA lookups, etc.),
-// and marks the Tambahan CONVERTED — kept for history, no longer active.
+// Purely a labeling action — records the real SO number that was
+// eventually issued on paper for this Tambahan batch. Does NOT create a
+// new sales_orders row, does NOT touch sales_order_items, does NOT
+// re-tag any location_stock_events, and does NOT touch location_stock.
+// Every pick and ship that happened under this Tambahan stays exactly
+// where it is, still queryable by tambahanOrderId — this just stamps the
+// batch with the number it ultimately became on paper.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ soNumber: string }> }
@@ -30,10 +30,9 @@ export async function POST(
   const { soNumber } = await params;
   const body = await req.json();
   const newSoNumber = sanitize(body.newSoNumber ?? "");
-  const orderDateInput = body.orderDate;
 
-  if (!newSoNumber || !orderDateInput) {
-    return NextResponse.json({ error: "newSoNumber and orderDate are required" }, { status: 400 });
+  if (!newSoNumber) {
+    return NextResponse.json({ error: "newSoNumber is required" }, { status: 400 });
   }
 
   const [parentSalesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.soNumber, soNumber));
@@ -50,67 +49,31 @@ export async function POST(
     return NextResponse.json({ error: "No Tambahan batch exists for this SO" }, { status: 404 });
   }
   if (tambahan.status === "CONVERTED") {
-    return NextResponse.json({ error: `${tambahan.tambahanNumber} was already converted` }, { status: 409 });
+    return NextResponse.json(
+      { error: `Already converted to ${tambahan.convertedSoNumber}` },
+      { status: 409 }
+    );
   }
 
+  // Avoid confusion with a real, separately-existing sales order.
   const [clash] = await db.select().from(salesOrders).where(eq(salesOrders.soNumber, newSoNumber));
   if (clash) {
-    return NextResponse.json({ error: `SO number ${newSoNumber} already exists` }, { status: 409 });
-  }
-
-  const pickedRows = await db
-    .select({
-      itemId: locationStockEvents.itemId,
-      picked: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
-    })
-    .from(locationStockEvents)
-    .where(
-      and(
-        eq(locationStockEvents.tambahanOrderId, tambahan.id),
-        inArray(locationStockEvents.type, ["PICKING", "DEFAULT_PICKING"])
-      )
-    )
-    .groupBy(locationStockEvents.itemId);
-
-  const lines = pickedRows.filter((r) => r.picked > 0);
-  if (lines.length === 0) {
-    return NextResponse.json({ error: "Nothing has been picked under this Tambahan yet" }, { status: 400 });
-  }
-
-  const result = await db.transaction(async (tx) => {
-    const [newOrder] = await tx
-      .insert(salesOrders)
-      .values({ soNumber: newSoNumber, orderDate: new Date(orderDateInput) })
-      .returning();
-
-    await tx.insert(salesOrderItems).values(
-      lines.map((l) => ({
-        salesOrderId: newOrder.id,
-        itemId: l.itemId,
-        quantity: l.picked, // "ordered" qty = what was actually picked under Tambahan
-      }))
+    return NextResponse.json(
+      { error: `${newSoNumber} already exists as a real, separate sales order — this action just labels the Tambahan, it can't link to an existing SO's own data.` },
+      { status: 409 }
     );
+  }
 
-    // Re-tag every event that happened under the Tambahan onto the new,
-    // real SO — its picking/shipping history moves with it, so the new SO
-    // immediately shows the correct PICKING/SHIPPED status.
-    await tx
-      .update(locationStockEvents)
-      .set({ salesOrderId: newOrder.id, tambahanOrderId: null })
-      .where(eq(locationStockEvents.tambahanOrderId, tambahan.id));
+  const [updated] = await db
+    .update(tambahanOrders)
+    .set({
+      status: "CONVERTED",
+      convertedSoNumber: newSoNumber,
+      convertedAt: new Date(),
+      convertedBy: session.userId,
+    })
+    .where(eq(tambahanOrders.id, tambahan.id))
+    .returning();
 
-    await tx
-      .update(tambahanOrders)
-      .set({
-        status: "CONVERTED",
-        convertedSalesOrderId: newOrder.id,
-        convertedAt: new Date(),
-        convertedBy: session.userId,
-      })
-      .where(eq(tambahanOrders.id, tambahan.id));
-
-    return newOrder;
-  });
-
-  return NextResponse.json({ newSoNumber: result.soNumber, newSalesOrderId: result.id });
+  return NextResponse.json({ tambahanNumber: updated.tambahanNumber, convertedSoNumber: updated.convertedSoNumber });
 }

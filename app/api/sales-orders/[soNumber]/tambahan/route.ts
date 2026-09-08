@@ -76,7 +76,7 @@ export async function GET(
       id: tambahan.id,
       tambahanNumber: tambahan.tambahanNumber,
       status: tambahan.status,
-      convertedSalesOrderId: tambahan.convertedSalesOrderId,
+      convertedSoNumber: tambahan.convertedSoNumber,      
       convertedAt: tambahan.convertedAt,
       createdAt: tambahan.createdAt,
     },
