@@ -403,8 +403,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
               <tbody>
                 {report.report.flatMap((loc) =>
                   loc.items.length === 0 ? (
-                    <tr key={loc.locationCode} className="border-t border-zinc-800/60">
-                      <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
+<tr key={loc.locationCode} className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors">                      <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
                       <td className="py-1.5 px-3 text-zinc-700">—</td>
                       <td className="py-1.5 px-3 text-zinc-700">—</td>
                       <td className="py-1.5 px-3 text-zinc-700">—</td>
@@ -423,7 +422,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                     </tr>
                   ) : (
                     loc.items.map((item, i) => (
-                      <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60">
+                      <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors">
                         <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
                         <td className="py-1.5 px-3">
                           {item.itemSku ? (
