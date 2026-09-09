@@ -1,124 +1,131 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { salesOrders, salesOrderItems, locationStockEvents, tambahanOrders } from "@/db/schema";
-import { eq, inArray, ilike, or, isNotNull } from "drizzle-orm";
-
-// GET /api/sales-orders/search-any?q=...
-//
-// Unlike /api/sales-orders/open-list, this does NOT filter out DONE
-// orders — it's for the PDA search bar, so a driver can still find and
-// open a fully-shipped SO to work on its Tambahan.
-//
-// Also matches against a Tambahan's convertedSoNumber: since conversion
-// is a label-only action (no real sales_orders row gets created for the
-// new number), searching that number wouldn't find anything otherwise —
-// but the driver still needs to reach the PARENT SO to continue shipping
-// the Tambahan's remaining stock, since that's where the actual
-// picking/shipping screens and the Tambahan section live.
+import {
+  salesOrders,
+  salesOrderItems,
+  items,
+  palletEvents,
+  pallets,
+  locationStockEvents,
+  locations,
+  users,
+  shipmentRevisions,
+} from "@/db/schema";
+import { eq, and, inArray, ilike, desc, sql } from "drizzle-orm";
+import { getShippedQuantity } from "@/lib/shippedQuantity";
+import { getPickedForSoQuantity } from "@/lib/pickedForSo";
+// GET /api/sales-orders/search?q=...
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
+
   if (!q) {
     return NextResponse.json([]);
   }
 
-  const directMatches = await db
+  const matchedOrders = await db
     .select()
     .from(salesOrders)
     .where(ilike(salesOrders.soNumber, `%${q}%`))
+    .orderBy(desc(salesOrders.orderDate))
     .limit(50);
 
-  const tambahanMatches = await db
-    .select({
-      parentSalesOrderId: tambahanOrders.parentSalesOrderId,
-      convertedSoNumber: tambahanOrders.convertedSoNumber,
-      tambahanNumber: tambahanOrders.tambahanNumber,
-    })
-    .from(tambahanOrders)
-    .where(
-      or(
-        ilike(tambahanOrders.convertedSoNumber, `%${q}%`),
-        ilike(tambahanOrders.tambahanNumber, `%${q}%`)
-      )
-    )
-    .limit(50);
-
-  const directIds = new Set(directMatches.map((o) => o.id));
-  const extraParentIds = tambahanMatches
-    .map((t) => t.parentSalesOrderId)
-    .filter((id) => !directIds.has(id));
-
-  const matchNoteByParentId = new Map<number, string>();
-  for (const t of tambahanMatches) {
-    if (directIds.has(t.parentSalesOrderId)) continue;
-    matchNoteByParentId.set(
-      t.parentSalesOrderId,
-      t.convertedSoNumber && t.convertedSoNumber.toLowerCase().includes(q.toLowerCase())
-        ? `matched via converted Tambahan → ${t.convertedSoNumber}`
-        : `matched via Tambahan ${t.tambahanNumber}`
-    );
-  }
-
-  const extraParents = extraParentIds.length
-    ? await db.select().from(salesOrders).where(inArray(salesOrders.id, extraParentIds))
-    : [];
-
-  const allOrders = [...directMatches, ...extraParents];
-  if (allOrders.length === 0) {
+  if (matchedOrders.length === 0) {
     return NextResponse.json([]);
   }
 
-  const orderIds = allOrders.map((o) => o.id);
+  const orderIds = matchedOrders.map((o) => o.id);
 
   const lines = await db
     .select({
       salesOrderId: salesOrderItems.salesOrderId,
       itemId: salesOrderItems.itemId,
-      orderedQty: salesOrderItems.quantity,
+      quantity: salesOrderItems.quantity,
+      itemSku: items.sku,
+      itemName: items.name,
+      palletCartonQty: items.palletCartonQty,
     })
     .from(salesOrderItems)
+    .innerJoin(items, eq(salesOrderItems.itemId, items.id))
     .where(inArray(salesOrderItems.salesOrderId, orderIds));
 
-  const shippedRows = await db
-    .select({
-      salesOrderId: locationStockEvents.salesOrderId,
-      itemId: locationStockEvents.itemId,
-      shipped: locationStockEvents.quantity,
-    })
-    .from(locationStockEvents)
-    .where(inArray(locationStockEvents.salesOrderId, orderIds));
-
-  const shippedMap = new Map<string, number>();
-  for (const r of shippedRows) {
-    if (r.salesOrderId === null) continue;
-    const key = `${r.salesOrderId}-${r.itemId}`;
-    shippedMap.set(key, (shippedMap.get(key) ?? 0) + r.shipped);
-  }
-
   const linesByOrder = new Map<number, typeof lines>();
-  for (const line of lines) {
-    if (!linesByOrder.has(line.salesOrderId)) linesByOrder.set(line.salesOrderId, []);
-    linesByOrder.get(line.salesOrderId)!.push(line);
+  for (const l of lines) {
+    if (!linesByOrder.has(l.salesOrderId)) linesByOrder.set(l.salesOrderId, []);
+    linesByOrder.get(l.salesOrderId)!.push(l);
   }
 
-  const result = allOrders
-    .map((order) => {
-      const orderLines = linesByOrder.get(order.id) ?? [];
+const results = await Promise.all(
+  matchedOrders.map(async (o) => {
+    const orderLines = linesByOrder.get(o.id) ?? [];
+const withStatus = await Promise.all(
+  orderLines.map(async (line) => {
+    const shipped = await getShippedQuantity(db, o.id, line.itemId);
+    const picked = Math.max(0, await getPickedForSoQuantity(db, o.id, line.itemId));
+    const status: "PENDING" | "PICKING" | "SHIPPED" =
+      shipped >= line.quantity ? "SHIPPED" : shipped > 0 || picked > 0 ? "PICKING" : "PENDING";
 
-      let anyActivity = false;
-      let allDone = orderLines.length > 0;
+        const pickedFromRows = await db
+          .select({
+            locationCode: locations.code,
+            type: locationStockEvents.type,
+            username: users.username,
+            quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+          })
+          .from(locationStockEvents)
+          .innerJoin(locations, eq(locationStockEvents.sourceLocationId, locations.id))
+          .innerJoin(users, eq(locationStockEvents.userId, users.id))
+          .where(
+            and(
+              eq(locationStockEvents.salesOrderId, o.id),
+              eq(locationStockEvents.itemId, line.itemId),
+              sql`${locationStockEvents.type} IN ('PICKING', 'DEFAULT_PICKING')`
+            )
+          )
+          .groupBy(locations.code, locationStockEvents.type, users.username);
 
-      for (const line of orderLines) {
-        const shipped = shippedMap.get(`${order.id}-${line.itemId}`) ?? 0;
-        if (shipped > 0) anyActivity = true;
-        if (shipped < line.orderedQty) allDone = false;
-      }
+        const shippedByRows = await db
+          .select({
+            username: users.username,
+            quantity: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int`,
+          })
+          .from(palletEvents)
+          .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
+          .innerJoin(users, eq(palletEvents.userId, users.id))
+          .where(
+            and(
+              eq(palletEvents.salesOrderId, o.id),
+              eq(pallets.itemId, line.itemId),
+              eq(palletEvents.type, "OUTBOUND")
+            )
+          )
+          .groupBy(users.username);
 
-      const status = allDone ? "DONE" : anyActivity ? "IN_PROGRESS" : "PENDING";
-      const matchNote = matchNoteByParentId.get(order.id);
+        return {
+          ...line,
+          shipped,
+          status,
+          pickedFrom: pickedFromRows,
+          shippedBy: shippedByRows,
+          revisions: [],
+        };
+      })
+    );
 
-      return { soNumber: order.soNumber, orderDate: order.orderDate, status, matchNote };
-    })
-    .sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
+    const allComplete = withStatus.length > 0 && withStatus.every((l) => l.status === "SHIPPED");
+    const anyShipped = withStatus.some((l) => l.shipped > 0);
+    const overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED" = allComplete
+      ? "COMPLETE"
+      : anyShipped
+      ? "PARTIAL"
+      : "NOT_STARTED";
 
-  return NextResponse.json(result);
+    const pickedByUsers = Array.from(
+      new Set(withStatus.flatMap((l) => l.pickedFrom.map((p: any) => p.username)))
+    );
+
+    return { ...o, items: withStatus, overallStatus, pickedByUsers };
+  })
+);
+
+  return NextResponse.json(results);
 }
