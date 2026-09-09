@@ -4,7 +4,7 @@ import { locations, items, settings, locationStockEvents, locationStock } from "
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { adjustLocationStock } from "@/lib/locationStock";
-
+import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
@@ -63,6 +63,25 @@ export async function PATCH(req: NextRequest) {
   const [item] = await db.select().from(items).where(eq(items.sku, itemSku));
   if (!item) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+  }
+  // Outbound WH's physical total includes stock reserved for open SOs and
+  // Tambahans — a Move must never dip into that, only the genuinely
+  // unmarked ("ecer") portion. This is a hard cap independent of the
+  // Default Move setting below, since Default Move is about tolerating a
+  // location-count mismatch, not about permission to take reserved stock.
+  if (sourceLocation.type === "OUTBOUND_WH") {
+    const unmarked = await getUnclaimedQuantity(db, item.id);
+    if (quantity > unmarked) {
+      return NextResponse.json(
+        {
+          error:
+            unmarked <= 0
+              ? `Semua stok ${itemSku} di Outbound WH sudah ter-alokasi ke SO/Tambahan — tidak ada yang bisa dipindahkan.`
+              : `Hanya ${unmarked} karton ${itemSku} yang belum ter-alokasi (ecer) di Outbound WH — sisanya sudah dipesan untuk SO/Tambahan.`,
+        },
+        { status: 409 }
+      );
+    }
   }
 
   const allStockAtSource = await db
