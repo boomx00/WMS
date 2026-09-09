@@ -275,8 +275,8 @@ export default function MovementHistoryV2Table({
             : `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} events total`}
       </p>
 
-      <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
-        <table className="w-full text-sm">
+      <div className="border border-zinc-800 rounded-lg overflow-x-auto mb-4">
+        <table className="w-full text-sm min-w-[900px]">
           <thead>
             <tr className="bg-zinc-900 text-zinc-500 text-left">
               <th className="px-4 py-3 font-medium">Type</th>

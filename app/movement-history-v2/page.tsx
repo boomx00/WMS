@@ -61,7 +61,7 @@ export default async function MovementHistoryV2Page({
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="p-8 max-w-7xl">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold">Movement History (v2)</h1>
         <p className="text-zinc-500 text-sm mt-1">
