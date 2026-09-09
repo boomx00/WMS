@@ -68,12 +68,7 @@ export async function PATCH(req: NextRequest) {
     .from(tambahanOrders)
     .where(eq(tambahanOrders.parentSalesOrderId, salesOrder.id));
 
-  if (tambahan && tambahan.status === "CONVERTED") {
-    return NextResponse.json(
-      { error: `${tambahan.tambahanNumber} was already converted to a new SO — picking is closed.` },
-      { status: 409 }
-    );
-  }
+
 
   if (!tambahan) {
     [tambahan] = await db

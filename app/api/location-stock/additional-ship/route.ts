@@ -78,12 +78,7 @@ export async function PATCH(req: NextRequest) {
   if (!tambahan) {
     return NextResponse.json({ error: `No Additional batch exists for ${soNumber}` }, { status: 404 });
   }
-  if (tambahan.status === "CONVERTED") {
-    return NextResponse.json(
-      { error: `${tambahan.tambahanNumber} was already converted to a new SO — ship against that instead.` },
-      { status: 409 }
-    );
-  }
+
 
   const [outboundWh] = await db.select().from(locations).where(eq(locations.type, "OUTBOUND_WH"));
   if (!outboundWh) {
