@@ -1,8 +1,23 @@
 import { db } from "@/lib/db";
 import { locations, locationStock, items } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 
 async function getWarehouseMapData() {
+  // Aggregate per location instead of a raw row-per-item leftJoin. A rack
+  // location can end up with more than one location_stock row over time
+  // (e.g. a stale quantity=0 row left behind after a move), and Postgres
+  // doesn't guarantee which one comes back first without an ORDER BY that
+  // covers it. Left unaggregated, two rows for the same location both map
+  // to the same grid cell (same x/y), so whichever one happens to land
+  // last in the array visually wins — which flips between requests and
+  // can show a location as empty even though it currently has stock.
+  //
+  // Fixing this two ways together:
+  //   1. Only join location_stock rows with quantity != 0, so a stale
+  //      zero row can never compete with the real one.
+  //   2. GROUP BY location and SUM the quantity, so even a legitimate
+  //      multi-item location collapses into a single cell instead of
+  //      producing duplicate overlapping entries.
   const rows = await db
     .select({
       locationId: locations.id,
@@ -10,13 +25,17 @@ async function getWarehouseMapData() {
       area: locations.area,
       x: locations.x,
       y: locations.y,
-      totalQuantity: locationStock.quantity,
-      palletCartonQty: items.palletCartonQty,
+      totalQuantity: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)`.as("total_quantity"),
+      palletCartonQty: sql<number | null>`MAX(${items.palletCartonQty})`.as("pallet_carton_qty"),
     })
     .from(locations)
-    .leftJoin(locationStock, eq(locationStock.locationId, locations.id))
+    .leftJoin(
+      locationStock,
+      and(eq(locationStock.locationId, locations.id), ne(locationStock.quantity, 0))
+    )
     .leftJoin(items, eq(locationStock.itemId, items.id))
     .where(eq(locations.type, "RACK"))
+    .groupBy(locations.id, locations.code, locations.area, locations.x, locations.y)
     .orderBy(locations.area, locations.x, locations.y);
 
   // Estimated pallet count = cartons at this cell (from location_stock,
