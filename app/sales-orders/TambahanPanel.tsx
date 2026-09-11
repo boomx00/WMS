@@ -29,7 +29,7 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
   const [orderDate, setOrderDate] = useState(new Date().toISOString().slice(0, 10));
   const [converting, setConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  const [confirming, setConfirming] = useState(false);
   async function refresh() {
     setLoading(true);
     const res = await fetch(`/api/sales-orders/${encodeURIComponent(soNumber)}/tambahan`);
@@ -64,15 +64,27 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
     }
     await refresh();
   }
+    async function handleConfirmTambahan() {
+    setError(null);
+    setConfirming(true);
+    const res = await fetch(`/api/sales-orders/${encodeURIComponent(soNumber)}/tambahan/confirm`, {
+      method: "POST",
+    });
+    setConfirming(false);
+    if (!res.ok) {
+      const responseBody = await res.json();
+      setError(responseBody.error ?? "Failed to confirm");
+      return;
+    }
+    await refresh();
+  }
 
   if (loading) return null;
   if (!data?.tambahan) return null; // no Tambahan started for this SO yet
 
   const { tambahan, items } = data;
-
+  const totalOutstanding = items.reduce((sum, it) => sum + Math.max(0, it.pickedQty - it.shippedQty), 0);
   return (
-    // pl-10 ≈ one Word tab-stop of indent, so it visually nests under the
-    // original product list above it.
     <div className="pl-10 mt-3 border-l border-zinc-800">
       <div className="pl-4">
         <span className="text-sm font-medium text-amber-400 underline underline-offset-4">
@@ -87,23 +99,35 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
               <tr className="text-zinc-500 text-left">
                 <th className="py-1 font-medium">SKU</th>
                 <th className="py-1 font-medium">Nama</th>
-                <th className="py-1 font-medium text-right">Shipped/Picked</th>
+                <th className="py-1 font-medium text-right">Picked</th>
+                <th className="py-1 font-medium text-right">Shipped</th>
+                <th className="py-1 font-medium text-right">Outstanding</th>
+                <th className="py-1 font-medium"></th>
               </tr>
             </thead>
             <tbody>
               {items.map((it) => (
-                <tr key={it.itemId} className="border-t border-zinc-900">
-                  <td className="py-1 font-mono">{it.itemSku}</td>
-                  <td className="py-1 text-zinc-400">{it.itemName}</td>
-                  <td className="py-1 text-right font-mono">
-                    {it.shippedQty}/{it.pickedQty}
-                  </td>
-                </tr>
+                <TambahanItemRow
+                  key={it.itemId}
+                  tambahanNumber={tambahan.tambahanNumber}
+                  item={it}
+                  onSaved={refresh}
+                />
               ))}
             </tbody>
           </table>
         )}
-
+        {totalOutstanding > 0 && (
+          <div className="mt-2">
+            <button
+              onClick={handleConfirmTambahan}
+              disabled={confirming}
+              className="px-3 py-1.5 rounded-md border border-zinc-700 text-xs font-medium text-zinc-300 hover:bg-zinc-900 disabled:opacity-50 transition-colors"
+            >
+              {confirming ? "Confirming..." : `Confirm Tambahan (release ${totalOutstanding} leftover)`}
+            </button>
+          </div>
+        )}
         <div className="mt-3">
           {tambahan.status === "CONVERTED" ? (
             <p className="text-xs text-emerald-400">
@@ -144,5 +168,102 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function TambahanItemRow({
+  tambahanNumber,
+  item,
+  onSaved,
+}: {
+  tambahanNumber: string;
+  item: TambahanItem;
+  onSaved: () => void;
+}) {
+  const outstanding = item.pickedQty - item.shippedQty;
+
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(outstanding.toString());
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Both Edit and Delete go through the same correction: the "Marked Qty"
+  // for this SKU under this Tambahan is picked-minus-shipped, and this
+  // sets that outstanding amount directly — 0 for Delete (nothing left
+  // to ship, e.g. the picker over-picked by mistake), or any other value
+  // for Edit (e.g. correcting a miscount).
+  async function save(newOutstanding: number) {
+    setSaving(true);
+    setError(null);
+    const res = await fetch("/api/location-stock/outbound-breakdown/correct-tambahan", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemSku: item.itemSku, tambahanNumber, newQuantity: newOutstanding }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to save");
+      return;
+    }
+    setEditing(false);
+    onSaved();
+  }
+
+  return (
+    <tr className="border-t border-zinc-900">
+      <td className="py-1 font-mono">{item.itemSku}</td>
+      <td className="py-1 text-zinc-400">{item.itemName}</td>
+      <td className="py-1 text-right font-mono">{item.pickedQty}</td>
+      <td className="py-1 text-right font-mono">{item.shippedQty}</td>
+      <td className="py-1 text-right font-mono">
+        {editing ? (
+          <input
+            type="number"
+            min={0}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-16 px-1.5 py-0.5 rounded bg-zinc-900 border border-amber-700 text-right font-mono text-xs"
+          />
+        ) : (
+          outstanding
+        )}
+      </td>
+      <td className="py-1 text-right">
+        {editing ? (
+          <div className="flex gap-1.5 justify-end items-center">
+            <button
+              onClick={() => save(Number(value))}
+              disabled={saving}
+              className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
+            >
+              {saving ? "..." : "Save"}
+            </button>
+            <button
+              onClick={() => {
+                setEditing(false);
+                setValue(outstanding.toString());
+                setError(null);
+              }}
+              className="text-zinc-500 hover:text-zinc-300"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-1.5 justify-end items-center">
+            <button onClick={() => setEditing(true)} className="text-amber-500 hover:underline">
+              Edit
+            </button>
+            {outstanding > 0 && (
+              <button onClick={() => save(0)} disabled={saving} className="text-red-400 hover:underline disabled:opacity-50">
+                Delete
+              </button>
+            )}
+          </div>
+        )}
+        {error && <div className="text-red-400 mt-0.5 text-[10px]">{error}</div>}
+      </td>
+    </tr>
   );
 }
