@@ -182,31 +182,25 @@ function TambahanItemRow({
 }) {
   const outstanding = item.pickedQty - item.shippedQty;
 
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(outstanding.toString());
+  const [showPopup, setShowPopup] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Both Edit and Delete go through the same correction: the "Marked Qty"
-  // for this SKU under this Tambahan is picked-minus-shipped, and this
-  // sets that outstanding amount directly — 0 for Delete (nothing left
-  // to ship, e.g. the picker over-picked by mistake), or any other value
-  // for Edit (e.g. correcting a miscount).
-  async function save(newOutstanding: number) {
+  async function returnStock(mode: "ECER" | "ORIGINAL_LOCATION") {
     setSaving(true);
     setError(null);
-    const res = await fetch("/api/location-stock/outbound-breakdown/correct-tambahan", {
+    const res = await fetch("/api/location-stock/outbound-breakdown/return-tambahan", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemSku: item.itemSku, tambahanNumber, newQuantity: newOutstanding }),
+      body: JSON.stringify({ itemSku: item.itemSku, tambahanNumber, mode }),
     });
     setSaving(false);
     if (!res.ok) {
       const data = await res.json();
-      setError(data.error ?? "Failed to save");
+      setError(data.error ?? "Failed to return stock");
       return;
     }
-    setEditing(false);
+    setShowPopup(false);
     onSaved();
   }
 
@@ -216,53 +210,49 @@ function TambahanItemRow({
       <td className="py-1 text-zinc-400">{item.itemName}</td>
       <td className="py-1 text-right font-mono">{item.pickedQty}</td>
       <td className="py-1 text-right font-mono">{item.shippedQty}</td>
-      <td className="py-1 text-right font-mono">
-        {editing ? (
-          <input
-            type="number"
-            min={0}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            className="w-16 px-1.5 py-0.5 rounded bg-zinc-900 border border-amber-700 text-right font-mono text-xs"
-          />
-        ) : (
-          outstanding
+      <td className="py-1 text-right font-mono">{outstanding}</td>
+      <td className="py-1 text-right relative">
+        {outstanding > 0 && (
+          <button onClick={() => setShowPopup(true)} className="text-red-400 hover:underline">
+            Delete
+          </button>
         )}
-      </td>
-      <td className="py-1 text-right">
-        {editing ? (
-          <div className="flex gap-1.5 justify-end items-center">
-            <button
-              onClick={() => save(Number(value))}
-              disabled={saving}
-              className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50"
-            >
-              {saving ? "..." : "Save"}
-            </button>
-            <button
-              onClick={() => {
-                setEditing(false);
-                setValue(outstanding.toString());
-                setError(null);
-              }}
-              className="text-zinc-500 hover:text-zinc-300"
-            >
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <div className="flex gap-1.5 justify-end items-center">
-            <button onClick={() => setEditing(true)} className="text-amber-500 hover:underline">
-              Edit
-            </button>
-            {outstanding > 0 && (
-              <button onClick={() => save(0)} disabled={saving} className="text-red-400 hover:underline disabled:opacity-50">
-                Delete
+        {error && !showPopup && <div className="text-red-400 mt-0.5 text-[10px]">{error}</div>}
+
+        {showPopup && (
+          <div className="absolute right-0 top-6 z-10 w-64 rounded-md border border-zinc-700 bg-zinc-900 shadow-lg p-3 text-left">
+            <p className="text-xs text-zinc-300 mb-2">
+              Kembalikan {outstanding} {item.itemSku} ke:
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <button
+                onClick={() => returnStock("ECER")}
+                disabled={saving}
+                className="px-2 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-left disabled:opacity-50"
+              >
+                Kembalikan ke ecer OUTBOUND_WH
               </button>
-            )}
+              <button
+                onClick={() => returnStock("ORIGINAL_LOCATION")}
+                disabled={saving}
+                className="px-2 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-left disabled:opacity-50"
+              >
+                Kembalikan ke lokasi semula
+              </button>
+              <button
+                onClick={() => {
+                  setShowPopup(false);
+                  setError(null);
+                }}
+                disabled={saving}
+                className="px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300"
+              >
+                Batal
+              </button>
+            </div>
+            {error && <p className="text-red-400 text-[10px] mt-2">{error}</p>}
           </div>
         )}
-        {error && <div className="text-red-400 mt-0.5 text-[10px]">{error}</div>}
       </td>
     </tr>
   );
