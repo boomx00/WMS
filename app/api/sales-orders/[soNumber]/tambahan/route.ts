@@ -27,6 +27,11 @@ export async function GET(
     return NextResponse.json({ tambahan: null, items: [] });
   }
 
+  // Includes RELEASE/CLAIM alongside PICKING/DEFAULT_PICKING so this
+  // matches getPickedForTambahanQuantity's formula exactly — a return-to-
+  // ecer action inserts a negative CLAIM, and that needs to actually
+  // reduce what's displayed as "Picked" here, not just silently vanish
+  // from the outstanding calculation while the picked number stays stale.
   const pickedRows = await db
     .select({
       itemId: locationStockEvents.itemId,
@@ -36,7 +41,7 @@ export async function GET(
     .where(
       and(
         eq(locationStockEvents.tambahanOrderId, tambahan.id),
-        inArray(locationStockEvents.type, ["PICKING", "DEFAULT_PICKING"])
+        inArray(locationStockEvents.type, ["PICKING", "DEFAULT_PICKING", "RELEASE", "CLAIM"])
       )
     )
     .groupBy(locationStockEvents.itemId);
