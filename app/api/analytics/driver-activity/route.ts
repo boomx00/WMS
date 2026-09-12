@@ -26,10 +26,11 @@ export function classifyDriverEvent(
 
 // GET /api/analytics/driver-activity?start=...&end=...
 //
-// Per-driver (role = "Forklift Driver") summary of location_stock_events
-// activity in a date range, using location_stock as the source of truth
-// for movement data (v2). Every Forklift Driver is included even with
-// zero activity in range, so gaps are visible rather than hidden.
+// Per-driver (role = "Forklift Driver" or "Admin") summary of
+// location_stock_events activity in a date range, using location_stock as
+// the source of truth for movement data (v2). Every matching user is
+// included even with zero activity in range, so gaps are visible rather
+// than hidden.
 export async function GET(req: NextRequest) {
   const startParam = req.nextUrl.searchParams.get("start");
   const endParam = req.nextUrl.searchParams.get("end");
@@ -48,7 +49,7 @@ export async function GET(req: NextRequest) {
     .select({ id: users.id, username: users.username })
     .from(users)
     .innerJoin(roles, eq(users.roleId, roles.id))
-    .where(eq(roles.name, "Forklift Driver"));
+    .where(inArray(roles.name, ["Forklift Driver", "Admin"]));
 
   if (drivers.length === 0) {
     return NextResponse.json([]);
