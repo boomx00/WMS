@@ -52,17 +52,6 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
   const [searching, setSearching] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  // Floor + Rack totals across the full dataset — independent of any
-  // active search filter, so these numbers stay stable while typing.
-  const stockTotals = useMemo(() => {
-    let floor = 0;
-    let rack = 0;
-    for (const row of rows) {
-      if (row.locationType === "FLOOR") floor += row.quantity;
-      else if (row.locationType === "RACK") rack += row.quantity;
-    }
-    return { floor, rack, total: floor + rack };
-  }, [rows]);
   async function runSearch(query: string) {
     setSearching(true);
     const res = await fetch(`/api/location-stock/search?q=${encodeURIComponent(query)}`);
@@ -101,6 +90,19 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
 
   const isSearching = search.trim().length > 0;
   const baseRows = searchResults ?? rows;
+
+  // Floor + Rack totals — recalculated from whatever's currently showing
+  // (search results if a search is active, otherwise the full dataset),
+  // so the numbers track the SKU/location filter above the table.
+  const stockTotals = useMemo(() => {
+    let floor = 0;
+    let rack = 0;
+    for (const row of baseRows) {
+      if (row.locationType === "FLOOR") floor += row.quantity;
+      else if (row.locationType === "RACK") rack += row.quantity;
+    }
+    return { floor, rack, total: floor + rack };
+  }, [baseRows]);
 
   const groups = useMemo(() => {
     const byKey = new Map<string, Row[]>();
