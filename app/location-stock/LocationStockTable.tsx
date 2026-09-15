@@ -52,6 +52,17 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
   const [searching, setSearching] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
+  // Floor + Rack totals across the full dataset — independent of any
+  // active search filter, so these numbers stay stable while typing.
+  const stockTotals = useMemo(() => {
+    let floor = 0;
+    let rack = 0;
+    for (const row of rows) {
+      if (row.locationType === "FLOOR") floor += row.quantity;
+      else if (row.locationType === "RACK") rack += row.quantity;
+    }
+    return { floor, rack, total: floor + rack };
+  }, [rows]);
   async function runSearch(query: string) {
     setSearching(true);
     const res = await fetch(`/api/location-stock/search?q=${encodeURIComponent(query)}`);
@@ -129,6 +140,21 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
 
   return (
     <div>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="border border-zinc-800 rounded-lg px-4 py-3">
+          <p className="text-xs text-zinc-500 mb-1">Total Stock (Floor + Rack)</p>
+          <p className="text-lg font-semibold">{stockTotals.total.toLocaleString()}</p>
+        </div>
+        <div className="border border-zinc-800 rounded-lg px-4 py-3">
+          <p className="text-xs text-zinc-500 mb-1">Total Floor</p>
+          <p className="text-lg font-semibold">{stockTotals.floor.toLocaleString()}</p>
+        </div>
+        <div className="border border-zinc-800 rounded-lg px-4 py-3">
+          <p className="text-xs text-zinc-500 mb-1">Total Rack</p>
+          <p className="text-lg font-semibold">{stockTotals.rack.toLocaleString()}</p>
+        </div>
+      </div>
+
       <div className="flex items-center gap-2 mb-4">
         <input
           type="text"
