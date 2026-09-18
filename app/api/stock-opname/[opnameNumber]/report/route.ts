@@ -133,6 +133,7 @@ export async function GET(
       ? await db
           .select({
             locationId: locationStock.locationId,
+            itemId: locationStock.itemId,
             itemSku: items.sku,
             itemName: items.name,
             quantity: locationStock.quantity,
@@ -147,6 +148,14 @@ export async function GET(
     if (row.quantity === 0) continue;
     if (!liveByLocation.has(row.locationId)) liveByLocation.set(row.locationId, []);
     liveByLocation.get(row.locationId)!.push({ sku: row.itemSku, name: row.itemName, quantity: row.quantity });
+  }
+
+  // Scoped to exactly (location, item) — used to show "Current System Qty"
+  // for a normal counted line as just that item's own live stock, not
+  // every other SKU that happens to share the same FLOOR cell.
+  const liveByLocationItem = new Map<string, number>();
+  for (const row of liveStockRows) {
+    liveByLocationItem.set(`${row.locationId}-${row.itemId}`, row.quantity);
   }
 
   const report = allLocations.map((loc) => {
@@ -182,6 +191,11 @@ export async function GET(
           difference: c.difference,
           countedAt: c.countedAt,
           countedByUsername: c.countedByUsername,
+          // Live current stock for THIS specific item at this location —
+          // null for an empty confirmation (no single item to scope to;
+          // the location-wide currentSystemStock/currentSystemQty above
+          // still applies there instead).
+          currentItemQty: c.itemId !== null ? liveByLocationItem.get(`${loc.locationId}-${c.itemId}`) ?? 0 : null,
           skuMatch: isEmptyConfirmation
             ? (systemSkuList.length === 0 ? ("MATCH" as const) : ("MISMATCH" as const))
             : systemSkuList.includes((c.itemSku ?? "").toUpperCase())

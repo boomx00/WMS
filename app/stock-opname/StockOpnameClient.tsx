@@ -194,7 +194,7 @@ function TabButton({ label, active, onClick }: { label: string; active: boolean;
 }
 
 type ReportItem = {
-  itemId: number | null; // null = PIC confirmed this location was empty
+  itemId: number | null;
   itemSku: string | null;
   itemName: string;
   systemQty: number;
@@ -203,6 +203,7 @@ type ReportItem = {
   difference: number;
   countedAt: string | null;
   countedByUsername: string | null;
+  currentItemQty: number | null; // ADD
   skuMatch: "MATCH" | "MISMATCH";
 };
 type ReportLocation = {
@@ -400,10 +401,11 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                   <th className="py-2 px-3 font-medium"></th>
                 </tr>
               </thead>
-              <tbody>
+                            <tbody>
                 {report.report.flatMap((loc) =>
                   loc.items.length === 0 ? (
-<tr key={loc.locationCode} className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors">                      <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
+                    <tr key={loc.locationCode} className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors">
+                      <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
                       <td className="py-1.5 px-3 text-zinc-700">—</td>
                       <td className="py-1.5 px-3 text-zinc-700">—</td>
                       <td className="py-1.5 px-3 text-zinc-700">—</td>
@@ -452,17 +454,27 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                           <DifferenceBadge difference={item.difference} />
                         </td>
                         <td className="py-1.5 px-3">
-                          <CurrentSystemCell entries={loc.currentSystemStock} />
+                          {item.itemId !== null ? (
+                            item.currentItemQty && item.currentItemQty > 0 ? (
+                              <div>
+                                <span className="font-mono text-zinc-300">{item.itemSku}</span>{" "}
+                                <span className="text-zinc-500">{item.itemName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-zinc-700">—</span>
+                            )
+                          ) : (
+                            <CurrentSystemCell entries={loc.currentSystemStock} />
+                          )}
                         </td>
                         <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
-                          {loc.currentSystemQty.toLocaleString()}
+                          {item.itemId !== null
+                            ? (item.currentItemQty ?? 0).toLocaleString()
+                            : loc.currentSystemQty.toLocaleString()}
                         </td>
                         <td className="py-1.5 px-3 text-zinc-500">{item.countedByUsername ?? "—"}</td>
                         <td className="py-1.5 px-3 text-right">
                           {item.itemId === null ? (
-                            // No single item to adjust for a confirmed-empty
-                            // location — any real discrepancy here needs a
-                            // manual look, not a one-click apply.
                             item.difference === 0 ? (
                               <span className="text-[10px] text-zinc-700">Matched</span>
                             ) : (
