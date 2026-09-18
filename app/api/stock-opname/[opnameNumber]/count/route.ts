@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpnameItems, stockOpnameLocations, locations, items, locationStock } from "@/db/schema";
+import { stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
 import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
@@ -15,44 +15,6 @@ function extractSku(label: string): string | null {
   return parts[0]?.trim() || null;
 }
 
-// PATCH /api/stock-opname/:opnameNumber/count
-// body: { locationCode, scanned, countedQty, originalLocationCode?, originalSku? }
-//
-// `scanned` (and therefore `countedQty`) may be omitted/blank — that
-// records the location as CONFIRMED EMPTY (the PIC physically checked it
-// and found no stock), as distinct from a location that simply hasn't
-// been visited yet. An empty confirmation is stored as a stock_opname_items
-// row with itemId = null and countedQty = 0, compared against the SYSTEM'S
-// TOTAL quantity across every item at that location — so if the system
-// expected something there, the resulting difference still surfaces the
-// discrepancy on the report instead of silently disappearing.
-//
-// Alongside the blind physical count, this also snapshots whatever
-// location_stock says is there for this exact location+item *at the
-// moment of counting* — so the recorded line always reflects what the
-// system believed at count time, not whatever it happens to say later
-// (e.g. after other movements land). difference = countedQty - systemQty,
-// recomputed every time a line is (re)counted.
-//
-// It also separately snapshots which SKU(s) the system had recorded at
-// this location OVERALL at this exact moment (not just for the counted
-// item) — this is what the report's "System SKU (at Count)" column
-// reflects, a fixed historical record rather than something recomputed
-// live later.
-//
-// If this location isn't yet part of this opname session (e.g. a custom,
-// real-time session where locations are never pre-planned — only
-// discovered as the PIC actually visits them), it's registered into
-// stock_opname_locations automatically here.
-//
-// originalLocationCode/originalSku identify the row as it existed BEFORE
-// this edit — sent by the PDA whenever the PIC corrects a mis-scanned
-// location or wrong SKU on an already-saved line, so it can be edited in
-// place rather than leaving the stale original behind as a duplicate:
-//   - RACK locations hold exactly one SKU at a time, so the original row
-//     is found by location alone (whatever item is currently there).
-//   - FLOOR (and other non-RACK types) can hold several different SKUs
-//     at once, so the original row must be matched by location + item.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ opnameNumber: string }> }
@@ -142,23 +104,31 @@ export async function PATCH(
 
   const difference = countedQty - systemQty;
 
-  // Also snapshot which SKU(s) the system had recorded at this location
-  // overall, at this exact moment — not just for the counted item, but
-  // whatever location_stock actually shows here right now. This is what
-  // "System SKU (at Count)" on the report reflects: a fixed record of
-  // what the system believed at count time, so it stays meaningful even
-  // if the location is later adjusted or moved before anyone reads the
-  // report.
-  const allStockAtLocation = await db
-    .select({ itemId: locationStock.itemId, quantity: locationStock.quantity })
-    .from(locationStock)
-    .where(eq(locationStock.locationId, location.id));
-
-  const nonZeroItemIds = allStockAtLocation.filter((r) => r.quantity !== 0).map((r) => r.itemId);
+  // Snapshot what the system expected here at this exact moment — the
+  // meaning depends on whether a SKU was actually counted:
+  //   - Normal count (item present): only THIS item's own snapshot
+  //     matters — not every other SKU that happens to share the same
+  //     FLOOR cell. If the system had nothing recorded for this exact
+  //     item here, systemSku stays null even if other SKUs are present.
+  //   - Empty confirmation (item is null — PIC found nothing here):
+  //     there's no single item to check against, so this snapshots
+  //     EVERY SKU the system had recorded at the location, so the report
+  //     can correctly flag "system expected something here, PIC found
+  //     nothing" as a mismatch.
   let systemSku: string | null = null;
-  if (nonZeroItemIds.length > 0) {
-    const systemItems = await db.select({ sku: items.sku }).from(items).where(inArray(items.id, nonZeroItemIds));
-    systemSku = systemItems.map((i) => i.sku).join(", ") || null;
+  if (item) {
+    systemSku = systemQty !== 0 ? item.sku : null;
+  } else {
+    const allStockAtLocation = await db
+      .select({ itemId: locationStock.itemId, quantity: locationStock.quantity })
+      .from(locationStock)
+      .where(eq(locationStock.locationId, location.id));
+
+    const nonZeroItemIds = allStockAtLocation.filter((r) => r.quantity !== 0).map((r) => r.itemId);
+    if (nonZeroItemIds.length > 0) {
+      const systemItems = await db.select({ sku: items.sku }).from(items).where(inArray(items.id, nonZeroItemIds));
+      systemSku = systemItems.map((i) => i.sku).join(", ") || null;
+    }
   }
 
   const [existingLine] = await db
@@ -240,6 +210,7 @@ export async function PATCH(
   }
 
   let result;
+  const previousQty = existingLine?.countedQty ?? 0;
   if (existingLine) {
     [result] = await db
       .update(stockOpnameItems)
@@ -261,6 +232,22 @@ export async function PATCH(
         countedBy: session.userId,
       })
       .returning();
+  }
+
+  // Log this commit as a history event — but only when it actually changed
+  // the total. Re-saving an unchanged value (e.g. tapping into a line and
+  // out again without editing) isn't something worth showing in the
+  // "what was typed in" history.
+  const delta = countedQty - previousQty;
+  if (delta !== 0) {
+    await db.insert(stockOpnameCountEvents).values({
+      opnameNumber,
+      locationId: location.id,
+      itemId: item?.id ?? null,
+      delta,
+      resultingTotal: countedQty,
+      userId: session.userId,
+    });
   }
 
   return NextResponse.json({

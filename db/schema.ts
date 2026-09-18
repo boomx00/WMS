@@ -428,6 +428,22 @@ export const stockOpnameLocations = pgTable(
   (table) => [uniqueIndex("stock_opname_locations_unique_idx").on(table.opnameNumber, table.locationId)]
 );
 
+export const stockOpnameCountEvents = pgTable("stock_opname_count_events", {
+  id: serial("id").primaryKey(),
+  opnameNumber: varchar("opname_number", { length: 50 })
+    .notNull()
+    .references(() => stockOpname.opnameNumber),
+  locationId: integer("location_id")
+    .notNull()
+    .references(() => locations.id),
+  itemId: integer("item_id").references(() => items.id), // null = a confirmed-empty commit
+  delta: integer("delta").notNull(),
+  resultingTotal: integer("resulting_total").notNull(),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 // ============================================================
 // Tambahan (extra picks against an already-fulfilled SO, pending
 // a real new SO number)
