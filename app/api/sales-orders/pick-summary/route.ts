@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     .where(
       and(
         eq(locationStockEvents.salesOrderId, salesOrder.id),
-        inArray(locationStockEvents.type, ["PICKING", "DEFAULT_PICKING"])
+        inArray(locationStockEvents.type, ["PICKING", "DEFAULT_PICKING", "RELEASE", "CLAIM"])
       )
     )
     .groupBy(locationStockEvents.itemId);
