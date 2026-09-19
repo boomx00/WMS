@@ -244,7 +244,7 @@ const sortedOrders = useMemo(() => {
   <td className="py-1.5 text-right font-mono">
     {line.quantity.toLocaleString()}
   </td>
-<td className="py-1.5 text-right font-mono">
+  <td className="py-1.5 text-right font-mono">
     <ShippedCell order={order} line={line} isAdmin={isAdmin} />
   </td>
                                     <td className="py-1.5">
@@ -703,6 +703,10 @@ function ShippedCell({ order, line, isAdmin }: { order: Order; line: OrderLine; 
       setError("Enter a valid quantity");
       return;
     }
+    if (correctedQuantity >= line.shipped) {
+      setError(`Must be less than current shipped (${line.shipped})`);
+      return;
+    }
     if (!reason.trim()) {
       setError("Reason is required");
       return;
@@ -735,7 +739,7 @@ function ShippedCell({ order, line, isAdmin }: { order: Order; line: OrderLine; 
               setValue(String(line.shipped));
               setEditing(true);
             }}
-            className="text-zinc-600 hover:text-amber-500 text-[10px]"
+            className="text-amber-500 hover:text-amber-400 text-[10px]"
             title="Correct shipped quantity"
           >
             ✎
@@ -754,8 +758,15 @@ function ShippedCell({ order, line, isAdmin }: { order: Order; line: OrderLine; 
         type="number"
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        min={0}
+        max={line.shipped - 1}
         className="w-20 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-right font-mono text-xs"
       />
+      {Number.isFinite(Number(value)) && Number(value) < line.shipped && (
+        <span className="text-[10px] text-zinc-500">
+          +{(line.shipped - Number(value)).toLocaleString()} to ecer
+        </span>
+      )}
       <input
         type="text"
         value={reason}
