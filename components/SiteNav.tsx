@@ -25,6 +25,7 @@ import { usePageLabels } from "@/lib/hooks/usePageLabels";
 type NavItems =
   | "Inventory"
   | "Location_Stock"
+    | "Total_Stock"
   | "Sales_Orders"
   | "Movement_History"
   | "Work_Orders"
@@ -52,6 +53,7 @@ export default function SiteNav() {
   const navItem:{key: NavItems; label: string, href: string}[] = [
     {key: "Inventory", label: labels.inventory, href:"/"},
     {key: "Location_Stock", label: labels.location_stock, href:"/location-stock"},
+    {key: "Total_Stock", label: labels.total_stock, href:"/total-stock"},
     {key: "Sales_Orders", label: labels.sales_order, href:"/sales-orders"},
     {key: "Movement_History", label: labels.movement_history, href:"/movement-history-v2"},
     {key: "Work_Orders", label: labels.work_order, href:"/work-orders"},

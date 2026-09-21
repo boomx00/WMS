@@ -34,6 +34,7 @@ export const DEFAULT_LABELS = {
   navbar: {
     inventory: "Inventory",
     location_stock: "Location Stock",
+    total_stock: "Total Stock",
     sales_order: "Sales Order",
     movement_history: "Movement History",
     work_order: "Work order",
