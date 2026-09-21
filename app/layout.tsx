@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import SiteNav from "@/components/SiteNav";
 import { LanguageProvider } from "@/lib/LanguageContext";
+import { getSession } from "@/lib/auth";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,7 +23,9 @@ export const metadata: Metadata = {
 	},
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const session = await getSession();
+
   return (
     <html
       lang="en"
@@ -34,7 +37,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               the page content. flex-row on desktop: sidebar sits beside it,
               as before. */}
           <div className="min-h-screen flex flex-col md:flex-row">
-            <SiteNav />
+            <SiteNav username={session?.username ?? null} />
             <main className="flex-1 min-w-0">{children}</main>
           </div>
         </LanguageProvider>

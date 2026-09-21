@@ -44,11 +44,16 @@ const adminItems = [
   { href: "/roles", label: "Roles" },
 ];
 
-export default function SiteNav() {
+export default function SiteNav({ username }: { username: string | null }) {
   const [open, setOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const { language, setLanguage } = useLanguage();
   const labels = usePageLabels("navbar")
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.href = "/login"; // full reload so no stale state survives
+  }
 
   const navItem:{key: NavItems; label: string, href: string}[] = [
     {key: "Inventory", label: labels.inventory, href:"/"},
@@ -68,6 +73,16 @@ export default function SiteNav() {
     <>
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-56 shrink-0 h-screen sticky top-0 overflow-y-auto border-r border-zinc-800 bg-zinc-900/50 flex-col">
+        {username && (
+  <div className="px-5 py-3 border-b border-zinc-800">
+    <div className="text-[10px] tracking-widest text-zinc-500 uppercase">
+      Welcome,
+    </div>
+    <div className="text-sm font-semibold text-amber-500 uppercase truncate">
+      {username}
+    </div>
+  </div>
+)}
         <div className="px-5 py-5 border-b border-zinc-800">
           <div className="font-mono text-xs tracking-widest text-amber-500 uppercase">
             Rack&nbsp;/&nbsp;Bin
@@ -137,28 +152,49 @@ export default function SiteNav() {
           </div>
         </nav>
 
-        <div className="px-5 py-4 border-t border-zinc-800 text-xs text-zinc-600 font-mono">
-          v0.1 · inventory
-        </div>
+      <div className="px-5 py-4 border-t border-zinc-800 space-y-3">
+  {username && (
+    <button
+      onClick={handleLogout}
+      className="w-full px-3 py-2 rounded-md border border-zinc-800 text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+    >
+      Log out
+    </button>
+  )}
+  <div className="text-xs text-zinc-600 font-mono">v0.1 · inventory</div>
+</div>
       </aside>
 
       {/* Mobile top bar */}
       <div className="md:hidden sticky top-0 z-50 bg-zinc-900/95 backdrop-blur border-b border-zinc-800">
         <div className="flex items-center justify-between px-4 py-3">
-          <div>
-            <div className="font-mono text-[10px] tracking-widest text-amber-500 uppercase">
-              Rack&nbsp;/&nbsp;Bin
-            </div>
+          <div className="flex-1">
+  <div className="font-mono text-[10px] tracking-widest text-amber-500 uppercase">
+    Rack&nbsp;/&nbsp;Bin
+  </div>
 
-            <div className="flex items-center gap-2">
-              <div className="text-base font-semibold">WMS</div>
+  <div className="flex items-center gap-2">
+    <div className="text-base font-semibold">WMS</div>
+    <LanguageSwitcher language={language} onChange={setLanguage} />
+  </div>
 
-              <LanguageSwitcher
-                language={language}
-                onChange={setLanguage}
-              />
-            </div>
-          </div>
+  {username && (
+    <div className="text-[10px] tracking-widest text-zinc-500 uppercase">
+      Welcome, <span className="text-amber-500 font-semibold">{username}</span>
+    </div>
+  )}
+</div>
+
+{username && (
+  <button
+    onClick={handleLogout}
+    className="px-3 py-1.5 mr-1 rounded-md border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+  >
+    Log out
+  </button>
+)}
+
+{/* existing hamburger <button> stays as-is */}
 
           <button
             onClick={() => setOpen((prev) => !prev)}
