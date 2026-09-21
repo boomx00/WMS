@@ -21,27 +21,8 @@ export type SkuStock = {
   locations: SkuLocation[];
 };
 
-type Filters = {
-  sku: string;
-  name: string;
-  locMin: string;
-  locMax: string;
-  totalMin: string;
-  totalMax: string;
-  palletMin: string;
-  palletMax: string;
-};
-
-const EMPTY_FILTERS: Filters = {
-  sku: "",
-  name: "",
-  locMin: "",
-  locMax: "",
-  totalMin: "",
-  totalMax: "",
-  palletMin: "",
-  palletMax: "",
-};
+type SortKey = "sku" | "name" | "locations" | "total" | "pallets";
+type SortDir = "asc" | "desc";
 
 const TYPE_LABELS: Record<string, string> = {
   FLOOR: "Floor",
@@ -68,97 +49,98 @@ function formatPallets(quantity: number, palletCartonQty: number): string {
   return Number.isInteger(num) ? num.toString() : num.toFixed(2).replace(/\.?0+$/, "");
 }
 
-// Empty min/max means "no limit". A null value (e.g. an SKU with no pallet
-// size set) is excluded whenever a range is actually being applied.
-function withinRange(value: number | null, min: string, max: string): boolean {
-  const lo = min.trim() === "" ? null : Number(min);
-  const hi = max.trim() === "" ? null : Number(max);
-  const hasLo = lo !== null && !Number.isNaN(lo);
-  const hasHi = hi !== null && !Number.isNaN(hi);
-
-  if (!hasLo && !hasHi) return true;
-  if (value === null) return false;
-  if (hasLo && value < (lo as number)) return false;
-  if (hasHi && value > (hi as number)) return false;
-  return true;
-}
-
-const inputClass =
-  "px-2 py-1 rounded-md bg-zinc-950 border border-zinc-800 text-xs font-normal text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500";
-
-function RangeFilter({
-  min,
-  max,
-  onMinChange,
-  onMaxChange,
+function SortableTh({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onSort,
+  align = "left",
 }: {
-  min: string;
-  max: string;
-  onMinChange: (v: string) => void;
-  onMaxChange: (v: string) => void;
+  label: string;
+  sortKey: SortKey;
+  activeKey: SortKey;
+  dir: SortDir;
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
 }) {
+  const active = activeKey === sortKey;
+
   return (
-    <div className="flex items-center justify-end gap-1">
-      <input
-        type="number"
-        step="any"
-        value={min}
-        onChange={(e) => onMinChange(e.target.value)}
-        placeholder="Min"
-        aria-label="Minimum"
-        className={`${inputClass} w-16 text-right`}
-      />
-      <span className="text-zinc-600">–</span>
-      <input
-        type="number"
-        step="any"
-        value={max}
-        onChange={(e) => onMaxChange(e.target.value)}
-        placeholder="Max"
-        aria-label="Maximum"
-        className={`${inputClass} w-16 text-right`}
-      />
-    </div>
+    <th
+      aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
+      className={`px-4 py-3 font-medium ${align === "right" ? "text-right" : ""}`}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 hover:text-zinc-100 transition-colors ${
+          active ? "text-zinc-200" : ""
+        }`}
+      >
+        {label}
+        <span className={`text-[10px] ${active ? "text-amber-500" : "text-zinc-700"}`}>
+          {active ? (dir === "asc" ? "▲" : "▼") : "↕"}
+        </span>
+      </button>
+    </th>
   );
 }
 
 export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
   const router = useRouter();
   const [isRefreshing, startRefresh] = useTransition();
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [sortKey, setSortKey] = useState<SortKey>("sku");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  function setFilter<K extends keyof Filters>(key: K, value: string) {
-    setFilters((prev) => ({ ...prev, [key]: value }));
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
   }
 
-  const hasActiveFilters = Object.values(filters).some((v) => v.trim() !== "");
-
-  const filtered = useMemo(() => {
-    const skuQ = filters.sku.trim().toLowerCase();
-    const nameQ = filters.name.trim().toLowerCase();
-
-    return skus.filter((s) => {
-      if (skuQ && !s.sku.toLowerCase().includes(skuQ)) return false;
-      if (nameQ && !s.name.toLowerCase().includes(nameQ)) return false;
-      if (!withinRange(s.locations.length, filters.locMin, filters.locMax)) return false;
-      if (!withinRange(s.totalQuantity, filters.totalMin, filters.totalMax)) return false;
-      if (
-        !withinRange(
-          palletValue(s.totalQuantity, s.palletCartonQty),
-          filters.palletMin,
-          filters.palletMax
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? skus.filter(
+          (s) => s.sku.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
         )
-      )
-        return false;
-      return true;
-    });
-  }, [skus, filters]);
+      : skus;
 
-  // Card totals follow whatever the filters currently leave visible.
+    const dirMul = sortDir === "asc" ? 1 : -1;
+
+    return [...filtered].sort((a, b) => {
+      switch (sortKey) {
+        case "sku":
+          return dirMul * a.sku.localeCompare(b.sku, undefined, { numeric: true });
+        case "name":
+          return dirMul * a.name.localeCompare(b.name, undefined, { numeric: true });
+        case "locations":
+          return dirMul * (a.locations.length - b.locations.length);
+        case "total":
+          return dirMul * (a.totalQuantity - b.totalQuantity);
+        case "pallets": {
+          const pa = palletValue(a.totalQuantity, a.palletCartonQty);
+          const pb = palletValue(b.totalQuantity, b.palletCartonQty);
+          // SKUs with no pallet size set always sink to the bottom,
+          // whichever direction is active.
+          if (pa === null && pb === null) return 0;
+          if (pa === null) return 1;
+          if (pb === null) return -1;
+          return dirMul * (pa - pb);
+        }
+      }
+    });
+  }, [skus, search, sortKey, sortDir]);
+
   const grandTotal = useMemo(
-    () => filtered.reduce((sum, s) => sum + s.totalQuantity, 0),
-    [filtered]
+    () => visible.reduce((sum, s) => sum + s.totalQuantity, 0),
+    [visible]
   );
 
   function toggle(itemId: number) {
@@ -181,7 +163,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
           <p className="text-xs text-zinc-500 mb-1">SKUs in stock</p>
-          <p className="text-lg font-semibold">{filtered.length.toLocaleString()}</p>
+          <p className="text-lg font-semibold">{visible.length.toLocaleString()}</p>
         </div>
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
           <p className="text-xs text-zinc-500 mb-1">Total stock (cartons)</p>
@@ -189,21 +171,15 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <p className="text-xs text-zinc-600">
-          Showing {filtered.length.toLocaleString()} of {skus.length.toLocaleString()} SKU(s)
-        </p>
-        <div className="flex items-center gap-2">
-          {hasActiveFilters && (
-            <button
-              onClick={() => setFilters(EMPTY_FILTERS)}
-              className="px-3 py-1.5 rounded-md border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
-            >
-              Clear filters
-            </button>
-          )}
-          <RefreshButton onClick={handleRefresh} loading={isRefreshing} />
-        </div>
+      <div className="flex items-center gap-2 mb-4">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by SKU or product name..."
+          className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        />
+        <RefreshButton onClick={handleRefresh} loading={isRefreshing} />
       </div>
 
       <div className="border border-zinc-800 rounded-lg overflow-x-auto">
@@ -211,67 +187,22 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           <thead>
             <tr className="bg-zinc-900 text-zinc-500 text-left">
               <th className="px-4 py-3 font-medium w-8"></th>
-              <th className="px-4 py-3 font-medium">SKU</th>
-              <th className="px-4 py-3 font-medium">Product</th>
-              <th className="px-4 py-3 font-medium text-right">Locations</th>
-              <th className="px-4 py-3 font-medium text-right">Total (cartons)</th>
-              <th className="px-4 py-3 font-medium text-right">Pallets</th>
-            </tr>
-            <tr className="bg-zinc-900 border-t border-zinc-800">
-              <th className="px-4 pb-3"></th>
-              <th className="px-4 pb-3">
-                <input
-                  type="text"
-                  value={filters.sku}
-                  onChange={(e) => setFilter("sku", e.target.value)}
-                  placeholder="Filter SKU..."
-                  className={`${inputClass} w-full font-mono`}
-                />
-              </th>
-              <th className="px-4 pb-3">
-                <input
-                  type="text"
-                  value={filters.name}
-                  onChange={(e) => setFilter("name", e.target.value)}
-                  placeholder="Filter product..."
-                  className={`${inputClass} w-full`}
-                />
-              </th>
-              <th className="px-4 pb-3">
-                <RangeFilter
-                  min={filters.locMin}
-                  max={filters.locMax}
-                  onMinChange={(v) => setFilter("locMin", v)}
-                  onMaxChange={(v) => setFilter("locMax", v)}
-                />
-              </th>
-              <th className="px-4 pb-3">
-                <RangeFilter
-                  min={filters.totalMin}
-                  max={filters.totalMax}
-                  onMinChange={(v) => setFilter("totalMin", v)}
-                  onMaxChange={(v) => setFilter("totalMax", v)}
-                />
-              </th>
-              <th className="px-4 pb-3">
-                <RangeFilter
-                  min={filters.palletMin}
-                  max={filters.palletMax}
-                  onMinChange={(v) => setFilter("palletMin", v)}
-                  onMaxChange={(v) => setFilter("palletMax", v)}
-                />
-              </th>
+              <SortableTh label="SKU" sortKey="sku" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Product" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label="Locations" sortKey="locations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Total (cartons)" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Pallets" sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {visible.length === 0 ? (
               <tr>
                 <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
-                  {hasActiveFilters ? "No SKUs match the current filters." : "No stock recorded."}
+                  {search.trim() ? "No SKUs match your search." : "No stock recorded."}
                 </td>
               </tr>
             ) : (
-              filtered.map((sku) => {
+              visible.map((sku) => {
                 const open = expanded.has(sku.itemId);
 
                 return (
