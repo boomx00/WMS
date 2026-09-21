@@ -16,11 +16,13 @@ type TransactionRow = {
   username: string;
 };
 
+type FormRow = { locationCode: string; itemSku: string; quantity: string };
+
+const EMPTY_ROW: FormRow = { locationCode: "", itemSku: "", quantity: "" };
+
 export default function OtherTransactionsClient() {
   const [tab, setTab] = useState<Tab>("INBOUND");
-  const [locationCode, setLocationCode] = useState("");
-  const [itemSku, setItemSku] = useState("");
-  const [quantity, setQuantity] = useState("");
+  const [formRows, setFormRows] = useState<FormRow[]>([{ ...EMPTY_ROW }]);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,15 +48,50 @@ export default function OtherTransactionsClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  function updateRow(index: number, field: keyof FormRow, value: string) {
+    setFormRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
+  }
+
+  function addRow() {
+    setFormRows((prev) => [...prev, { ...EMPTY_ROW }]);
+  }
+
+  function removeRow(index: number) {
+    setFormRows((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSuccess(null);
 
-    if (!locationCode || !itemSku || !quantity) {
-      setError("Location, SKU, and quantity are required");
+    // Fully blank rows are ignored; partially filled ones are flagged below.
+    const filled = formRows
+      .map((r) => ({
+        locationCode: r.locationCode.trim(),
+        itemSku: r.itemSku.trim(),
+        quantity: r.quantity.trim(),
+      }))
+      .filter((r) => r.locationCode || r.itemSku || r.quantity);
+
+    if (filled.length === 0) {
+      setError("Add at least one row");
       return;
     }
+
+    for (let i = 0; i < filled.length; i++) {
+      const r = filled[i];
+      if (!r.locationCode || !r.itemSku || !r.quantity) {
+        setError(`Row ${i + 1}: location, SKU, and quantity are required`);
+        return;
+      }
+    }
+
+    const lines = filled.map((r) => ({
+      locationCode: r.locationCode,
+      itemSku: r.itemSku,
+      quantity: Number(r.quantity),
+    }));
 
     setSubmitting(true);
     const res = await fetch("/api/other-transactions", {
@@ -62,9 +99,7 @@ export default function OtherTransactionsClient() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         type: tab,
-        locationCode,
-        itemSku,
-        quantity: Number(quantity),
+        lines,
         notes: notes || undefined,
       }),
     });
@@ -77,10 +112,15 @@ export default function OtherTransactionsClient() {
     }
 
     const data = await res.json();
-    setSuccess(`Recorded as ${data.transactionCode}`);
-    setLocationCode("");
-    setItemSku("");
-    setQuantity("");
+    const codes: string[] = data.transactionCodes ?? [data.transactionCode];
+    setSuccess(
+      codes.length === 1
+        ? `Recorded as ${codes[0]}`
+        : codes.length <= 6
+          ? `Recorded ${codes.length} lines: ${codes.join(", ")}`
+          : `Recorded ${codes.length} lines: ${codes[0]} … ${codes[codes.length - 1]}`
+    );
+    setFormRows([{ ...EMPTY_ROW }]);
     setNotes("");
     refresh(tab);
   }
@@ -109,47 +149,60 @@ export default function OtherTransactionsClient() {
       >
         <p className="text-xs text-zinc-500">
           {tab === "INBOUND"
-            ? "Adds stock to the entered location."
-            : "Removes stock from the entered location."}
+            ? "Adds stock to each entered location. Add as many rows as you need — the whole batch is recorded together, or not at all."
+            : "Removes stock from each entered location. Add as many rows as you need — the whole batch is recorded together, or not at all."}
         </p>
 
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <label className="block text-xs text-zinc-500 mb-1">Location Code</label>
-            <input
-              type="text"
-              value={locationCode}
-              onChange={(e) => setLocationCode(e.target.value)}
-              className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-              placeholder="e.g. A1.1"
-              required
-            />
+        <div className="space-y-2">
+          <div className="flex gap-2 items-center text-xs text-zinc-500">
+            <div className="flex-1">Location Code</div>
+            <div className="flex-1">SKU</div>
+            <div className="w-28">Qty</div>
+            <div className="w-8" />
           </div>
-          <div className="flex-1">
-            <label className="block text-xs text-zinc-500 mb-1">SKU</label>
-            <input
-              type="text"
-              value={itemSku}
-              onChange={(e) => setItemSku(e.target.value)}
-              className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-              required
-            />
-          </div>
-          <div className="w-28">
-            <label className="block text-xs text-zinc-500 mb-1">Qty</label>
-            <input
-              type="number"
-              min={1}
-              value={quantity}
-              onChange={(e) => setQuantity(e.target.value)}
-              className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-              required
-            />
-          </div>
+
+          {formRows.map((row, i) => (
+            <div key={i} className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={row.locationCode}
+                onChange={(e) => updateRow(i, "locationCode", e.target.value)}
+                placeholder="e.g. A1.1"
+                className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+              />
+              <input
+                type="text"
+                value={row.itemSku}
+                onChange={(e) => updateRow(i, "itemSku", e.target.value)}
+                placeholder="SKU"
+                className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+              />
+              <input
+                type="number"
+                min={1}
+                value={row.quantity}
+                onChange={(e) => updateRow(i, "quantity", e.target.value)}
+                placeholder="Qty"
+                className="w-28 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+              />
+              <button
+                type="button"
+                onClick={() => removeRow(i)}
+                disabled={formRows.length === 1}
+                className="w-8 text-zinc-600 hover:text-red-400 disabled:opacity-30 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
 
+        <button type="button" onClick={addRow} className="text-xs text-amber-500 hover:text-amber-400">
+          + Add row
+        </button>
+
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">Notes (optional)</label>
+          <label className="block text-xs text-zinc-500 mb-1">Notes (optional, applies to every row)</label>
           <input
             type="text"
             value={notes}
