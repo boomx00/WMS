@@ -10,6 +10,9 @@ export type SessionPayload = {
   userId: number;
   username: string;
   roleId: number;
+  // Added so middleware (which can't query the DB) can gate web pages.
+  // Optional so older tokens / other callers of signSession still type-check.
+  roleName?: string;
 };
 
 export async function signSession(payload: SessionPayload) {
@@ -55,7 +58,7 @@ export async function getSessionRole(): Promise<string | null> {
 
 export async function requireAdmin() {
   const role = await getSessionRole();
-  if (role !== "Admin") {
+  if (role?.toLowerCase() !== "admin") {
     return { error: "Admin access required", status: 403 as const };
   }
   return null;
