@@ -5,6 +5,7 @@ import {
   integer,
   timestamp,
   uniqueIndex,
+  index,
   pgEnum,
   boolean,
   varchar,
@@ -515,8 +516,9 @@ export const otherTransactions = pgTable(
       .references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("other_transactions_code_idx").on(table.transactionCode)]
-);
+  // Not unique: every line of one batch shares the same ZXCKWMS-<n> code
+  // (n = id of the batch's first line, so codes never collide across batches).
+  (table) => [index("other_transactions_code_idx").on(table.transactionCode)]);
 
 export const otherTransactionsRelations = relations(otherTransactions, ({ one }) => ({
   item: one(items, { fields: [otherTransactions.itemId], references: [items.id] }),

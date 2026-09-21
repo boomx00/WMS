@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { otherTransactions, locations, items, locationStockEvents, users } from "@/db/schema";
-import { eq, desc, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, sql, inArray } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { adjustLocationStock } from "@/lib/locationStock";
 
@@ -15,6 +15,9 @@ const MAX_LINES = 200;
 type IncomingLine = { locationCode: string; itemSku: string; quantity: number };
 
 // GET /api/other-transactions?type=INBOUND|OUTBOUND&page=1
+// Rows of the same batch share one transactionCode (and, since they're
+// written in one DB transaction, the same createdAt), so ordering by
+// createdAt desc then id asc keeps each batch together in line order.
 export async function GET(req: NextRequest) {
   const type = req.nextUrl.searchParams.get("type");
   const page = Math.max(1, Number(req.nextUrl.searchParams.get("page")) || 1);
@@ -47,7 +50,7 @@ export async function GET(req: NextRequest) {
     .innerJoin(locations, eq(otherTransactions.locationId, locations.id))
     .innerJoin(users, eq(otherTransactions.userId, users.id))
     .where(eq(otherTransactions.type, type))
-    .orderBy(desc(otherTransactions.createdAt))
+    .orderBy(desc(otherTransactions.createdAt), asc(otherTransactions.id))
     .limit(PAGE_SIZE)
     .offset(offset);
 
@@ -66,13 +69,15 @@ export async function GET(req: NextRequest) {
 //
 // A manual correction outside the normal Inbound/Picking/Shipping flows —
 // e.g. defective stock discovered mid-process that needs to be pulled out
-// (OUTBOUND) or added back in (INBOUND). Every line gets its own sequential
-// ZXCKWMS-<n> code for paperwork/audit purposes.
+// (OUTBOUND) or added back in (INBOUND).
 //
-// Like bulk adjustments, every line is resolved and validated BEFORE
-// anything is written, and the whole batch runs in one transaction — a bad
-// row (unknown location/SKU, outbound below zero) fails the entire batch
-// instead of leaving it partially applied.
+// The whole submission is ONE transaction under ONE ZXCKWMS-<n> code, where
+// n is the id of the batch's first line — so every line of the batch shares
+// the same code, and codes stay unique across batches (row ids never repeat).
+//
+// Every line is resolved and validated BEFORE anything is written, and the
+// batch is all-or-nothing: a bad row (unknown location/SKU, outbound below
+// zero) fails the entire batch instead of leaving it partially applied.
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -152,32 +157,46 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const results = await db.transaction(async (tx) => {
-      const created: { transactionCode: string; itemSku: string; locationCode: string; quantity: number }[] = [];
+    const result = await db.transaction(async (tx) => {
+      const created: { itemSku: string; locationCode: string; quantity: number }[] = [];
+      let batchCode: string | null = null;
 
       for (let i = 0; i < resolved.length; i++) {
         const { line, location, item } = resolved[i];
         const quantity = line.quantity;
 
         try {
-          const [inserted] = await tx
-            .insert(otherTransactions)
-            .values({
-              transactionCode: "PENDING", // fixed up below once we have the real id
-              type,
-              itemId: item.id,
-              locationId: location.id,
-              quantity,
-              notes,
-              userId: session.userId,
-            })
-            .returning();
+          const values = {
+            type,
+            itemId: item.id,
+            locationId: location.id,
+            quantity,
+            notes,
+            userId: session.userId,
+          };
 
-          const [withCode] = await tx
-            .update(otherTransactions)
-            .set({ transactionCode: `ZXCKWMS-${inserted.id}` })
-            .where(eq(otherTransactions.id, inserted.id))
-            .returning();
+          let row: typeof otherTransactions.$inferSelect;
+
+          if (batchCode === null) {
+            // First line: its id defines the batch code shared by all lines.
+            const [first] = await tx
+              .insert(otherTransactions)
+              .values({ ...values, transactionCode: "PENDING" }) // fixed up right below
+              .returning();
+            batchCode = `ZXCKWMS-${first.id}`;
+            const [updated] = await tx
+              .update(otherTransactions)
+              .set({ transactionCode: batchCode })
+              .where(eq(otherTransactions.id, first.id))
+              .returning();
+            row = updated;
+          } else {
+            const [next] = await tx
+              .insert(otherTransactions)
+              .values({ ...values, transactionCode: batchCode })
+              .returning();
+            row = next;
+          }
 
           const delta = type === "INBOUND" ? quantity : -quantity;
           // Blocks (throws) if OUTBOUND would take a location below zero.
@@ -189,16 +208,15 @@ export async function POST(req: NextRequest) {
             itemId: item.id,
             sourceLocationId: type === "OUTBOUND" ? location.id : null,
             destinationLocationId: type === "INBOUND" ? location.id : null,
-            otherTransactionId: withCode.id,
+            otherTransactionId: row.id,
             quantity,
             userId: session.userId,
           });
 
           created.push({
-            transactionCode: withCode.transactionCode,
             itemSku: item.sku,
             locationCode: location.code,
-            quantity: withCode.quantity,
+            quantity: row.quantity,
           });
         } catch (err) {
           const message = err instanceof Error ? err.message : "Failed to record transaction";
@@ -206,15 +224,14 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return created;
+      return { transactionCode: batchCode as string, lines: created };
     });
 
     return NextResponse.json({
       type,
-      // transactionCode kept for older single-row callers
-      transactionCode: results[0].transactionCode,
-      transactionCodes: results.map((r) => r.transactionCode),
-      lines: results,
+      transactionCode: result.transactionCode,
+      lineCount: result.lines.length,
+      lines: result.lines,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to record transaction";

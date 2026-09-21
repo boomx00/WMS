@@ -112,13 +112,10 @@ export default function OtherTransactionsClient() {
     }
 
     const data = await res.json();
-    const codes: string[] = data.transactionCodes ?? [data.transactionCode];
     setSuccess(
-      codes.length === 1
-        ? `Recorded as ${codes[0]}`
-        : codes.length <= 6
-          ? `Recorded ${codes.length} lines: ${codes.join(", ")}`
-          : `Recorded ${codes.length} lines: ${codes[0]} … ${codes[codes.length - 1]}`
+      data.lineCount > 1
+        ? `Recorded as ${data.transactionCode} (${data.lineCount} lines)`
+        : `Recorded as ${data.transactionCode}`
     );
     setFormRows([{ ...EMPTY_ROW }]);
     setNotes("");
@@ -149,8 +146,8 @@ export default function OtherTransactionsClient() {
       >
         <p className="text-xs text-zinc-500">
           {tab === "INBOUND"
-            ? "Adds stock to each entered location. Add as many rows as you need — the whole batch is recorded together, or not at all."
-            : "Removes stock from each entered location. Add as many rows as you need — the whole batch is recorded together, or not at all."}
+            ? "Adds stock to each entered location. All rows are recorded together under one ZXCKWMS code, or not at all."
+            : "Removes stock from each entered location. All rows are recorded together under one ZXCKWMS code, or not at all."}
         </p>
 
         <div className="space-y-2">
@@ -251,20 +248,33 @@ export default function OtherTransactionsClient() {
                 </td>
               </tr>
             ) : (
-              rows.map((r) => (
-                <tr key={r.id} className="border-t border-zinc-800">
-                  <td className="px-4 py-3 font-mono text-amber-400">{r.transactionCode}</td>
-                  <td className="px-4 py-3">
-                    <div className="font-mono">{r.itemSku}</div>
-                    <div className="text-xs text-zinc-500">{r.itemName}</div>
-                  </td>
-                  <td className="px-4 py-3 font-mono">{r.locationCode}</td>
-                  <td className="px-4 py-3 text-right font-mono">{r.quantity}</td>
-                  <td className="px-4 py-3 text-zinc-400">{r.username}</td>
-                  <td className="px-4 py-3 text-zinc-400">{new Date(r.createdAt).toLocaleString()}</td>
-                  <td className="px-4 py-3 text-zinc-500">{r.notes ?? "—"}</td>
-                </tr>
-              ))
+              rows.map((r, i) => {
+                // Lines of one batch share a code and sit next to each other:
+                // show code / user / date / notes once, on the batch's first line.
+                const isFirstOfBatch = i === 0 || rows[i - 1].transactionCode !== r.transactionCode;
+
+                return (
+                  <tr
+                    key={r.id}
+                    className={`border-t ${isFirstOfBatch ? "border-zinc-800" : "border-zinc-900"}`}
+                  >
+                    <td className="px-4 py-3 font-mono text-amber-400">
+                      {isFirstOfBatch ? r.transactionCode : ""}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-mono">{r.itemSku}</div>
+                      <div className="text-xs text-zinc-500">{r.itemName}</div>
+                    </td>
+                    <td className="px-4 py-3 font-mono">{r.locationCode}</td>
+                    <td className="px-4 py-3 text-right font-mono">{r.quantity}</td>
+                    <td className="px-4 py-3 text-zinc-400">{isFirstOfBatch ? r.username : ""}</td>
+                    <td className="px-4 py-3 text-zinc-400">
+                      {isFirstOfBatch ? new Date(r.createdAt).toLocaleString() : ""}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-500">{isFirstOfBatch ? (r.notes ?? "—") : ""}</td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
