@@ -3,7 +3,7 @@
 // a new customizable page/string later just means adding an entry here
 // and using usePageLabels(page).key wherever that string is rendered.
 export const DEFAULT_LABELS = {
-  stock_opname: {
+    stock_opname: {
     th_location: "Location",
     th_counted_sku: "Counted SKU",
     th_system_sku_at_count: "System SKU (at Count)",
@@ -14,6 +14,7 @@ export const DEFAULT_LABELS = {
     th_current_system_sku: "Current System SKU",
     th_current_system_qty: "Current System Qty",
     th_by: "By",
+    th_counted_at: "Counted At",   // ADD
   },
   location_stock: {
     th_location: "Location",

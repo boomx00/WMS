@@ -404,6 +404,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                   <th className="py-2 px-3 font-medium">{labels.th_current_system_sku}</th>
                   <th className="py-2 px-3 font-medium text-right">{labels.th_current_system_qty}</th>
                   <th className="py-2 px-3 font-medium">{labels.th_by}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_counted_at}</th>
                   <th className="py-2 px-3 font-medium"></th>
                 </tr>
               </thead>
@@ -424,7 +425,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                       <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
                         {loc.currentSystemQty.toLocaleString()}
                       </td>
-                      <td colSpan={2} className="py-1.5 px-3 text-zinc-700">
+                     <td colSpan={3} className="py-1.5 px-3 text-zinc-700">
                         Not counted yet
                       </td>
                     </tr>
@@ -479,6 +480,9 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                             : loc.currentSystemQty.toLocaleString()}
                         </td>
                         <td className="py-1.5 px-3 text-zinc-500">{item.countedByUsername ?? "—"}</td>
+                        <td className="py-1.5 px-3 text-zinc-500">
+                          {item.countedAt ? new Date(item.countedAt).toLocaleString() : "—"}
+                        </td>
                         <td className="py-1.5 px-3 text-right">
                           {item.itemId === null ? (
                             item.difference === 0 ? (
