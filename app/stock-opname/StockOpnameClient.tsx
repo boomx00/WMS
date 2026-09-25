@@ -10,14 +10,15 @@ type Session = {
   notes: string | null;
   createdAt: string | Date;
   commencedAt: string | Date | null;
+  completedAt: string | Date | null;           // ADD
   totalLines: number;
   countedLines: number;
   discrepancies: number;
   status: string;
   assignedToUsername: string | null;
-  confirmedAt: string | Date | null;          // ADD
-  confirmDescription: string | null;           // ADD
-  confirmedAdjustmentCode: string | null;       // ADD
+  confirmedAt: string | Date | null;
+  confirmDescription: string | null;
+  confirmedAdjustmentCode: string | null;
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -318,6 +319,11 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
           <span className="text-xs text-zinc-600">
             · Commenced: {session.commencedAt ? new Date(session.commencedAt).toLocaleString() : "Not started"}
           </span>
+          {session.completedAt && (
+            <span className="text-xs text-zinc-600">
+              · Finished (PDA): {new Date(session.completedAt).toLocaleString()}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4">
           <span className="text-xs text-zinc-500">
