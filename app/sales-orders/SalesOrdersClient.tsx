@@ -196,6 +196,25 @@ export default function SalesOrdersClient({
                               onDone={() => setEditingId(null)}
                             />
                           ) : (
+                            <>
+                            <div className="flex gap-6 mb-3 text-xs">
+                              <div>
+                                <span className="text-zinc-500">Truck Enter: </span>
+                                <span className="text-zinc-300 font-mono">
+                                  {order.truckEnterTime
+                                    ? new Date(order.truckEnterTime).toLocaleString("en-GB", { hour12: false })
+                                    : "—"}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-zinc-500">Truck Leave: </span>
+                                <span className="text-zinc-300 font-mono">
+                                  {order.truckLeaveTime
+                                    ? new Date(order.truckLeaveTime).toLocaleString("en-GB", { hour12: false })
+                                    : "—"}
+                                </span>
+                              </div>
+                            </div>
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="text-zinc-500 text-left">
@@ -266,6 +285,7 @@ export default function SalesOrdersClient({
                                 ))}
                               </tbody>
                             </table>
+                            </>
                           )}
                           <TambahanPanel soNumber={order.soNumber} />
                         </td>

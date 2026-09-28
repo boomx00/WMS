@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ItemPicker from "./ItemPicker";
+import { toDatetimeLocal } from "./helpers";
 import type { ItemOption, Order } from "./types";
 
 export default function EditSalesOrderForm({
@@ -19,6 +20,8 @@ export default function EditSalesOrderForm({
   const [orderDate, setOrderDate] = useState(
     new Date(order.orderDate).toISOString().slice(0, 10)
   );
+  const [truckEnterTime, setTruckEnterTime] = useState(toDatetimeLocal(order.truckEnterTime));
+  const [truckLeaveTime, setTruckLeaveTime] = useState(toDatetimeLocal(order.truckLeaveTime));
   const [lines, setLines] = useState(
     order.items.map((l) => ({ sku: l.itemSku, quantity: String(l.quantity) }))
   );
@@ -57,7 +60,13 @@ export default function EditSalesOrderForm({
     const res = await fetch(`/api/sales-orders/${order.soNumber}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ soNumber, orderDate, items: mergedLines }),
+      body: JSON.stringify({
+        soNumber,
+        orderDate,
+        items: mergedLines,
+        truckEnterTime: truckEnterTime || null,
+        truckLeaveTime: truckLeaveTime || null,
+      }),
     });
     setLoading(false);
 
@@ -73,7 +82,7 @@ export default function EditSalesOrderForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="flex gap-3">
+      <div className="flex gap-3 flex-wrap">
         <div className="flex-1">
           <label className="block text-xs text-zinc-500 mb-1">SO Number</label>
           <input
@@ -92,6 +101,24 @@ export default function EditSalesOrderForm({
             onChange={(e) => setOrderDate(e.target.value)}
             className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
             required
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Truck Enter</label>
+          <input
+            type="datetime-local"
+            value={truckEnterTime}
+            onChange={(e) => setTruckEnterTime(e.target.value)}
+            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Truck Leave</label>
+          <input
+            type="datetime-local"
+            value={truckLeaveTime}
+            onChange={(e) => setTruckLeaveTime(e.target.value)}
+            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
           />
         </div>
       </div>
