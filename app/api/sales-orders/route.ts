@@ -38,7 +38,7 @@ export async function GET() {
 }
 
 // POST /api/sales-orders - create a sales order with line items
-// body: { soNumber, orderDate, items: [{ sku, quantity }] }
+// body: { soNumber, orderDate, items: [{ sku, quantity }], truckEnterTime?, truckLeaveTime? }
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -49,10 +49,19 @@ export async function POST(req: NextRequest) {
   const soNumber = sanitize(body.soNumber ?? "");
   const orderDate = body.orderDate;
   const lineItems = Array.isArray(body.items) ? body.items : [];
+  const truckEnterTime = body.truckEnterTime ? new Date(body.truckEnterTime) : null;
+  const truckLeaveTime = body.truckLeaveTime ? new Date(body.truckLeaveTime) : null;
 
   if (!soNumber || !orderDate || lineItems.length === 0) {
     return NextResponse.json(
       { error: "soNumber, orderDate, and at least one item are required" },
+      { status: 400 }
+    );
+  }
+
+  if (truckEnterTime && truckLeaveTime && truckLeaveTime < truckEnterTime) {
+    return NextResponse.json(
+      { error: "Truck leave time can't be before truck enter time" },
       { status: 400 }
     );
   }
@@ -80,7 +89,7 @@ export async function POST(req: NextRequest) {
   const result = await db.transaction(async (tx) => {
     const [order] = await tx
       .insert(salesOrders)
-      .values({ soNumber, orderDate: new Date(orderDate) })
+      .values({ soNumber, orderDate: new Date(orderDate), truckEnterTime, truckLeaveTime })
       .returning();
 
     await tx.insert(salesOrderItems).values(

@@ -269,6 +269,8 @@ export const salesOrders = pgTable(
     assignedCheckerId: integer("assigned_checker_id").references(() => users.id),
     finishedAt: timestamp("finished_at"),
     finishedBy: integer("finished_by").references(() => users.id),
+        truckEnterTime: timestamp("truck_enter_time"),
+    truckLeaveTime: timestamp("truck_leave_time"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("sales_orders_so_number_idx").on(table.soNumber)]

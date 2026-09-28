@@ -5,7 +5,7 @@ import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
 // PATCH /api/sales-orders/:soNumber
-// body: { soNumber, orderDate, items: [{ sku, quantity }] }
+// body: { soNumber, orderDate, items: [{ sku, quantity }], truckEnterTime?, truckLeaveTime? }
 // Replaces the sales order's header and line items wholesale. Blocks any
 // item's new quantity from dropping below what's already been shipped
 // against it, and blocks removing an item entirely if anything has already
@@ -33,10 +33,19 @@ export async function PATCH(
 
   const body = await req.json();
   const { soNumber, orderDate, items: lineItems } = body;
+  const truckEnterTime = body.truckEnterTime ? new Date(body.truckEnterTime) : null;
+  const truckLeaveTime = body.truckLeaveTime ? new Date(body.truckLeaveTime) : null;
 
   if (!soNumber || !orderDate || !Array.isArray(lineItems) || lineItems.length === 0) {
     return NextResponse.json(
       { error: "soNumber, orderDate, and at least one item are required" },
+      { status: 400 }
+    );
+  }
+
+  if (truckEnterTime && truckLeaveTime && truckLeaveTime < truckEnterTime) {
+    return NextResponse.json(
+      { error: "Truck leave time can't be before truck enter time" },
       { status: 400 }
     );
   }
@@ -94,7 +103,7 @@ export async function PATCH(
   const result = await db.transaction(async (tx) => {
     const [updatedOrder] = await tx
       .update(salesOrders)
-      .set({ soNumber, orderDate: new Date(orderDate) })
+      .set({ soNumber, orderDate: new Date(orderDate), truckEnterTime, truckLeaveTime })
       .where(eq(salesOrders.id, orderId))
       .returning();
 
