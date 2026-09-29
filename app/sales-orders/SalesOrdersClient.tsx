@@ -7,7 +7,7 @@ import CreateSalesOrderForm from "./components/CreateSalesOrderForm";
 import EditSalesOrderForm from "./components/EditSalesOrderForm";
 import ShippedCell from "./components/ShippedCell";
 import type { ItemOption, Order } from "./components/types";
-
+import { formatTruckTime } from "./components/helpers";
 const OVERALL_STATUS_STYLES: Record<string, string> = {
   NOT_STARTED: "bg-zinc-800 text-zinc-400",
   PARTIAL: "bg-amber-950 text-amber-300",
@@ -197,21 +197,17 @@ export default function SalesOrdersClient({
                             />
                           ) : (
                             <>
-                            <div className="flex gap-6 mb-3 text-xs">
+                                                        <div className="flex gap-6 mb-3 text-xs">
                               <div>
                                 <span className="text-zinc-500">Truck Enter: </span>
                                 <span className="text-zinc-300 font-mono">
-                                  {order.truckEnterTime
-                                    ? new Date(order.truckEnterTime).toLocaleString("en-GB", { hour12: false })
-                                    : "—"}
+                                  {formatTruckTime(order.truckEnterTime as string | null)}
                                 </span>
                               </div>
                               <div>
                                 <span className="text-zinc-500">Truck Leave: </span>
                                 <span className="text-zinc-300 font-mono">
-                                  {order.truckLeaveTime
-                                    ? new Date(order.truckLeaveTime).toLocaleString("en-GB", { hour12: false })
-                                    : "—"}
+                                  {formatTruckTime(order.truckLeaveTime as string | null)}
                                 </span>
                               </div>
                             </div>

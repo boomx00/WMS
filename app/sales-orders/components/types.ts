@@ -25,6 +25,6 @@ export type Order = {
   overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED";
   pickedByUsers: string[];
   finishedAt: string | Date | null;
-  truckEnterTime: string | Date | null;
-  truckLeaveTime: string | Date | null;
+  truckEnterTime: string  | null;
+  truckLeaveTime: string  | null;
 };

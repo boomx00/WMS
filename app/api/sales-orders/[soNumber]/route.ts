@@ -33,8 +33,8 @@ export async function PATCH(
 
   const body = await req.json();
   const { soNumber, orderDate, items: lineItems } = body;
-  const truckEnterTime = body.truckEnterTime ? new Date(body.truckEnterTime) : null;
-  const truckLeaveTime = body.truckLeaveTime ? new Date(body.truckLeaveTime) : null;
+  const truckEnterTime = body.truckEnterTime || null;
+  const truckLeaveTime = body.truckLeaveTime || null;
 
   if (!soNumber || !orderDate || !Array.isArray(lineItems) || lineItems.length === 0) {
     return NextResponse.json(

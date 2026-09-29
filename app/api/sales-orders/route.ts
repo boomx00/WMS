@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
   const soNumber = sanitize(body.soNumber ?? "");
   const orderDate = body.orderDate;
   const lineItems = Array.isArray(body.items) ? body.items : [];
-  const truckEnterTime = body.truckEnterTime ? new Date(body.truckEnterTime) : null;
-  const truckLeaveTime = body.truckLeaveTime ? new Date(body.truckLeaveTime) : null;
+  const truckEnterTime = body.truckEnterTime || null;
+  const truckLeaveTime = body.truckLeaveTime || null;
 
   if (!soNumber || !orderDate || lineItems.length === 0) {
     return NextResponse.json(
