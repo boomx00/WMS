@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
 
@@ -70,11 +70,17 @@ export default function MovementHistoryV2Table({
   const [searching, setSearching] = useState(false);
   const [activeSearchLabel, setActiveSearchLabel] = useState("");
 
+  // Tracks the in-flight quick search so older responses can't overwrite newer ones
+  const quickSearchAbortRef = useRef<AbortController | null>(null);
+
   // Quick search stays debounced-as-you-type, only active in simple mode.
   useEffect(() => {
     if (advancedMode) return;
 
     if (!search.trim()) {
+      quickSearchAbortRef.current?.abort(); // drop anything still in flight
+      quickSearchAbortRef.current = null;
+      setSearching(false);
       setSearchResults(null);
       return;
     }
@@ -86,13 +92,36 @@ export default function MovementHistoryV2Table({
     return () => clearTimeout(handle);
   }, [search, advancedMode]);
 
+  // Abort any pending quick search on unmount
+  useEffect(() => {
+    return () => quickSearchAbortRef.current?.abort();
+  }, []);
+
   async function runQuickSearch(query: string) {
+    // Cancel the previous request — its result is no longer wanted
+    quickSearchAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    quickSearchAbortRef.current = ctrl;
+
     setSearching(true);
-    const res = await fetch(`/api/movement-history-v2/search?q=${encodeURIComponent(query)}`);
-    setSearching(false);
-    if (res.ok) {
-      setSearchResults(await res.json());
+    try {
+      const res = await fetch(
+        `/api/movement-history-v2/search?q=${encodeURIComponent(query)}`,
+        { signal: ctrl.signal }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      if (ctrl.signal.aborted) return; // a newer search superseded this one
+      setSearchResults(data);
       setActiveSearchLabel(`"${query}"`);
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") console.error("Quick search failed:", e);
+    } finally {
+      // Only the latest request is allowed to turn the spinner off
+      if (quickSearchAbortRef.current === ctrl) {
+        setSearching(false);
+        quickSearchAbortRef.current = null;
+      }
     }
   }
 
