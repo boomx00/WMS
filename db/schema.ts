@@ -355,26 +355,34 @@ export const locationStockEventTypeEnum = pgEnum("location_stock_event_type", [
   "OTHER_OUTBOUND",
 ]);
 
-export const locationStockEvents = pgTable("location_stock_events", {
-  id: serial("id").primaryKey(),
-  type: locationStockEventTypeEnum("type").notNull(),
-  itemId: integer("item_id")
-    .notNull()
-    .references(() => items.id),
-  sourceLocationId: integer("source_location_id").references(() => locations.id),
-  destinationLocationId: integer("destination_location_id").references(() => locations.id), // nullable now — SHIP events have no destination location
-  salesOrderId: integer("sales_order_id").references(() => salesOrders.id), // nullable — only set for SHIP events
-  quantity: integer("quantity").notNull(),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  // nullable — set instead of salesOrderId for picking/shipping done under a
-// Tambahan batch, before the real new SO number exists
-tambahanOrderId: integer("tambahan_order_id").references(() => tambahanOrders.id),
-  otherTransactionId: integer("other_transaction_id").references(() => otherTransactions.id),
-  bulkAdjustmentId: integer("bulk_adjustment_id").references(() => bulkAdjustments.id), // ADD THIS LINE
-});
+export const locationStockEvents = pgTable(
+  "location_stock_events",
+  {
+    id: serial("id").primaryKey(),
+    type: locationStockEventTypeEnum("type").notNull(),
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => items.id),
+    sourceLocationId: integer("source_location_id").references(() => locations.id),
+    destinationLocationId: integer("destination_location_id").references(() => locations.id), // nullable now — SHIP events have no destination location
+    salesOrderId: integer("sales_order_id").references(() => salesOrders.id), // nullable — only set for SHIP events
+    quantity: integer("quantity").notNull(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    // nullable — set instead of salesOrderId for picking/shipping done under a
+    // Tambahan batch, before the real new SO number exists
+    tambahanOrderId: integer("tambahan_order_id").references(() => tambahanOrders.id),
+    otherTransactionId: integer("other_transaction_id").references(() => otherTransactions.id),
+    bulkAdjustmentId: integer("bulk_adjustment_id").references(() => bulkAdjustments.id),
+  },
+  (table) => [
+    index("location_stock_events_item_created_idx").on(table.itemId, table.createdAt),
+    index("location_stock_events_source_loc_idx").on(table.sourceLocationId),
+    index("location_stock_events_dest_loc_idx").on(table.destinationLocationId),
+  ]
+);
   
 
 

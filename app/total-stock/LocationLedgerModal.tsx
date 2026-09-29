@@ -7,8 +7,10 @@ type LedgerEntry = {
   id: number;
   type: string;
   quantity: number;
-  sourceCode: string | null;
-  destinationCode: string | null;
+  itemSku: string;
+  itemName: string;
+  direction: "IN" | "OUT" | null;
+  otherLocationCode: string | null;
   soNumber: string | null;
   tambahanNumber: string | null;
   username: string;
@@ -18,8 +20,10 @@ type LedgerEntry = {
 };
 
 type LedgerResponse = {
-  sku: string;
-  name: string;
+  locationCode: string;
+  locationType: string;
+  sku: string | null;
+  name: string | null;
   anchorOpeningAt: string;
   truncated: boolean;
   rangeFrom: string;
@@ -29,32 +33,40 @@ type LedgerResponse = {
   entries: LedgerEntry[];
 };
 
-type Query = { sku: string; from: string; to: string };
+type Query = { sku: string; location: string; from: string; to: string };
 
 function describeEvent(entry: LedgerEntry): string {
   if (entry.soNumber) return `SO ${entry.soNumber}`;
   if (entry.tambahanNumber) return `Tambahan ${entry.tambahanNumber}`;
-  if (entry.sourceCode && entry.destinationCode) return `${entry.sourceCode} → ${entry.destinationCode}`;
-  if (entry.destinationCode) return `→ ${entry.destinationCode}`;
-  if (entry.sourceCode) return `${entry.sourceCode} →`;
+  if (entry.direction === "IN") return entry.otherLocationCode ? `from ${entry.otherLocationCode}` : "in";
+  if (entry.direction === "OUT") return entry.otherLocationCode ? `to ${entry.otherLocationCode}` : "out";
   return "—";
 }
 
-export default function LedgerModal({ sku, onClose }: { sku: string; onClose: () => void }) {
+export default function LocationLedgerModal({
+  sku,
+  location,
+  onClose,
+}: {
+  sku: string;
+  location: string;
+  onClose: () => void;
+}) {
   const [skuInput, setSkuInput] = useState(sku);
+  const [locationInput, setLocationInput] = useState(location);
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
-  const [query, setQuery] = useState<Query>({ sku, from: "", to: "" });
+  const [query, setQuery] = useState<Query>({ sku, location, from: "", to: "" });
 
   const [data, setData] = useState<LedgerResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const trimmedSku = query.sku.trim();
-    if (!trimmedSku) {
+    const trimmedLocation = query.location.trim();
+    if (!trimmedLocation) {
       setData(null);
-      setError("Enter a SKU");
+      setError("Enter a location");
       setLoading(false);
       return;
     }
@@ -64,11 +76,12 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
     setError(null);
 
     const params = new URLSearchParams();
+    params.set("location", trimmedLocation);
+    if (query.sku.trim()) params.set("sku", query.sku.trim());
     if (query.from) params.set("from", query.from);
     if (query.to) params.set("to", query.to);
-    const qs = params.toString();
 
-    fetch(`/api/total-stock/${encodeURIComponent(trimmedSku)}/ledger${qs ? `?${qs}` : ""}`)
+    fetch(`/api/total-stock/location-ledger?${params.toString()}`)
       .then(async (res) => {
         if (!res.ok) throw new Error((await res.json()).error ?? "Failed to load ledger");
         return res.json();
@@ -92,7 +105,7 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
   }, [query]);
 
   function applyFilters() {
-    setQuery({ sku: skuInput, from: fromInput, to: toInput });
+    setQuery({ sku: skuInput, location: locationInput, from: fromInput, to: toInput });
   }
 
   function clearDates() {
@@ -104,17 +117,19 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
   function exportCsv() {
     if (!data) return;
     const rows: (string | number)[][] = [
-      ["Opening balance", "", "", "", "", data.openingBalance],
+      ["Opening balance", "", "", "", "", "", data.openingBalance],
       ...data.entries.map((e) => [
         e.createdAt,
         e.type,
+        e.itemSku,
         describeEvent(e),
         e.username,
         e.delta,
         e.runningTotal,
       ]),
     ];
-    downloadCsv(`${data.sku}-ledger.csv`, ["When", "Type", "Detail", "By", "Delta", "Balance"], rows);
+    const filename = data.sku ? `${data.locationCode}-${data.sku}-ledger.csv` : `${data.locationCode}-ledger.csv`;
+    downloadCsv(filename, ["When", "Type", "SKU", "Detail", "By", "Delta", "Balance"], rows);
   }
 
   return (
@@ -125,9 +140,12 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
           <div>
-            <h2 className="text-lg font-semibold">{data ? `${data.sku} — ${data.name}` : skuInput}</h2>
+            <h2 className="text-lg font-semibold">
+              {data ? `${data.locationCode}${data.sku ? ` — ${data.sku}` : ""}` : locationInput}
+            </h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Movement ledger — starts from an opening balance, not full history.
+              Location ledger — starts from an opening balance, not full history.
+              {data && !data.sku && " Showing every SKU that has passed through this location."}
             </p>
           </div>
           <button
@@ -141,7 +159,20 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
 
         <div className="px-5 pt-4 flex flex-wrap items-end gap-3 shrink-0">
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">SKU</label>
+            <label className="block text-xs text-zinc-500 mb-1">Location</label>
+            <input
+              type="text"
+              value={locationInput}
+              onChange={(e) => setLocationInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") applyFilters();
+              }}
+              className="px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500 w-32"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs text-zinc-500 mb-1">SKU (optional)</label>
             <input
               type="text"
               value={skuInput}
@@ -149,6 +180,7 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
               onKeyDown={(e) => {
                 if (e.key === "Enter") applyFilters();
               }}
+              placeholder="All SKUs"
               className="px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500 w-36"
             />
           </div>
@@ -228,6 +260,7 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
                     <tr className="bg-zinc-900 text-zinc-500 text-left">
                       <th className="px-3 py-2 font-medium">When</th>
                       <th className="px-3 py-2 font-medium">Type</th>
+                      <th className="px-3 py-2 font-medium">SKU</th>
                       <th className="px-3 py-2 font-medium">Detail</th>
                       <th className="px-3 py-2 font-medium">By</th>
                       <th className="px-3 py-2 font-medium text-right">Δ</th>
@@ -236,7 +269,7 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
                   </thead>
                   <tbody>
                     <tr className="border-t border-zinc-800 bg-zinc-900/40">
-                      <td className="px-3 py-2 font-mono text-xs text-zinc-500" colSpan={4}>
+                      <td className="px-3 py-2 font-mono text-xs text-zinc-500" colSpan={5}>
                         Opening balance
                       </td>
                       <td className="px-3 py-2 text-right text-zinc-600">—</td>
@@ -247,7 +280,7 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
 
                     {data.entries.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-3 py-6 text-center text-zinc-600">
+                        <td colSpan={7} className="px-3 py-6 text-center text-zinc-600">
                           No movement in this range.
                         </td>
                       </tr>
@@ -256,6 +289,7 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
                         <tr key={entry.id} className="border-t border-zinc-800/70">
                           <td className="px-3 py-2 font-mono text-xs text-zinc-500">{entry.createdAt}</td>
                           <td className="px-3 py-2 text-zinc-300">{entry.type}</td>
+                          <td className="px-3 py-2 font-mono text-zinc-400">{entry.itemSku}</td>
                           <td className="px-3 py-2 text-zinc-400">{describeEvent(entry)}</td>
                           <td className="px-3 py-2 text-zinc-400">{entry.username}</td>
                           <td

@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
 import LedgerModal from "./LedgerModal";
+import LocationLedgerModal from "./LocationLedgerModal";
 
 export type SkuLocation = {
   locationCode: string;
@@ -96,6 +97,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
   const [sortKey, setSortKey] = useState<SortKey>("sku");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [ledgerSku, setLedgerSku] = useState<string | null>(null);
+  const [locationLedger, setLocationLedger] = useState<{ sku: string; location: string } | null>(null);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -264,7 +266,8 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                                 <th className="py-2 pr-4 font-medium">Type</th>
                                 <th className="py-2 pr-4 font-medium text-right">Quantity</th>
                                 <th className="py-2 pr-4 font-medium text-right">Pallets</th>
-                                <th className="py-2 font-medium text-right">Updated</th>
+                                <th className="py-2 pr-4 font-medium text-right">Updated</th>
+                                <th className="py-2 font-medium text-right">Ledger</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -280,8 +283,18 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                                   <td className="py-2 pr-4 text-right font-mono text-zinc-400">
                                     {formatPallets(loc.quantity, sku.palletCartonQty)}
                                   </td>
-                                  <td className="py-2 text-right font-mono text-xs text-zinc-500">
+                                  <td className="py-2 pr-4 text-right font-mono text-xs text-zinc-500">
                                     {loc.updatedAt}
+                                  </td>
+                                  <td className="py-2 text-right">
+                                    <button
+                                      onClick={() =>
+                                        setLocationLedger({ sku: sku.sku, location: loc.locationCode })
+                                      }
+                                      className="px-2 py-1 rounded-md border border-zinc-800 text-[10px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+                                    >
+                                      Ledger
+                                    </button>
                                   </td>
                                 </tr>
                               ))}
@@ -299,6 +312,14 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
       </div>
 
       {ledgerSku && <LedgerModal key={ledgerSku} sku={ledgerSku} onClose={() => setLedgerSku(null)} />}
-            </div>
+      {locationLedger && (
+        <LocationLedgerModal
+          key={`${locationLedger.sku}-${locationLedger.location}`}
+          sku={locationLedger.sku}
+          location={locationLedger.location}
+          onClose={() => setLocationLedger(null)}
+        />
+      )}
+    </div>
   );
 }
