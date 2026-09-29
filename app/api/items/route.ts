@@ -1,17 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { items, users, roles } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { getSession } from "@/lib/auth";
-
-async function requireAdmin(userId: number): Promise<boolean> {
-  const [row] = await db
-    .select({ roleName: roles.name })
-    .from(users)
-    .innerJoin(roles, eq(users.roleId, roles.id))
-    .where(eq(users.id, userId));
-  return row?.roleName?.toLowerCase() === "admin";
-}
+import { items } from "@/db/schema";
+import { getSession, isSuperUser } from "@/lib/auth";
 
 export async function GET() {
   const rows = await db.select().from(items).orderBy(items.sku);
@@ -24,9 +14,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const isAdmin = await requireAdmin(session.userId);
+  const isAdmin = await isSuperUser(session.userId);
   if (!isAdmin) {
-    return NextResponse.json({ error: "Only admins can create items" }, { status: 403 });
+    return NextResponse.json({ error: "Only Manager can create items" }, { status: 403 });
   }
 
   const body = await req.json();

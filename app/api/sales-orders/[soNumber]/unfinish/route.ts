@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salesOrders, locationStockEvents } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSession, hasRole } from "@/lib/auth";
+import { SUPER_ROLE_NAME } from "@/lib/roles";
 
 // POST /api/sales-orders/:soNumber/unfinish
 // Admin only. Reverses a Finish — deletes the RELEASE events that finish
@@ -17,9 +18,9 @@ export async function POST(
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const isAdmin = await hasRole(session.userId, ["Admin"]);
+  const isAdmin = await hasRole(session.userId, [SUPER_ROLE_NAME]);
   if (!isAdmin) {
-    return NextResponse.json({ error: "Only admins can undo a finished sales order" }, { status: 403 });
+    return NextResponse.json({ error: "Only Manager can undo a finished sales order" }, { status: 403 });
   }
 
   const { soNumber } = await params;

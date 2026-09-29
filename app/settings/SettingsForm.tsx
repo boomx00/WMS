@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import PageLabelsSettings from "./PageLabelsSettings";
+import { useCan } from "@/lib/AccessContext";
 
 export default function SettingsForm({
   initial,
@@ -19,6 +20,7 @@ export default function SettingsForm({
   };
 }) {
   const [activeTab, setActiveTab] = useState<"general" | "translations">("general");
+  const canEdit = useCan()("settings.edit");
 
   const [allowDefaultCode, setAllowDefaultCode] = useState(initial.allowDefaultCodeTransactions);
   const [automaticInbound, setAutomaticInbound] = useState(initial.automaticInbound);
@@ -53,10 +55,16 @@ export default function SettingsForm({
       </div>
 
       {activeTab === "translations" ? (
-        <PageLabelsSettings />
+        <PageLabelsSettings readOnly={!canEdit} />
       ) : (
         <div className="space-y-4">
+          {!canEdit && (
+            <p className="text-xs text-zinc-500 border border-zinc-800 rounded-md px-3 py-2">
+              Read-only — your role can view settings but not change them.
+            </p>
+          )}
           <LedgerStartSetting
+            readOnly={!canEdit}
             initialIso={initial.ledgerStartAt}
             initialIsDefault={initial.ledgerStartIsDefault}
           />
@@ -77,8 +85,8 @@ export default function SettingsForm({
                   setAllowDefaultCode(next);
                   updateSetting("allowDefaultCodeTransactions", next);
                 }}
-                disabled={saving}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                disabled={saving || !canEdit}
+                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
                   allowDefaultCode ? "bg-amber-500" : "bg-zinc-700"
                 }`}
               >
@@ -107,8 +115,8 @@ export default function SettingsForm({
                   setAutomaticInbound(next);
                   updateSetting("automaticInbound", next);
                 }}
-                disabled={saving}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                disabled={saving || !canEdit}
+                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
                   automaticInbound ? "bg-amber-500" : "bg-zinc-700"
                 }`}
               >
@@ -137,8 +145,8 @@ export default function SettingsForm({
                   setAutomaticInboundFromRack(next);
                   updateSetting("automaticInboundFromRack", next);
                 }}
-                disabled={saving}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                disabled={saving || !canEdit}
+                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
                   automaticInboundFromRack ? "bg-amber-500" : "bg-zinc-700"
                 }`}
               >
@@ -167,8 +175,8 @@ export default function SettingsForm({
                   setAllowUntrackedOutbound(next);
                   updateSetting("allowUntrackedOutbound", next);
                 }}
-                disabled={saving}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                disabled={saving || !canEdit}
+                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
                   allowUntrackedOutbound ? "bg-amber-500" : "bg-zinc-700"
                 }`}
               >
@@ -200,8 +208,8 @@ export default function SettingsForm({
                   setAllowDefaultPicking(next);
                   updateSetting("allowDefaultPicking", next);
                 }}
-                disabled={saving}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                disabled={saving || !canEdit}
+                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
                   allowDefaultPicking ? "bg-amber-500" : "bg-zinc-700"
                 }`}
               >
@@ -231,8 +239,8 @@ export default function SettingsForm({
                   setAllowNegativeFloorStock(next);
                   updateSetting("allowNegativeFloorStock", next);
                 }}
-                disabled={saving}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                disabled={saving || !canEdit}
+                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
                   allowNegativeFloorStock ? "bg-amber-500" : "bg-zinc-700"
                 }`}
               >
@@ -264,8 +272,8 @@ export default function SettingsForm({
                   setAllowNegativeRackStock(next);
                   updateSetting("allowNegativeRackStock", next);
                 }}
-                disabled={saving}
-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
+                disabled={saving || !canEdit}
+                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
                   allowNegativeRackStock ? "bg-amber-500" : "bg-zinc-700"
                 }`}
               >
@@ -299,9 +307,11 @@ function wibInputToIso(value: string): string | null {
 function LedgerStartSetting({
   initialIso,
   initialIsDefault,
+  readOnly,
 }: {
   initialIso: string;
   initialIsDefault: boolean;
+  readOnly: boolean;
 }) {
   const [savedIso, setSavedIso] = useState(initialIso);
   const [isDefault, setIsDefault] = useState(initialIsDefault);
@@ -361,8 +371,10 @@ function LedgerStartSetting({
             setValue(e.target.value);
             setMessage(null);
           }}
-          className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 [color-scheme:dark]"
+          disabled={readOnly}
+          className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 [color-scheme:dark] disabled:opacity-60"
         />
+        {!readOnly && (
         <button
           onClick={handleSave}
           disabled={saving || !dirty || !value}
@@ -370,7 +382,8 @@ function LedgerStartSetting({
         >
           {saving ? "Saving…" : "Save"}
         </button>
-        {!isDefault && (
+        )}
+        {!readOnly && !isDefault && (
           <button
             onClick={() => save(null)}
             disabled={saving}

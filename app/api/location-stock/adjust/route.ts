@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { locations, items, locationStock, locationStockEvents, salesOrders, salesOrderItems } from "@/db/schema";
 import { eq, and, ne, inArray, isNotNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
@@ -35,6 +36,9 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "scan.adjustLocation");
+  if (denied) return denied;
 
   const body = await req.json();
   const locationCode = sanitize(body.locationCode ?? "");

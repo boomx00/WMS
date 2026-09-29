@@ -1,51 +1,65 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
-type Role = { id: number; name: string; isAdmin: boolean };
+type Role = { id: number; name: string; isSuper: boolean };
 type Page = { path: string; label: string };
-type Grant = { roleId: number; pagePath: string };
+type Action = { key: string; page: string; label: string; hint: string | null };
 
-const key = (roleId: number, pagePath: string) => `${roleId}:${pagePath}`;
+// One change = one checkbox: either a page or an action for a role.
+type Change = { roleId: number; pagePath?: string; actionKey?: string; allowed: boolean };
+
+const pageId = (roleId: number, path: string) => `${roleId}:p:${path}`;
+const actionId = (roleId: number, key: string) => `${roleId}:a:${key}`;
+const changeId = (c: Change) => (c.pagePath !== undefined ? pageId(c.roleId, c.pagePath) : actionId(c.roleId, c.actionKey!));
 
 export default function PermissionsClient({
   roles,
   pages,
-  initialGrants,
+  actions,
+  initialPageGrants,
+  initialActionGrants,
 }: {
   roles: Role[];
   pages: Page[];
-  initialGrants: Grant[];
+  actions: Action[];
+  initialPageGrants: { roleId: number; pagePath: string }[];
+  initialActionGrants: { roleId: number; actionKey: string }[];
 }) {
   const [granted, setGranted] = useState<Set<string>>(
-    () => new Set(initialGrants.map((g) => key(g.roleId, g.pagePath)))
+    () =>
+      new Set([
+        ...initialPageGrants.map((g) => pageId(g.roleId, g.pagePath)),
+        ...initialActionGrants.map((g) => actionId(g.roleId, g.actionKey)),
+      ])
   );
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
-  const editableRoles = roles.filter((r) => !r.isAdmin);
-  const adminRoles = roles.filter((r) => r.isAdmin);
+  const editableRoles = roles.filter((r) => !r.isSuper);
+  const superRoles = roles.filter((r) => r.isSuper);
 
-  function setMany(next: Set<string>, keys: string[], on: boolean) {
-    for (const k of keys) {
-      if (on) next.add(k);
-      else next.delete(k);
+  function withKeys(prev: Set<string>, ids: string[], on: boolean) {
+    const next = new Set(prev);
+    for (const id of ids) {
+      if (on) next.add(id);
+      else next.delete(id);
     }
     return next;
   }
 
-  async function apply(changes: { roleId: number; pagePath: string; allowed: boolean }[]) {
+  async function apply(changes: Change[]) {
     if (changes.length === 0) return;
     setError(null);
-    const keys = changes.map((c) => key(c.roleId, c.pagePath));
+    const ids = changes.map(changeId);
 
     // Optimistic: flip now, roll back any that fail.
     setGranted((prev) => {
-      const next = new Set(prev);
-      for (const c of changes) setMany(next, [key(c.roleId, c.pagePath)], c.allowed);
+      let next = prev;
+      for (const c of changes) next = withKeys(next, [changeId(c)], c.allowed);
       return next;
     });
-    setPending((prev) => setMany(new Set(prev), keys, true));
+    setPending((prev) => withKeys(prev, ids, true));
 
     const results = await Promise.all(
       changes.map(async (c) => {
@@ -66,33 +80,33 @@ export default function PermissionsClient({
     const failed = results.filter((r): r is NonNullable<typeof r> => r !== null);
     if (failed.length > 0) {
       setGranted((prev) => {
-        const next = new Set(prev);
-        for (const f of failed) setMany(next, [key(f.change.roleId, f.change.pagePath)], !f.change.allowed);
+        let next = prev;
+        for (const f of failed) next = withKeys(next, [changeId(f.change)], !f.change.allowed);
         return next;
       });
       setError(failed[0].message);
     }
-    setPending((prev) => setMany(new Set(prev), keys, false));
+    setPending((prev) => withKeys(prev, ids, false));
   }
 
-  function toggle(roleId: number, pagePath: string) {
-    apply([{ roleId, pagePath, allowed: !granted.has(key(roleId, pagePath)) }]);
-  }
-
-  // Column header click: grant all pages if any are missing, else revoke all.
+  // Column header click: grant everything if anything is missing, else revoke everything.
   function toggleRole(roleId: number) {
-    const allOn = pages.every((p) => granted.has(key(roleId, p.path)));
+    const all: Change[] = [
+      ...pages.map((p) => ({ roleId, pagePath: p.path, allowed: true })),
+      ...actions.map((a) => ({ roleId, actionKey: a.key, allowed: true })),
+    ];
+    const allOn = all.every((c) => granted.has(changeId(c)));
     apply(
-      pages
-        .filter((p) => granted.has(key(roleId, p.path)) === allOn)
-        .map((p) => ({ roleId, pagePath: p.path, allowed: !allOn }))
+      all
+        .filter((c) => granted.has(changeId(c)) === allOn)
+        .map((c) => ({ ...c, allowed: !allOn }))
     );
   }
 
   if (editableRoles.length === 0) {
     return (
       <div className="border border-zinc-800 rounded-lg p-8 text-center text-sm text-zinc-500">
-        No non-admin roles yet. Create one on the Roles page.
+        No other roles yet. Create one on the Roles page.
       </div>
     );
   }
@@ -109,8 +123,8 @@ export default function PermissionsClient({
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-zinc-900 text-zinc-500 text-left">
-              <th className="px-4 py-3 font-medium sticky left-0 bg-zinc-900">Page</th>
-              {adminRoles.map((r) => (
+              <th className="px-4 py-3 font-medium sticky left-0 bg-zinc-900">Page / action</th>
+              {superRoles.map((r) => (
                 <th key={r.id} className="px-4 py-3 font-medium text-center whitespace-nowrap">
                   {r.name}
                 </th>
@@ -119,7 +133,7 @@ export default function PermissionsClient({
                 <th key={r.id} className="px-4 py-3 font-medium text-center whitespace-nowrap">
                   <button
                     onClick={() => toggleRole(r.id)}
-                    title="Toggle all pages for this role"
+                    title="Toggle everything for this role"
                     className="hover:text-amber-500 transition-colors"
                   >
                     {r.name}
@@ -129,39 +143,80 @@ export default function PermissionsClient({
             </tr>
           </thead>
           <tbody>
-            {pages.map((page) => (
-              <tr key={page.path} className="border-t border-zinc-800 hover:bg-zinc-900/50">
-                <td className="px-4 py-3 sticky left-0 bg-zinc-950">
-                  <div>{page.label}</div>
-                  <div className="text-xs text-zinc-600 font-mono">{page.path}</div>
-                </td>
-                {adminRoles.map((r) => (
-                  <td key={r.id} className="px-4 py-3 text-center text-xs text-zinc-600">
-                    always
-                  </td>
-                ))}
-                {editableRoles.map((r) => {
-                  const k = key(r.id, page.path);
-                  return (
-                    <td key={r.id} className="px-4 py-3 text-center">
-                      <input
-                        type="checkbox"
-                        checked={granted.has(k)}
-                        disabled={pending.has(k)}
-                        onChange={() => toggle(r.id, page.path)}
-                        aria-label={`${r.name} can open ${page.label}`}
-                        className="w-4 h-4 accent-amber-500 cursor-pointer disabled:opacity-40"
-                      />
+            {pages.map((page) => {
+              const pageActions = actions.filter((a) => a.page === page.path);
+              return (
+                <Fragment key={page.path}>
+                  <tr className="border-t border-zinc-800 hover:bg-zinc-900/50">
+                    <td className="px-4 py-3 sticky left-0 bg-zinc-950">
+                      <div>{page.label}</div>
+                      <div className="text-xs text-zinc-600 font-mono">{page.path}</div>
                     </td>
-                  );
-                })}
-              </tr>
-            ))}
+                    {superRoles.map((r) => (
+                      <td key={r.id} className="px-4 py-3 text-center text-xs text-zinc-600">
+                        always
+                      </td>
+                    ))}
+                    {editableRoles.map((r) => {
+                      const id = pageId(r.id, page.path);
+                      return (
+                        <td key={r.id} className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={granted.has(id)}
+                            disabled={pending.has(id)}
+                            onChange={() =>
+                              apply([{ roleId: r.id, pagePath: page.path, allowed: !granted.has(id) }])
+                            }
+                            aria-label={`${r.name} can open ${page.label}`}
+                            className="w-4 h-4 accent-amber-500 cursor-pointer disabled:opacity-40"
+                          />
+                        </td>
+                      );
+                    })}
+                  </tr>
+
+                  {pageActions.map((action) => (
+                    <tr key={action.key} className="border-t border-zinc-800/50 bg-zinc-900/20">
+                      <td className="pl-10 pr-4 py-2 sticky left-0 bg-zinc-950">
+                        <div className="text-zinc-300 text-xs">↳ {action.label}</div>
+                        {action.hint && <div className="text-[11px] text-zinc-600">{action.hint}</div>}
+                      </td>
+                      {superRoles.map((r) => (
+                        <td key={r.id} className="px-4 py-2 text-center text-xs text-zinc-600">
+                          always
+                        </td>
+                      ))}
+                      {editableRoles.map((r) => {
+                        const id = actionId(r.id, action.key);
+                        const pageOn = granted.has(pageId(r.id, page.path));
+                        return (
+                          <td key={r.id} className="px-4 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              checked={granted.has(id)}
+                              disabled={pending.has(id) || !pageOn}
+                              onChange={() =>
+                                apply([{ roleId: r.id, actionKey: action.key, allowed: !granted.has(id) }])
+                              }
+                              title={pageOn ? undefined : "Grant the page first"}
+                              aria-label={`${r.name}: ${action.label}`}
+                              className="w-3.5 h-3.5 accent-amber-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
       <p className="text-xs text-zinc-600 mt-3">
-        Changes save as you click. Click a role name to toggle all its pages.
+        Changes save as you click. Actions (↳) only work when their page is also ticked. Click a role
+        name to toggle everything for that role.
       </p>
     </div>
   );

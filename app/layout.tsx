@@ -5,6 +5,7 @@ import SiteNav from "@/components/SiteNav";
 import { LanguageProvider } from "@/lib/LanguageContext";
 import { getSession } from "@/lib/auth";
 import { getPageAccess } from "@/lib/pagePermissions";
+import { AccessProvider } from "@/lib/AccessContext";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,6 +36,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full bg-zinc-950 text-zinc-100">
         <LanguageProvider>
+          <AccessProvider access={access}>
           {/* flex-col on mobile: mobile top bar (from SiteNav) stacks above
               the page content. flex-row on desktop: sidebar sits beside it,
               as before. */}
@@ -42,6 +44,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             <SiteNav username={session?.username ?? null} access={access} />
             <main className="flex-1 min-w-0">{children}</main>
           </div>
+          </AccessProvider>
         </LanguageProvider>
       </body>
     </html>

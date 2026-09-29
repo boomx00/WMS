@@ -54,7 +54,7 @@ export const roles = pgTable(
   "roles",
   {
     id: serial("id").primaryKey(),
-    name: text("name").notNull(), // e.g. "Inbound", "Forklift Driver", "Admin"
+    name: text("name").notNull(), // e.g. "Inbound", "Forklift Driver", "Manager"
   },
   (table) => [uniqueIndex("roles_name_idx").on(table.name)]
 );
@@ -62,10 +62,11 @@ export const roles = pgTable(
 export const rolesRelations = relations(roles, ({ many }) => ({
   users: many(users),
   pagePermissions: many(rolePagePermissions),
+  actionPermissions: many(roleActionPermissions),
 }));
 
-// Which web pages a (non-admin) role may open. One row = one granted page.
-// Admin always has every page and never needs rows here. `pagePath` must be
+// Which web pages a (non-Manager) role may open. One row = one granted page.
+// Manager always has every page and never needs rows here. `pagePath` must be
 // a grantable path from APP_PAGES in lib/pages.ts.
 export const rolePagePermissions = pgTable(
   "role_page_permissions",
@@ -83,6 +84,29 @@ export const rolePagePermissions = pgTable(
 export const rolePagePermissionsRelations = relations(rolePagePermissions, ({ one }) => ({
   role: one(roles, {
     fields: [rolePagePermissions.roleId],
+    references: [roles.id],
+  }),
+}));
+
+// Which in-page actions a (non-Manager) role may do, e.g. "so.create".
+// `actionKey` must be a key from APP_ACTIONS in lib/pages.ts. An action only
+// takes effect if the role can also open that action's page.
+export const roleActionPermissions = pgTable(
+  "role_action_permissions",
+  {
+    id: serial("id").primaryKey(),
+    roleId: integer("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    actionKey: text("action_key").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("role_action_permissions_role_action_idx").on(table.roleId, table.actionKey)]
+);
+
+export const roleActionPermissionsRelations = relations(roleActionPermissions, ({ one }) => ({
+  role: one(roles, {
+    fields: [roleActionPermissions.roleId],
     references: [roles.id],
   }),
 }));

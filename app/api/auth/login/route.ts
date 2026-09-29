@@ -9,7 +9,7 @@ import { firstAllowedPath } from "@/lib/pages";
 
 // POST /api/auth/login
 // body: { username, password, client? }
-// client: "web" → Admin, or a role with at least one page granted on
+// client: "web" → Manager, or a role with at least one page granted on
 // /permissions. Anything else (e.g. the PDA app) keeps the existing behaviour.
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -59,6 +59,8 @@ export async function POST(req: NextRequest) {
     username: user.username,
     roleId: user.roleId,
     roleName,
+    // Marks web sessions so web-only action permissions apply to them.
+    ...(client === "web" ? { client: "web" as const } : {}),
   });
 
   const response = NextResponse.json({

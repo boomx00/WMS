@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useCan } from "@/lib/AccessContext";
 
 type TambahanItem = {
   itemId: number;
@@ -23,6 +24,8 @@ type TambahanData = {
 };
 
 export default function TambahanPanel({ soNumber }: { soNumber: string }) {
+  // Convert / confirm / return are the web Tambahan actions.
+  const canAct = useCan()("so.tambahan");
   const [data, setData] = useState<TambahanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [newSoNumber, setNewSoNumber] = useState("");
@@ -111,13 +114,14 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
                   key={it.itemId}
                   tambahanNumber={tambahan.tambahanNumber}
                   item={it}
+                  canAct={canAct}
                   onSaved={refresh}
                 />
               ))}
             </tbody>
           </table>
         )}
-        {totalOutstanding > 0 && (
+        {canAct && totalOutstanding > 0 && (
           <div className="mt-2">
             <button
               onClick={handleConfirmTambahan}
@@ -134,6 +138,8 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
               Converted to <span className="font-mono text-amber-400">{tambahan.convertedSoNumber}</span> on{" "}
               {tambahan.convertedAt ? new Date(tambahan.convertedAt).toLocaleDateString() : ""}.
             </p>
+          ) : !canAct ? (
+            <p className="text-xs text-zinc-600">Not converted to an SO yet.</p>
           ) : (
             <div className="flex flex-wrap items-end gap-2">
               <div>
@@ -174,10 +180,12 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
 function TambahanItemRow({
   tambahanNumber,
   item,
+  canAct,
   onSaved,
 }: {
   tambahanNumber: string;
   item: TambahanItem;
+  canAct: boolean;
   onSaved: () => void;
 }) {
   const outstanding = item.pickedQty - item.shippedQty;
@@ -212,7 +220,7 @@ function TambahanItemRow({
       <td className="py-1 text-right font-mono">{item.shippedQty}</td>
       <td className="py-1 text-right font-mono">{outstanding}</td>
       <td className="py-1 text-right relative">
-        {outstanding > 0 && (
+        {canAct && outstanding > 0 && (
           <button onClick={() => setShowPopup(true)} className="text-red-400 hover:underline">
             Delete
           </button>

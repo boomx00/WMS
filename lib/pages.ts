@@ -1,16 +1,19 @@
-// The web pages that page permissions apply to. Safe to import from client
-// components (no DB access here).
+// Web pages and in-page actions that permissions apply to. Safe to import
+// from client components (no DB access here).
 //
-// - Admin can open every page, always.
-// - Other roles can open a page only if it's granted on /permissions.
-// - `adminOnly` pages can never be granted (they control access itself).
-// - Any path NOT listed here is admin-only by default, so a new page stays
+// - Manager (the super role) can open every page and do every action.
+// - Other roles can open a page only if it's granted on /permissions, and
+//   can do an action only if it's granted AND its page is granted.
+// - `superOnly` pages can never be granted (they control access itself).
+// - Any path NOT listed here is Manager-only by default, so a new page stays
 //   locked until it's added below.
+
+import { isSuperRoleName } from "@/lib/roles";
 
 export type AppPage = {
   path: string;
   label: string;
-  adminOnly?: boolean;
+  superOnly?: boolean;
 };
 
 export const APP_PAGES: AppPage[] = [
@@ -26,23 +29,78 @@ export const APP_PAGES: AppPage[] = [
   { path: "/other-transactions", label: "Other Transactions" },
   { path: "/items", label: "Items" },
   { path: "/locations", label: "Locations" },
-  { path: "/settings", label: "Settings", adminOnly: true },
-  { path: "/users", label: "Users", adminOnly: true },
-  { path: "/roles", label: "Roles", adminOnly: true },
-  { path: "/permissions", label: "Permissions", adminOnly: true },
+  { path: "/settings", label: "Settings" },
+  { path: "/users", label: "Users", superOnly: true },
+  { path: "/roles", label: "Roles", superOnly: true },
+  { path: "/permissions", label: "Permissions", superOnly: true },
 ];
 
-export const GRANTABLE_PAGES = APP_PAGES.filter((p) => !p.adminOnly);
+// Actions within a page. On the web these are enforced in the UI and in the
+// API routes they call. The PDA is not affected by them, except
+// `settings.edit` which applies everywhere (settings used to be admin-only).
+export type ActionKey =
+  | "so.create"
+  | "so.edit"
+  | "so.tambahan"
+  | "locationStock.editOutboundWh"
+  | "scan.inbound"
+  | "scan.adjustLocation"
+  | "scan.adjustBulk"
+  | "scan.correctQty"
+  | "settings.edit";
+
+export type AppAction = {
+  key: ActionKey;
+  page: string;
+  label: string;
+  hint?: string;
+};
+
+export const APP_ACTIONS: AppAction[] = [
+  { key: "so.create", page: "/sales-orders", label: "Create sales orders" },
+  { key: "so.edit", page: "/sales-orders", label: "Edit sales orders" },
+  {
+    key: "so.tambahan",
+    page: "/sales-orders",
+    label: "Tambahan actions",
+    hint: "Convert to SO, confirm leftover, return stock",
+  },
+  {
+    key: "locationStock.editOutboundWh",
+    page: "/location-stock",
+    label: "Edit Outbound WH",
+    hint: "Correct marked SO / Tambahan quantities",
+  },
+  { key: "scan.inbound", page: "/scan", label: "Inbound tab" },
+  { key: "scan.adjustLocation", page: "/scan", label: "Adjust tab" },
+  { key: "scan.adjustBulk", page: "/scan", label: "Bulk Adjust tab" },
+  { key: "scan.correctQty", page: "/scan", label: "Correct Qty tab" },
+  { key: "settings.edit", page: "/settings", label: "Edit settings", hint: "Including ledger start and translations" },
+];
+
+export const GRANTABLE_PAGES = APP_PAGES.filter((p) => !p.superOnly);
 
 const GRANTABLE_PATHS = new Set(GRANTABLE_PAGES.map((p) => p.path));
+const ACTIONS_BY_KEY = new Map(APP_ACTIONS.map((a) => [a.key, a]));
 
 export function isGrantablePath(path: string): boolean {
   return GRANTABLE_PATHS.has(path);
 }
 
-export function isAdminRoleName(roleName: string | null | undefined): boolean {
-  return roleName?.toLowerCase() === "admin";
+export function isActionKey(key: string): key is ActionKey {
+  return ACTIONS_BY_KEY.has(key as ActionKey);
 }
+
+export function getAction(key: ActionKey): AppAction {
+  return ACTIONS_BY_KEY.get(key)!;
+}
+
+export function actionsForPage(path: string): AppAction[] {
+  return APP_ACTIONS.filter((a) => a.page === path);
+}
+
+// Kept for existing imports; true only for the super role (Manager).
+export const isAdminRoleName = isSuperRoleName;
 
 // Finds the registered page a URL belongs to: "/" matches only itself,
 // anything else matches itself and its sub-paths (e.g. /work-orders/123).
@@ -61,15 +119,22 @@ export function matchPage(pathname: string): AppPage | undefined {
 
 export type PageAccess = {
   roleName: string;
-  isAdmin: boolean;
-  allowedPages: string[]; // grantable paths only; empty for admin (has all)
+  isAdmin: boolean; // true for the super role (Manager)
+  allowedPages: string[]; // grantable paths only; empty for super (has all)
+  allowedActions: ActionKey[]; // only actions whose page is also allowed; empty for super
 };
 
 export function canAccessPath(pathname: string, access: PageAccess): boolean {
   if (access.isAdmin) return true;
   const page = matchPage(pathname);
-  if (!page || page.adminOnly) return false;
+  if (!page || page.superOnly) return false;
   return access.allowedPages.includes(page.path);
+}
+
+export function canDo(access: PageAccess | null, key: ActionKey): boolean {
+  if (!access) return false;
+  if (access.isAdmin) return true;
+  return access.allowedActions.includes(key);
 }
 
 // Where to send someone after login, or when they open a page they can't use.

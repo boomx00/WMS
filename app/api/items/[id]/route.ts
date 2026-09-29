@@ -1,19 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { items, users, roles } from "@/db/schema";
+import { items } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { getSession } from "@/lib/auth";
+import { getSession, isSuperUser } from "@/lib/auth";
 
-async function requireAdmin(userId: number): Promise<boolean> {
-  const [row] = await db
-    .select({ roleName: roles.name })
-    .from(users)
-    .innerJoin(roles, eq(users.roleId, roles.id))
-    .where(eq(users.id, userId));
-  return row?.roleName?.toLowerCase() === "admin";
-}
-
-// PATCH /api/items/:id — admin only. Any subset of fields can be updated.
+// PATCH /api/items/:id — Manager only. Any subset of fields can be updated.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -23,9 +14,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const isAdmin = await requireAdmin(session.userId);
+  const isAdmin = await isSuperUser(session.userId);
   if (!isAdmin) {
-    return NextResponse.json({ error: "Only admins can edit items" }, { status: 403 });
+    return NextResponse.json({ error: "Only Manager can edit items" }, { status: 403 });
   }
 
   const { id } = await params;

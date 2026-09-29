@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locationStockEvents, users, roles, locations } from "@/db/schema";
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { SUPER_ROLE_NAME } from "@/lib/roles";
 import { alias } from "drizzle-orm/pg-core";
 
 const sourceLoc = alias(locations, "source_loc");
@@ -26,7 +27,7 @@ export function classifyDriverEvent(
 
 // GET /api/analytics/driver-activity?start=...&end=...
 //
-// Per-driver (role = "Forklift Driver" or "Admin") summary of
+// Per-driver (role = "Forklift Driver" or Manager) summary of
 // location_stock_events activity in a date range, using location_stock as
 // the source of truth for movement data (v2). Every matching user is
 // included even with zero activity in range, so gaps are visible rather
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
     .select({ id: users.id, username: users.username })
     .from(users)
     .innerJoin(roles, eq(users.roleId, roles.id))
-    .where(inArray(roles.name, ["Forklift Driver", "Admin"]));
+    .where(inArray(roles.name, ["Forklift Driver", SUPER_ROLE_NAME]));
 
   if (drivers.length === 0) {
     return NextResponse.json([]);

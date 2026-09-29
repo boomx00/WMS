@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import TambahanPanel from "./TambahanPanel";
+import { useCan } from "@/lib/AccessContext";
 import CreateSalesOrderForm from "./components/CreateSalesOrderForm";
 import EditSalesOrderForm from "./components/EditSalesOrderForm";
 import ShippedCell from "./components/ShippedCell";
@@ -36,6 +37,9 @@ export default function SalesOrdersClient({
   isAdmin: boolean;
 }) {
   const router = useRouter();
+  const can = useCan();
+  const canCreate = can("so.create");
+  const canEdit = can("so.edit");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [editingId, setEditingId] = useState<number | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
@@ -90,9 +94,11 @@ export default function SalesOrdersClient({
 
   return (
     <div>
-      <div className="mb-8">
-        <CreateSalesOrderForm allItems={allItems} />
-      </div>
+      {canCreate && (
+        <div className="mb-8">
+          <CreateSalesOrderForm allItems={allItems} />
+        </div>
+      )}
 
       <input
         type="text"
@@ -174,22 +180,24 @@ export default function SalesOrdersClient({
                       </td>
                       <td className="px-4 py-3 text-right text-zinc-400">{order.items.length}</td>
                       <td className="px-4 py-3 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingId(isEditing ? null : order.id);
-                            if (!isOpen) toggle(order.id);
-                          }}
-                          className="text-xs text-amber-500 hover:underline"
-                        >
-                          {isEditing ? "Cancel" : "Edit"}
-                        </button>
+                        {canEdit && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingId(isEditing ? null : order.id);
+                              if (!isOpen) toggle(order.id);
+                            }}
+                            className="text-xs text-amber-500 hover:underline"
+                          >
+                            {isEditing ? "Cancel" : "Edit"}
+                          </button>
+                        )}
                       </td>
                     </tr>
                     {isOpen && (
                       <tr className="border-t border-zinc-800/60 bg-zinc-950/40">
                         <td colSpan={7} className="px-4 py-4">
-                          {isEditing ? (
+                          {isEditing && canEdit ? (
                             <EditSalesOrderForm
                               order={order}
                               allItems={allItems}

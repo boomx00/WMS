@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items, palletEvents, pallets } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 
 // PATCH /api/sales-orders/:soNumber
 // body: { soNumber, orderDate, items: [{ sku, quantity }], truckEnterTime?, truckLeaveTime? }
@@ -18,6 +19,9 @@ export async function PATCH(
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "so.edit");
+  if (denied) return denied;
 
   const { soNumber: currentSoNumber } = await params;
 

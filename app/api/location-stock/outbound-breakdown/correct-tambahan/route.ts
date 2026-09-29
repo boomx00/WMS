@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { items, tambahanOrders, locationStockEvents } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { getPickedForTambahanQuantity } from "@/lib/pickedForTambahan";
 
 function sanitize(input: string): string {
@@ -23,6 +24,9 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "locationStock.editOutboundWh");
+  if (denied) return denied;
 
   const body = await req.json();
   const itemSku = sanitize(body.itemSku ?? "");

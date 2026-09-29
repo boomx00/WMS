@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { items, locations, tambahanOrders, locationStockEvents } from "@/db/schema";
 import { eq, and, inArray, desc, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { adjustLocationStock } from "@/lib/locationStock";
 import { getPickedForTambahanQuantity } from "@/lib/pickedForTambahan";
 
@@ -39,6 +40,9 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "so.tambahan");
+  if (denied) return denied;
 
   const body = await req.json();
   const itemSku = sanitize(body.itemSku ?? "");

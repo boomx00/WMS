@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { users, roles } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession, hasRole } from "@/lib/auth";
+import { SUPER_ROLE_NAME } from "@/lib/roles";
 
 // PATCH /api/users/:id/role
 // body: { roleId }
@@ -15,9 +16,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const isAdmin = await hasRole(session.userId, ["Admin"]);
+  const isAdmin = await hasRole(session.userId, [SUPER_ROLE_NAME]);
   if (!isAdmin) {
-    return NextResponse.json({ error: "Only admins can change roles" }, { status: 403 });
+    return NextResponse.json({ error: "Only Manager can change roles" }, { status: 403 });
   }
 
   const { id } = await params;

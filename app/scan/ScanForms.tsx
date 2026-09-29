@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
+import { useCan } from "@/lib/AccessContext";
+import type { ActionKey } from "@/lib/pages";
 
 function parseLabel(raw: string) {
   const parts = raw.trim().split("*");
@@ -14,16 +16,29 @@ function parseLabel(raw: string) {
 }
 type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST_LOCATION" | "ADJUST_BULK" | "ADJUST_PALLET_QTY" | "CHECK_SO";
 export default function ScanForms() {
-  const [tab, setTab] = useState<Tab>("INBOUND");
   const labels = usePageLabels("scan")
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "INBOUND", label: labels.th_inbound },
-    { key: "ADJUST_LOCATION", label: labels.th_adjust},
-      { key: "ADJUST_BULK", label: labels.th_adjust_bulk },
-
-    { key: "ADJUST_PALLET_QTY", label: labels.th_correct },
+  const can = useCan();
+  // Each tab is its own permission on /permissions (see lib/pages.ts).
+  const allTabs: { key: Tab; label: string; action: ActionKey }[] = [
+    { key: "INBOUND", label: labels.th_inbound, action: "scan.inbound" },
+    { key: "ADJUST_LOCATION", label: labels.th_adjust, action: "scan.adjustLocation" },
+    { key: "ADJUST_BULK", label: labels.th_adjust_bulk, action: "scan.adjustBulk" },
+    { key: "ADJUST_PALLET_QTY", label: labels.th_correct, action: "scan.correctQty" },
     // { key: "CHECK_SO", label: labels.th_check_so },
   ];
+  const tabs = allTabs.filter((t) => can(t.action));
+  const [selected, setTab] = useState<Tab | null>(null);
+  // Falls back to the first tab this role may use.
+  const tab: Tab | null = tabs.some((t) => t.key === selected) ? selected : tabs[0]?.key ?? null;
+
+  if (!tab) {
+    return (
+      <div className="border border-zinc-800 rounded-lg p-8 text-center text-sm text-zinc-500">
+        Your role doesn&apos;t have access to any System Control tabs.
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex gap-1 mb-6 border border-zinc-800 rounded-lg p-1 w-fit">

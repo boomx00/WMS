@@ -2,20 +2,9 @@ import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items } from "@/db/schema";
 import { eq, inArray, desc, sql, and } from "drizzle-orm";
 import SalesOrdersClient from "./SalesOrdersClient";
-import { getSession } from "@/lib/auth";
-import { users, roles } from "@/db/schema";
+import { sessionIsSuper } from "@/lib/auth";
 import { getPickedForSoQuantities } from "@/lib/pickedForSo";
 import { tambahanOrders } from "@/db/schema";
-async function getIsAdmin(): Promise<boolean> {
-  const session = await getSession();
-  if (!session) return false;
-  const [row] = await db
-    .select({ roleName: roles.name })
-    .from(users)
-    .innerJoin(roles, eq(users.roleId, roles.id))
-    .where(eq(users.id, session.userId));
-  return row?.roleName?.toLowerCase() === "admin";
-}
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
@@ -184,7 +173,7 @@ const [totalCount, orders, allItems, isAdmin] = await Promise.all([
   getTotalOrderCount(),
   getSalesOrdersForPage(page),
   db.select({ sku: items.sku, name: items.name }).from(items).orderBy(items.sku),
-  getIsAdmin(),
+  sessionIsSuper(),
 ]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));

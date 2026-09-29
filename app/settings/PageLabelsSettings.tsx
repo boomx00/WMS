@@ -5,7 +5,7 @@ import { PAGE_OPTIONS, PageKey } from "@/lib/pageLabels";
 
 type RawLabel = { en: string; id: string; zh: string };
 
-export default function PageLabelsSettings() {
+export default function PageLabelsSettings({ readOnly = false }: { readOnly?: boolean }) {
   const [page, setPage] = useState<PageKey>(PAGE_OPTIONS[0].key);
   const [values, setValues] = useState<Record<string, RawLabel>>({});
   const [loading, setLoading] = useState(false);
@@ -91,12 +91,14 @@ export default function PageLabelsSettings() {
                   <td className="px-3 py-2 text-zinc-400">{langs.id || <span className="text-zinc-700">—</span>}</td>
                   <td className="px-3 py-2 text-zinc-400">{langs.zh || <span className="text-zinc-700">—</span>}</td>
                   <td className="px-3 py-2">
-                    <button
-                      onClick={() => setEditingKey(key)}
-                      className="text-xs text-amber-500 hover:text-amber-400"
-                    >
-                      Edit
-                    </button>
+                    {!readOnly && (
+                      <button
+                        onClick={() => setEditingKey(key)}
+                        className="text-xs text-amber-500 hover:text-amber-400"
+                      >
+                        Edit
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -105,7 +107,7 @@ export default function PageLabelsSettings() {
         </div>
       )}
 
-      {editingKey && (
+      {editingKey && !readOnly && (
         <TranslationModal
           labelKey={editingKey}
           english={values[editingKey].en}

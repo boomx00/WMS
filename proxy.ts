@@ -34,6 +34,13 @@ export async function proxy(req: NextRequest) {
     return toLogin(req, false);
   }
 
+  // Web pages need a web-login session (one that carries client: "web"),
+  // so action permissions can be enforced on it. Older web tokens issued
+  // before this flag existed just log in again once.
+  if (session.client !== "web") {
+    return toLogin(req, true);
+  }
+
   const access = await getPageAccess(session.userId);
 
   // User deleted, or role has no web pages at all → sign them out of web.

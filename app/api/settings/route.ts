@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { settings } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { getSession, requireAdmin } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { DEFAULT_LEDGER_START_AT } from "@/lib/ledger";
 
 const BOOLEAN_KEYS = [
@@ -41,10 +42,9 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const denied = await requireAdmin();
-  if (denied) {
-    return NextResponse.json({ error: denied.error }, { status: denied.status });
-  }
+  // Enforced for every client, not just web: settings were admin-only before.
+  const denied = await denyUnlessAllowed(session, "settings.edit", { webOnly: false });
+  if (denied) return denied;
 
   const body = await req.json();
 

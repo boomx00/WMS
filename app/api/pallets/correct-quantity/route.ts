@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { pallets, palletEvents, locationStockEvents } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { adjustLocationStock } from "@/lib/locationStock";
 
@@ -22,6 +23,9 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "scan.correctQty");
+  if (denied) return denied;
 
   const body = await req.json();
   const rawLabel = sanitize(body.label ?? "");

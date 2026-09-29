@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { eq, and, ne, gt, desc, inArray } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -69,6 +70,9 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "scan.adjustBulk");
+  if (denied) return denied;
 
   const body = await req.json();
   const description = sanitize(body.description ?? "");

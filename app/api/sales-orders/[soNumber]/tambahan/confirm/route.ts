@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salesOrders, tambahanOrders, locationStockEvents, items } from "@/db/schema";
 import { eq, and, inArray, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 
 // POST /api/sales-orders/:soNumber/tambahan/confirm
 //
@@ -21,6 +22,9 @@ export async function POST(
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "so.tambahan");
+  if (denied) return denied;
 
   const { soNumber } = await params;
 

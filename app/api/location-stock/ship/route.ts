@@ -12,6 +12,7 @@ import {
 import { db } from "@/lib/db";
 import { eq, and, or, sql } from "drizzle-orm";
 import { getSession, hasRole } from "@/lib/auth";
+import { SUPER_ROLE_NAME } from "@/lib/roles";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { adjustLocationStock } from "@/lib/locationStock";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
@@ -41,7 +42,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
+  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker"]);
   if (!authorized) {
     return NextResponse.json(
       { error: "Only Checker and Admin roles can perform shipping" },

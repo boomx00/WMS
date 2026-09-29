@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { pageLabels } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { DEFAULT_LABELS, PageKey } from "@/lib/pageLabels";
 
 function sanitize(input: string): string {
@@ -55,6 +56,9 @@ export async function PUT(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessAllowed(session, "settings.edit", { webOnly: false });
+  if (denied) return denied;
 
   const body = await req.json();
   const page = sanitize(body.page ?? "");

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { pallets, palletEvents, locations, salesOrders, salesOrderItems } from "@/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { SUPER_ROLE_NAME } from "@/lib/roles";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { hasRole } from "@/lib/auth";
 function sanitize(input: string): string {
@@ -16,7 +17,7 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
-  const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
+  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker"]);
 if (!authorized) {
   return NextResponse.json(
     { error: "ANDA BUKAN CHECKER!" },

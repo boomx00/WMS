@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
+import { useCan } from "@/lib/AccessContext";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 type Row = {
@@ -416,6 +417,7 @@ function CorrectableRow({
   quantity: number;
   onSaved: () => void;
 }) {
+  const canEdit = useCan()("locationStock.editOutboundWh");
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(quantity.toString());
   const [saving, setSaving] = useState(false);
@@ -466,11 +468,11 @@ function CorrectableRow({
               Cancel
             </button>
           </div>
-        ) : (
+        ) : canEdit ? (
           <button onClick={() => setEditing(true)} className="text-amber-500 hover:underline">
             Edit
           </button>
-        )}
+        ) : null}
       </td>
     </tr>
   );
@@ -487,6 +489,7 @@ function CorrectableTambahanRow({
   quantity: number;
   onSaved: () => void;
 }) {
+  const canEdit = useCan()("locationStock.editOutboundWh");
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(quantity.toString());
   const [saving, setSaving] = useState(false);
@@ -546,11 +549,11 @@ function CorrectableTambahanRow({
               Cancel
             </button>
           </div>
-        ) : (
+        ) : canEdit ? (
           <button onClick={() => setEditing(true)} className="text-zinc-500 hover:text-zinc-300">
             Edit
           </button>
-        )}
+        ) : null}
         {error && <div className="text-red-400 mt-0.5">{error}</div>}
       </td>
     </tr>
