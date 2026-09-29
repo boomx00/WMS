@@ -14,9 +14,9 @@ type SalesOrderShipped = {
   salesOrderId: number;
   soNumber: string;
   orderDate: string;
-  firstShippedAt: string;
-  lastShippedAt: string;
-  durationMs: number;
+  truckEnterTime: string | null;
+  truckLeaveTime: string | null;
+  durationMs: number | null;
   totalQuantity: number;
   skuCount: number;
   lines: LineItem[];
@@ -39,10 +39,11 @@ function defaultRange() {
   return { start: toLocal(start), end: toLocal(end) };
 }
 
-// "Time needed" is the span between an order's first and last SHIP event —
-// how long it took to fully ship it out, not related to orderDate.
-function formatDuration(ms: number): string {
-  if (ms <= 0) return "—";
+// "Time needed" is how long the truck was actually at the dock —
+// truck_leave_time minus truck_enter_time. "—" if either end isn't
+// logged yet, or the recorded span is zero/negative.
+function formatDuration(ms: number | null): string {
+  if (ms == null || ms <= 0) return "—";
   const totalMinutes = Math.round(ms / 60000);
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
@@ -100,8 +101,9 @@ export default function SalesOrdersShippedPanel() {
     <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
       <h2 className="text-sm font-medium mb-1">Sales Orders Shipped</h2>
       <p className="text-xs text-zinc-500 mb-4">
-        Which sales orders actually shipped out the door in a date range,
-        and what left against each one — SHIP events grouped by SO number.
+        Sales orders whose truck entered in a date range, and what left
+        against each one — filtered by truck enter/leave time, not by when
+        individual SHIP events were logged.
       </p>
 
       <div className="flex items-end gap-3 mb-6 flex-wrap">
@@ -136,7 +138,7 @@ export default function SalesOrdersShippedPanel() {
 
       {data &&
         (data.salesOrders.length === 0 ? (
-          <p className="text-sm text-zinc-600">No sales orders shipped in this range.</p>
+          <p className="text-sm text-zinc-600">No sales orders' trucks entered in this range.</p>
         ) : (
           <div>
             <div className="flex gap-6 mb-5">
@@ -162,8 +164,8 @@ export default function SalesOrdersShippedPanel() {
                   <tr className="bg-zinc-900/60 text-left text-xs text-zinc-500">
                     <th className="px-3 py-2 font-medium">SO Number</th>
                     <th className="px-3 py-2 font-medium">Order Date</th>
-                    <th className="px-3 py-2 font-medium">Start (First Shipped)</th>
-                    <th className="px-3 py-2 font-medium">Last Shipped</th>
+                    <th className="px-3 py-2 font-medium">Start (Truck Enter)</th>
+                    <th className="px-3 py-2 font-medium">Truck Leave</th>
                     <th className="px-3 py-2 font-medium">Time Needed</th>
                     <th className="px-3 py-2 font-medium">SKUs</th>
                     <th className="px-3 py-2 font-medium">Total Units</th>
@@ -181,8 +183,12 @@ export default function SalesOrdersShippedPanel() {
                         >
                           <td className="px-3 py-2 font-mono">{so.soNumber}</td>
                           <td className="px-3 py-2 text-zinc-400">{formatDateTime24(so.orderDate)}</td>
-                          <td className="px-3 py-2 text-zinc-400">{formatDateTime24(so.firstShippedAt)}</td>
-                          <td className="px-3 py-2 text-zinc-400">{formatDateTime24(so.lastShippedAt)}</td>
+                          <td className="px-3 py-2 text-zinc-400">
+                            {so.truckEnterTime ? formatDateTime24(so.truckEnterTime) : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-zinc-400">
+                            {so.truckLeaveTime ? formatDateTime24(so.truckLeaveTime) : "—"}
+                          </td>
                           <td className="px-3 py-2 text-zinc-400 font-mono">{formatDuration(so.durationMs)}</td>
                           <td className="px-3 py-2 text-zinc-400">{so.skuCount}</td>
                           <td className="px-3 py-2 font-mono text-amber-500">

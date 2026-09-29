@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locationStockEvents, items, salesOrders } from "@/db/schema";
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, isNotNull, inArray } from "drizzle-orm";
 
 // GET /api/analytics/sales-orders-shipped?start=...&end=...
 //
-// Which sales orders actually shipped out the door in a date range, and
-// what left against each — i.e. location_stock_events rows with
-// type "SHIP" that have a salesOrderId, grouped by SO. Distinct from
-// /api/analytics/shipped-products, which groups the same underlying SHIP
-// events by product instead of by order.
+// Which sales orders were performed in a date range, and what left against
+// each one. "Performed in the range" is driven by the SO's own
+// truck_enter_time / truck_leave_time fields — not by SHIP event
+// timestamps — since those are the fields that actually record when the
+// order was worked (truck at the dock), independent of when individual
+// SHIP events happen to have been logged.
 export async function GET(req: NextRequest) {
   const startParam = req.nextUrl.searchParams.get("start");
   const endParam = req.nextUrl.searchParams.get("end");
@@ -24,27 +25,46 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid date format" }, { status: 400 });
   }
 
+  // truckEnterTime/truckLeaveTime are stored as plain (timezone-less)
+  // strings, so compare against ISO strings rather than Date objects —
+  // matches how the column is declared ({ mode: "string" }).
+  const startIso = start.toISOString();
+  const endIso = end.toISOString();
+
+  const orders = await db
+    .select({
+      id: salesOrders.id,
+      soNumber: salesOrders.soNumber,
+      orderDate: salesOrders.orderDate,
+      truckEnterTime: salesOrders.truckEnterTime,
+      truckLeaveTime: salesOrders.truckLeaveTime,
+    })
+    .from(salesOrders)
+    .where(
+      and(
+        isNotNull(salesOrders.truckEnterTime),
+        gte(salesOrders.truckEnterTime, startIso),
+        lte(salesOrders.truckEnterTime, endIso)
+      )
+    );
+
+  if (orders.length === 0) {
+    return NextResponse.json({ totalSalesOrders: 0, totalUnits: 0, totalSkus: 0, salesOrders: [] });
+  }
+
+  const orderIds = orders.map((o) => o.id);
+
   const shipEvents = await db
     .select({
       salesOrderId: locationStockEvents.salesOrderId,
-      soNumber: salesOrders.soNumber,
-      orderDate: salesOrders.orderDate,
       itemId: locationStockEvents.itemId,
       itemSku: items.sku,
       itemName: items.name,
       quantity: locationStockEvents.quantity,
-      createdAt: locationStockEvents.createdAt,
     })
     .from(locationStockEvents)
     .innerJoin(items, eq(locationStockEvents.itemId, items.id))
-    .innerJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
-    .where(
-      and(
-        eq(locationStockEvents.type, "SHIP"),
-        gte(locationStockEvents.createdAt, start),
-        lte(locationStockEvents.createdAt, end)
-      )
-    );
+    .where(and(eq(locationStockEvents.type, "SHIP"), inArray(locationStockEvents.salesOrderId, orderIds)));
 
   type LineItem = {
     itemId: number;
@@ -52,64 +72,48 @@ export async function GET(req: NextRequest) {
     itemName: string;
     quantity: number;
   };
-  type OrderGroup = {
-    salesOrderId: number;
-    soNumber: string;
-    orderDate: Date;
-    firstShippedAt: Date;
-    lastShippedAt: Date;
-    totalQuantity: number;
-    lines: Map<number, LineItem>;
-  };
 
-  const byOrder = new Map<number, OrderGroup>();
-
+  const linesByOrder = new Map<number, Map<number, LineItem>>();
   for (const ev of shipEvents) {
     if (ev.salesOrderId == null) continue;
-
-    let order = byOrder.get(ev.salesOrderId);
-    if (!order) {
-      order = {
-        salesOrderId: ev.salesOrderId,
-        soNumber: ev.soNumber,
-        orderDate: ev.orderDate,
-        firstShippedAt: ev.createdAt,
-        lastShippedAt: ev.createdAt,
-        totalQuantity: 0,
-        lines: new Map(),
-      };
-      byOrder.set(ev.salesOrderId, order);
-    }
-
+    if (!linesByOrder.has(ev.salesOrderId)) linesByOrder.set(ev.salesOrderId, new Map());
+    const lines = linesByOrder.get(ev.salesOrderId)!;
     const qty = Math.abs(ev.quantity);
-    order.totalQuantity += qty;
-    if (ev.createdAt < order.firstShippedAt) order.firstShippedAt = ev.createdAt;
-    if (ev.createdAt > order.lastShippedAt) order.lastShippedAt = ev.createdAt;
-
-    let line = order.lines.get(ev.itemId);
+    let line = lines.get(ev.itemId);
     if (!line) {
       line = { itemId: ev.itemId, itemSku: ev.itemSku, itemName: ev.itemName, quantity: 0 };
-      order.lines.set(ev.itemId, line);
+      lines.set(ev.itemId, line);
     }
     line.quantity += qty;
   }
 
-  const salesOrdersOut = Array.from(byOrder.values())
-    .map((o) => ({
-      salesOrderId: o.salesOrderId,
-      soNumber: o.soNumber,
-      orderDate: o.orderDate,
-      firstShippedAt: o.firstShippedAt,
-      lastShippedAt: o.lastShippedAt,
-      // Wall-clock span between the first and last SHIP event logged
-      // against this order — how long it took to fully ship it, not to
-      // be confused with orderDate (when the SO was created).
-      durationMs: o.lastShippedAt.getTime() - o.firstShippedAt.getTime(),
-      totalQuantity: o.totalQuantity,
-      skuCount: o.lines.size,
-      lines: Array.from(o.lines.values()).sort((a, b) => a.itemSku.localeCompare(b.itemSku)),
-    }))
-    .sort((a, b) => b.lastShippedAt.getTime() - a.lastShippedAt.getTime());
+  const salesOrdersOut = orders
+    .map((o) => {
+      const lines = Array.from(linesByOrder.get(o.id)?.values() ?? []).sort((a, b) =>
+        a.itemSku.localeCompare(b.itemSku)
+      );
+      const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
+
+      // Time needed = how long the truck was actually at the dock. Only
+      // computable once both ends are logged; still shown (as "—" for
+      // duration) if truck_leave_time hasn't been recorded yet.
+      const enterMs = o.truckEnterTime ? new Date(o.truckEnterTime).getTime() : null;
+      const leaveMs = o.truckLeaveTime ? new Date(o.truckLeaveTime).getTime() : null;
+      const durationMs = enterMs != null && leaveMs != null ? leaveMs - enterMs : null;
+
+      return {
+        salesOrderId: o.id,
+        soNumber: o.soNumber,
+        orderDate: o.orderDate,
+        truckEnterTime: o.truckEnterTime,
+        truckLeaveTime: o.truckLeaveTime,
+        durationMs,
+        totalQuantity,
+        skuCount: lines.length,
+        lines,
+      };
+    })
+    .sort((a, b) => new Date(b.truckEnterTime!).getTime() - new Date(a.truckEnterTime!).getTime());
 
   const totalUnits = salesOrdersOut.reduce((sum, o) => sum + o.totalQuantity, 0);
   const totalSkus = new Set(shipEvents.map((e) => e.itemId)).size;
