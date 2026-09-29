@@ -14,7 +14,9 @@ type SalesOrderShipped = {
   salesOrderId: number;
   soNumber: string;
   orderDate: string;
+  firstShippedAt: string;
   lastShippedAt: string;
+  durationMs: number;
   totalQuantity: number;
   skuCount: number;
   lines: LineItem[];
@@ -35,6 +37,22 @@ function defaultRange() {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
   return { start: toLocal(start), end: toLocal(end) };
+}
+
+// "Time needed" is the span between an order's first and last SHIP event —
+// how long it took to fully ship it out, not related to orderDate.
+function formatDuration(ms: number): string {
+  if (ms <= 0) return "—";
+  const totalMinutes = Math.round(ms / 60000);
+  const days = Math.floor(totalMinutes / (60 * 24));
+  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+  const minutes = totalMinutes % 60;
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`);
+  return parts.join(" ");
 }
 
 export default function SalesOrdersShippedPanel() {
@@ -144,7 +162,9 @@ export default function SalesOrdersShippedPanel() {
                   <tr className="bg-zinc-900/60 text-left text-xs text-zinc-500">
                     <th className="px-3 py-2 font-medium">SO Number</th>
                     <th className="px-3 py-2 font-medium">Order Date</th>
+                    <th className="px-3 py-2 font-medium">Start (First Shipped)</th>
                     <th className="px-3 py-2 font-medium">Last Shipped</th>
+                    <th className="px-3 py-2 font-medium">Time Needed</th>
                     <th className="px-3 py-2 font-medium">SKUs</th>
                     <th className="px-3 py-2 font-medium">Total Units</th>
                     <th className="px-3 py-2 font-medium"></th>
@@ -161,7 +181,9 @@ export default function SalesOrdersShippedPanel() {
                         >
                           <td className="px-3 py-2 font-mono">{so.soNumber}</td>
                           <td className="px-3 py-2 text-zinc-400">{formatDateTime24(so.orderDate)}</td>
+                          <td className="px-3 py-2 text-zinc-400">{formatDateTime24(so.firstShippedAt)}</td>
                           <td className="px-3 py-2 text-zinc-400">{formatDateTime24(so.lastShippedAt)}</td>
+                          <td className="px-3 py-2 text-zinc-400 font-mono">{formatDuration(so.durationMs)}</td>
                           <td className="px-3 py-2 text-zinc-400">{so.skuCount}</td>
                           <td className="px-3 py-2 font-mono text-amber-500">
                             {so.totalQuantity.toLocaleString()}
@@ -172,7 +194,7 @@ export default function SalesOrdersShippedPanel() {
                         </tr>
                         {isOpen && (
                           <tr className="border-t border-zinc-800/60">
-                            <td colSpan={6} className="px-3 py-3 bg-zinc-950/40">
+                            <td colSpan={8} className="px-3 py-3 bg-zinc-950/40">
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-left text-zinc-500">

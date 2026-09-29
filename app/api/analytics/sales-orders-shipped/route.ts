@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
     salesOrderId: number;
     soNumber: string;
     orderDate: Date;
+    firstShippedAt: Date;
     lastShippedAt: Date;
     totalQuantity: number;
     lines: Map<number, LineItem>;
@@ -72,6 +73,7 @@ export async function GET(req: NextRequest) {
         salesOrderId: ev.salesOrderId,
         soNumber: ev.soNumber,
         orderDate: ev.orderDate,
+        firstShippedAt: ev.createdAt,
         lastShippedAt: ev.createdAt,
         totalQuantity: 0,
         lines: new Map(),
@@ -81,6 +83,7 @@ export async function GET(req: NextRequest) {
 
     const qty = Math.abs(ev.quantity);
     order.totalQuantity += qty;
+    if (ev.createdAt < order.firstShippedAt) order.firstShippedAt = ev.createdAt;
     if (ev.createdAt > order.lastShippedAt) order.lastShippedAt = ev.createdAt;
 
     let line = order.lines.get(ev.itemId);
@@ -96,7 +99,12 @@ export async function GET(req: NextRequest) {
       salesOrderId: o.salesOrderId,
       soNumber: o.soNumber,
       orderDate: o.orderDate,
+      firstShippedAt: o.firstShippedAt,
       lastShippedAt: o.lastShippedAt,
+      // Wall-clock span between the first and last SHIP event logged
+      // against this order — how long it took to fully ship it, not to
+      // be confused with orderDate (when the SO was created).
+      durationMs: o.lastShippedAt.getTime() - o.firstShippedAt.getTime(),
       totalQuantity: o.totalQuantity,
       skuCount: o.lines.size,
       lines: Array.from(o.lines.values()).sort((a, b) => a.itemSku.localeCompare(b.itemSku)),
