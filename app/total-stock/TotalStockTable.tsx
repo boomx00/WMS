@@ -298,7 +298,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
         </table>
       </div>
 
-      {ledgerSku && <LedgerModal sku={ledgerSku} onClose={() => setLedgerSku(null)} />}
-    </div>
+      {ledgerSku && <LedgerModal key={ledgerSku} sku={ledgerSku} onClose={() => setLedgerSku(null)} />}
+            </div>
   );
 }
