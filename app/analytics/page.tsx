@@ -1,6 +1,7 @@
 import InboundByPersonChart from "./InboundByPersonChart";
 import DriverActivityPanel from "./DriverActivityPanel";
 import ShippedProductsPanel from "./ShippedProductsPanel";
+import SalesOrdersShippedPanel from "./SalesOrdersShippedPanel";
 
 export default function AnalyticsPage() {
   return (
@@ -13,9 +14,10 @@ export default function AnalyticsPage() {
       </header>
 
       <div className="space-y-8">
-        {/* Not wrapped in max-w-4xl — its expanded detail view uses the
+        {/* Not wrapped in max-w-4xl — their expanded detail views use the
             full width of the main content area (up to the sidebar). */}
         <DriverActivityPanel />
+        <SalesOrdersShippedPanel />
 
         <div className="max-w-4xl space-y-8">
           <ShippedProductsPanel />
