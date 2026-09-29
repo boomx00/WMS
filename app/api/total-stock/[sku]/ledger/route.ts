@@ -8,7 +8,6 @@ import {
   users,
   salesOrders,
   tambahanOrders,
-  itemLedgerAnchors,
 } from "@/db/schema";
 import { eq, and, gte, lt, sql, asc } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -17,6 +16,15 @@ export const dynamic = "force-dynamic";
 
 const sourceLoc = alias(locations, "source_loc");
 const destLoc = alias(locations, "dest_loc");
+
+// Fixed ledger start — every SKU's ledger is shown from this same date
+// forward, not from whenever it happened to first be viewed. The opening
+// balance for this date is computed backward from the live location_stock
+// total (same backward-anchored technique as lib/finalStock.ts): start
+// from what's true right now and subtract the net effect of everything
+// that happened on or after this date, rather than assuming a starting
+// balance we don't actually have a snapshot for.
+const LEDGER_START_AT = new Date("2026-09-21T00:00:00.000Z");
 
 function parseDateParam(raw: string | null): Date | null {
   if (!raw) return null;
@@ -28,15 +36,16 @@ function formatUtcDateTime(d: Date): string {
   return d.toISOString().slice(0, 16).replace("T", " ");
 }
 
+// Same total-effect rule used throughout: dest-only = entering (+quantity),
+// source-only = leaving (-quantity), both or neither = no net change.
+function totalDelta(hasSource: boolean, hasDest: boolean, quantity: number): number {
+  if (hasSource && hasDest) return 0;
+  if (hasDest) return quantity;
+  if (hasSource) return -quantity;
+  return 0;
+}
+
 // GET /api/total-stock/:sku/ledger?from=YYYY-MM-DD&to=YYYY-MM-DD
-//
-// Per-SKU movement ledger for the Total Stock page's Details modal.
-// Deliberately does NOT reconstruct history from before this ledger
-// existed: the first time this is called for a given item, it stamps an
-// "opening balance" anchor (current total quantity, right now) in
-// item_ledger_anchors. `from`/`to` only narrow which slice of the ledger
-// is *displayed* — they never move the anchor. A `from` earlier than the
-// anchor is clamped to it (`truncated: true` in the response).
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ sku: string }> }
@@ -51,38 +60,15 @@ export async function GET(
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
 
-  let [anchor] = await db
-    .select()
-    .from(itemLedgerAnchors)
-    .where(eq(itemLedgerAnchors.itemId, item.id));
+  const [totalRow] = await db
+    .select({ total: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::int` })
+    .from(locationStock)
+    .where(eq(locationStock.itemId, item.id));
+  const liveTotal = totalRow?.total ?? 0;
 
-  if (!anchor) {
-    const [totalRow] = await db
-      .select({ total: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::int` })
-      .from(locationStock)
-      .where(eq(locationStock.itemId, item.id));
-
-    await db
-      .insert(itemLedgerAnchors)
-      .values({ itemId: item.id, openingQuantity: totalRow?.total ?? 0 })
-      .onConflictDoNothing({ target: itemLedgerAnchors.itemId });
-
-    [anchor] = await db
-      .select()
-      .from(itemLedgerAnchors)
-      .where(eq(itemLedgerAnchors.itemId, item.id));
-  }
-
-  const [{ openingAtFormatted }] = await db
-    .select({
-      openingAtFormatted: sql<string>`to_char(${itemLedgerAnchors.openingAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI')`,
-    })
-    .from(itemLedgerAnchors)
-    .where(eq(itemLedgerAnchors.itemId, item.id));
-
-  const truncated = Boolean(fromParam && fromParam < anchor.openingAt);
-  const effectiveFrom = fromParam && fromParam > anchor.openingAt ? fromParam : anchor.openingAt;
-
+  // Every event for this item from the fixed start date onward — needed
+  // both to walk the display range forward and to back out the opening
+  // balance at LEDGER_START_AT from the live total above.
   const events = await db
     .select({
       id: locationStockEvents.id,
@@ -105,18 +91,25 @@ export async function GET(
     .where(
       and(
         eq(locationStockEvents.itemId, item.id),
-        gte(locationStockEvents.createdAt, anchor.openingAt),
-        toExclusive ? lt(locationStockEvents.createdAt, toExclusive) : undefined
+        gte(locationStockEvents.createdAt, LEDGER_START_AT)
       )
     )
     .orderBy(asc(locationStockEvents.createdAt), asc(locationStockEvents.id));
 
-  // Same total-effect rule as before: dest-only = entering (+quantity),
-  // source-only = leaving (-quantity), both or neither = no net change.
-  // Events before effectiveFrom still walk the running balance forward,
-  // they just fold into the opening balance instead of being listed.
-  let running = anchor.openingQuantity;
-  let openingBalance = anchor.openingQuantity;
+  // Back out the balance at LEDGER_START_AT by subtracting every event's
+  // total-effect from the live number — equivalent to summing forward
+  // from that date, but doesn't need a stored starting snapshot.
+  const netSinceStart = events.reduce(
+    (sum, ev) => sum + totalDelta(ev.sourceCode != null, ev.destinationCode != null, ev.quantity),
+    0
+  );
+  const startBalance = liveTotal - netSinceStart;
+
+  const truncated = Boolean(fromParam && fromParam < LEDGER_START_AT);
+  const effectiveFrom = fromParam && fromParam > LEDGER_START_AT ? fromParam : LEDGER_START_AT;
+
+  let running = startBalance;
+  let openingBalance = startBalance;
   const entries: {
     id: number;
     type: string;
@@ -132,14 +125,12 @@ export async function GET(
   }[] = [];
 
   for (const ev of events) {
-    const hasSource = ev.sourceCode != null;
-    const hasDest = ev.destinationCode != null;
-    const delta = hasSource && hasDest ? 0 : hasDest ? ev.quantity : hasSource ? -ev.quantity : 0;
+    const delta = totalDelta(ev.sourceCode != null, ev.destinationCode != null, ev.quantity);
     running += delta;
 
     if (ev.createdAtRaw < effectiveFrom) {
       openingBalance = running;
-    } else {
+    } else if (!toExclusive || ev.createdAtRaw < toExclusive) {
       const { createdAtRaw, ...rest } = ev;
       entries.push({ ...rest, delta, runningTotal: running });
     }
@@ -148,10 +139,10 @@ export async function GET(
   return NextResponse.json({
     sku: item.sku,
     name: item.name,
-    anchorOpeningQuantity: anchor.openingQuantity,
-    anchorOpeningAt: openingAtFormatted,
+    anchorOpeningQuantity: startBalance,
+    anchorOpeningAt: formatUtcDateTime(LEDGER_START_AT),
     truncated,
-    rangeFrom: fromParam ? formatUtcDateTime(effectiveFrom) : openingAtFormatted,
+    rangeFrom: formatUtcDateTime(effectiveFrom),
     rangeTo: toParam ? formatUtcDateTime(toParam) : null,
     openingBalance,
     closingBalance: running,
