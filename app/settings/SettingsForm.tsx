@@ -14,6 +14,8 @@ export default function SettingsForm({
     allowDefaultPicking: boolean;
     allowNegativeFloorStock: boolean;
     allowNegativeRackStock: boolean;
+    ledgerStartAt: string; // ISO, UTC
+    ledgerStartIsDefault: boolean;
   };
 }) {
   const [activeTab, setActiveTab] = useState<"general" | "translations">("general");
@@ -54,6 +56,11 @@ export default function SettingsForm({
         <PageLabelsSettings />
       ) : (
         <div className="space-y-4">
+          <LedgerStartSetting
+            initialIso={initial.ledgerStartAt}
+            initialIsDefault={initial.ledgerStartIsDefault}
+          />
+
           <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
@@ -272,6 +279,112 @@ export default function SettingsForm({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// The ledger start is stored in UTC but entered/shown in WIB (UTC+7), the
+// same way the old hard-coded LEDGER_START_AT was described.
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function isoToWibInput(iso: string): string {
+  return new Date(new Date(iso).getTime() + WIB_OFFSET_MS).toISOString().slice(0, 16);
+}
+
+function wibInputToIso(value: string): string | null {
+  const d = new Date(`${value}:00.000+07:00`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function LedgerStartSetting({
+  initialIso,
+  initialIsDefault,
+}: {
+  initialIso: string;
+  initialIsDefault: boolean;
+}) {
+  const [savedIso, setSavedIso] = useState(initialIso);
+  const [isDefault, setIsDefault] = useState(initialIsDefault);
+  const [value, setValue] = useState(isoToWibInput(initialIso));
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const dirty = value !== isoToWibInput(savedIso);
+
+  async function save(ledgerStartAt: string | null) {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ledgerStartAt }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      const nextIso = new Date(data.ledgerStartAt).toISOString();
+      setSavedIso(nextIso);
+      setValue(isoToWibInput(nextIso));
+      setIsDefault(ledgerStartAt === null);
+      setMessage({ kind: "ok", text: "Saved" });
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : "Failed to save" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleSave() {
+    const iso = wibInputToIso(value);
+    if (!iso) {
+      setMessage({ kind: "error", text: "Pick a valid date and time" });
+      return;
+    }
+    save(iso);
+  }
+
+  return (
+    <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+      <div className="text-sm font-medium">Ledger start</div>
+      <p className="text-xs text-zinc-500 mt-1 max-w-sm">
+        Total Stock ledgers (per SKU and per location) begin at this moment,
+        with an opening balance computed back from live stock. Events before
+        it are not shown. Time is WIB (UTC+7).
+        {isDefault && " Currently using the built-in default."}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2 mt-4">
+        <input
+          type="datetime-local"
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setMessage(null);
+          }}
+          className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 [color-scheme:dark]"
+        />
+        <button
+          onClick={handleSave}
+          disabled={saving || !dirty || !value}
+          className="px-3 py-1.5 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium disabled:opacity-40"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        {!isDefault && (
+          <button
+            onClick={() => save(null)}
+            disabled={saving}
+            className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-400 hover:text-zinc-100 disabled:opacity-40"
+          >
+            Reset to default
+          </button>
+        )}
+        {message && (
+          <span className={`text-xs ${message.kind === "ok" ? "text-emerald-400" : "text-red-400"}`}>
+            {message.text}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

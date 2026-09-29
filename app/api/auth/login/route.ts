@@ -4,11 +4,13 @@ import { users, roles } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { signSession } from "@/lib/auth";
+import { getPageAccess } from "@/lib/pagePermissions";
+import { firstAllowedPath } from "@/lib/pages";
 
 // POST /api/auth/login
 // body: { username, password, client? }
-// client: "web" → only Admin accounts may sign in (web app is admin-only).
-// Anything else (e.g. the PDA app) keeps the existing behaviour.
+// client: "web" → Admin, or a role with at least one page granted on
+// /permissions. Anything else (e.g. the PDA app) keeps the existing behaviour.
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { username, password, client } = body;
@@ -40,11 +42,16 @@ export async function POST(req: NextRequest) {
 
   // Checked after the password so we don't reveal which usernames exist
   // or what role they have to someone who doesn't know the password.
-  if (client === "web" && roleName.toLowerCase() !== "admin") {
-    return NextResponse.json(
-      { error: "Web access is limited to administrators. Please use the PDA." },
-      { status: 403 }
-    );
+  let homePath: string | null = null;
+  if (client === "web") {
+    const access = await getPageAccess(user.id);
+    homePath = access ? firstAllowedPath(access) : null;
+    if (!homePath) {
+      return NextResponse.json(
+        { error: "Your role has no web access. Please use the PDA." },
+        { status: 403 }
+      );
+    }
   }
 
   const token = await signSession({
@@ -58,6 +65,8 @@ export async function POST(req: NextRequest) {
     id: user.id,
     username: user.username,
     roleId: user.roleId,
+    // Web only, so the PDA's login response stays exactly as before.
+    ...(homePath ? { homePath } : {}),
   });
 
   response.cookies.set("session", token, {

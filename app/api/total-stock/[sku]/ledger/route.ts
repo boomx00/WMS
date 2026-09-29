@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { items, locationStock, locationStockEvents, locations, users, salesOrders, tambahanOrders } from "@/db/schema";
 import { eq, and, gte, asc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { LEDGER_START_AT, parseDateParam, formatUtcDateTime, totalDelta } from "@/lib/ledger";
+import { getLedgerStartAt, parseDateParam, formatUtcDateTime, totalDelta } from "@/lib/ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,7 @@ export async function GET(
   const fromParam = parseDateParam(req.nextUrl.searchParams.get("from"));
   const toParam = parseDateParam(req.nextUrl.searchParams.get("to"));
   const toExclusive = toParam ? new Date(toParam.getTime() + 24 * 60 * 60 * 1000) : null;
+  const ledgerStartAt = await getLedgerStartAt();
 
   const [item] = await db.select().from(items).where(eq(items.sku, sku));
   if (!item) {
@@ -50,7 +51,7 @@ export async function GET(
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
     .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
-    .where(and(eq(locationStockEvents.itemId, item.id), gte(locationStockEvents.createdAt, LEDGER_START_AT)))
+    .where(and(eq(locationStockEvents.itemId, item.id), gte(locationStockEvents.createdAt, ledgerStartAt)))
     .orderBy(asc(locationStockEvents.createdAt), asc(locationStockEvents.id));
 
   const netSinceStart = events.reduce(
@@ -59,8 +60,8 @@ export async function GET(
   );
   const startBalance = liveTotal - netSinceStart;
 
-  const truncated = Boolean(fromParam && fromParam < LEDGER_START_AT);
-  const effectiveFrom = fromParam && fromParam > LEDGER_START_AT ? fromParam : LEDGER_START_AT;
+  const truncated = Boolean(fromParam && fromParam < ledgerStartAt);
+  const effectiveFrom = fromParam && fromParam > ledgerStartAt ? fromParam : ledgerStartAt;
 
   let running = startBalance;
   let openingBalance = startBalance;
@@ -94,7 +95,7 @@ export async function GET(
     sku: item.sku,
     name: item.name,
     anchorOpeningQuantity: startBalance,
-    anchorOpeningAt: formatUtcDateTime(LEDGER_START_AT),
+    anchorOpeningAt: formatUtcDateTime(ledgerStartAt),
     truncated,
     rangeFrom: formatUtcDateTime(effectiveFrom),
     rangeTo: toParam ? formatUtcDateTime(toParam) : null,

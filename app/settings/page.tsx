@@ -1,21 +1,24 @@
 import { db } from "@/lib/db";
 import { settings } from "@/db/schema";
+import { DEFAULT_LEDGER_START_AT } from "@/lib/ledger";
 import SettingsForm from "./SettingsForm";
 
 export const dynamic = "force-dynamic";
 
 async function getSettings() {
   const [row] = await db.select().from(settings).limit(1);
-  return (
-    row ?? {
-      id: 0,
-      allowDefaultCodeTransactions: true,
-      automaticInbound: false,
-      automaticInboundFromRack: false,
-      allowUntrackedOutbound: false,
-      allowDefaultPicking: true,
-    }
-  );
+  return {
+    allowDefaultCodeTransactions: row?.allowDefaultCodeTransactions ?? true,
+    automaticInbound: row?.automaticInbound ?? false,
+    automaticInboundFromRack: row?.automaticInboundFromRack ?? false,
+    allowUntrackedOutbound: row?.allowUntrackedOutbound ?? false,
+    allowDefaultPicking: row?.allowDefaultPicking ?? true,
+    allowNegativeFloorStock: row?.allowNegativeFloorStock ?? false,
+    allowNegativeRackStock: row?.allowNegativeRackStock ?? false,
+    // Passed as an ISO string so the client component gets a plain value.
+    ledgerStartAt: (row?.ledgerStartAt ?? DEFAULT_LEDGER_START_AT).toISOString(),
+    ledgerStartIsDefault: !row?.ledgerStartAt,
+  };
 }
 
 export default async function SettingsPage() {

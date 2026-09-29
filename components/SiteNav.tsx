@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useLanguage } from "@/lib/LanguageContext";
 import { LANGUAGE_OPTIONS } from "@/lib/pageLabels";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
+import { canAccessPath, type PageAccess } from "@/lib/pages";
 
 // const navItems = [
 //   { href: "/", label: "Inventory" },
@@ -42,9 +43,17 @@ const adminItems = [
   { href: "/locations", label: "Locations" },
   { href: "/users", label: "Users" },
   { href: "/roles", label: "Roles" },
+  { href: "/permissions", label: "Permissions" },
 ];
 
-export default function SiteNav({ username }: { username: string | null }) {
+export default function SiteNav({
+  username,
+  access,
+}: {
+  username: string | null;
+  // null when logged out (login page) — nothing to filter then.
+  access: PageAccess | null;
+}) {
   const [open, setOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const { language, setLanguage } = useLanguage();
@@ -68,6 +77,10 @@ export default function SiteNav({ username }: { username: string | null }) {
     {key: "Other_Transactions", href: "/other-transactions", label: labels.other_transactions },
     {key: "Settings", label: labels.settings, href:"/settings"},
   ]
+
+  const visibleNavItems = navItem.filter((item) => !access || canAccessPath(item.href, access))
+
+  const visibleAdminItems = adminItems.filter((item) => !access || canAccessPath(item.href, access))
 
   return (
     <>
@@ -100,7 +113,7 @@ export default function SiteNav({ username }: { username: string | null }) {
 
         <nav className="flex-1 px-3 py-4 space-y-1">
           {/* Main navigation */}
-          {navItem.map((item) => (
+          {visibleNavItems.map((item) => (
             <a
               key={item.key}
               href={item.href}
@@ -110,7 +123,8 @@ export default function SiteNav({ username }: { username: string | null }) {
             </a>
           ))}
 
-          {/* Administration dropdown */}
+          {/* Administration dropdown — hidden if the role can't open any of it */}
+          {visibleAdminItems.length > 0 && (
           <div>
             <button
               onClick={() => setAdminOpen((prev) => !prev)}
@@ -138,7 +152,7 @@ export default function SiteNav({ username }: { username: string | null }) {
 
             {adminOpen && (
               <div className="ml-3 mt-1 space-y-1 border-l border-zinc-800 pl-2">
-                {adminItems.map((item) => (
+                {visibleAdminItems.map((item) => (
                   <a
                     key={item.href}
                     href={item.href}
@@ -150,6 +164,7 @@ export default function SiteNav({ username }: { username: string | null }) {
               </div>
             )}
           </div>
+          )}
         </nav>
 
       <div className="px-5 py-4 border-t border-zinc-800 space-y-3">
@@ -239,7 +254,7 @@ export default function SiteNav({ username }: { username: string | null }) {
         {open && (
           <nav className="border-t border-zinc-800 px-3 py-3 space-y-1 max-h-[calc(100vh-57px)] overflow-y-auto">
             {/* Main navigation */}
-            {navItem.map((item) => (
+            {visibleNavItems.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
@@ -250,7 +265,8 @@ export default function SiteNav({ username }: { username: string | null }) {
               </a>
             ))}
 
-            {/* Administration dropdown */}
+            {/* Administration dropdown — hidden if the role can't open any of it */}
+            {visibleAdminItems.length > 0 && (
             <div>
               <button
                 onClick={() => setAdminOpen((prev) => !prev)}
@@ -278,7 +294,7 @@ export default function SiteNav({ username }: { username: string | null }) {
 
               {adminOpen && (
                 <div className="ml-3 mt-1 space-y-1 border-l border-zinc-800 pl-2">
-                  {adminItems.map((item) => (
+                  {visibleAdminItems.map((item) => (
                     <a
                       key={item.href}
                       href={item.href}
@@ -291,6 +307,7 @@ export default function SiteNav({ username }: { username: string | null }) {
                 </div>
               )}
             </div>
+            )}
           </nav>
         )}
       </div>

@@ -23,13 +23,15 @@ export default function LoginPage() {
 
     setLoading(false);
 
+    const data = await res.json();
+
     if (!res.ok) {
-      const data = await res.json();
       setError(data.error ?? "Login failed");
       return;
     }
 
-    router.push("/");
+    // First page this role is allowed to open ("/" for admin).
+    router.push(data.homePath ?? "/");
     router.refresh();
   }
 

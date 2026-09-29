@@ -1,10 +1,23 @@
 // Shared by both Total Stock ledger endpoints (per-SKU and per-location) so
-// they agree on the same fixed start date and delta rules.
+// they agree on the same start date and delta rules.
+//
+// Server-only: getLedgerStartAt() reads the DB. Don't import this file from
+// client components.
 
-// Every ledger is shown from this same date forward, not from whenever it
-// happened to first be viewed. Sept 21 2026, 00:00 Jakarta/Bangkok time
-// (both UTC+7) = Sept 20 2026, 17:00 UTC.
-export const LEDGER_START_AT = new Date("2026-09-20T17:00:00.000Z");
+import { db } from "@/lib/db";
+import { settings } from "@/db/schema";
+
+// Fallback used when Settings → Ledger start hasn't been set yet.
+// Sept 21 2026, 00:00 Jakarta/Bangkok time (both UTC+7) = Sept 20 2026,
+// 17:00 UTC.
+export const DEFAULT_LEDGER_START_AT = new Date("2026-09-20T17:00:00.000Z");
+
+// Every ledger is shown from this same moment forward, not from whenever it
+// happened to first be viewed. Configurable on the Settings page.
+export async function getLedgerStartAt(): Promise<Date> {
+  const [row] = await db.select({ ledgerStartAt: settings.ledgerStartAt }).from(settings).limit(1);
+  return row?.ledgerStartAt ?? DEFAULT_LEDGER_START_AT;
+}
 
 export function parseDateParam(raw: string | null): Date | null {
   if (!raw) return null;

@@ -4,6 +4,7 @@ import "./globals.css";
 import SiteNav from "@/components/SiteNav";
 import { LanguageProvider } from "@/lib/LanguageContext";
 import { getSession } from "@/lib/auth";
+import { getPageAccess } from "@/lib/pagePermissions";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -20,11 +21,12 @@ export const metadata: Metadata = {
   description: "Warehouse inventory tracking",
   other: {
      "color-scheme":"dark",
-	},
+  },
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const session = await getSession();
+  const access = session ? await getPageAccess(session.userId) : null;
 
   return (
     <html
@@ -37,7 +39,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               the page content. flex-row on desktop: sidebar sits beside it,
               as before. */}
           <div className="min-h-screen flex flex-col md:flex-row">
-            <SiteNav username={session?.username ?? null} />
+            <SiteNav username={session?.username ?? null} access={access} />
             <main className="flex-1 min-w-0">{children}</main>
           </div>
         </LanguageProvider>

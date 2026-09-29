@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { items, locationStock, locationStockEvents, locations, users, salesOrders, tambahanOrders } from "@/db/schema";
 import { eq, and, or, gte, asc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { LEDGER_START_AT, parseDateParam, formatUtcDateTime, locationDelta } from "@/lib/ledger";
+import { getLedgerStartAt, parseDateParam, formatUtcDateTime, locationDelta } from "@/lib/ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
   const fromParam = parseDateParam(req.nextUrl.searchParams.get("from"));
   const toParam = parseDateParam(req.nextUrl.searchParams.get("to"));
   const toExclusive = toParam ? new Date(toParam.getTime() + 24 * 60 * 60 * 1000) : null;
+  const ledgerStartAt = await getLedgerStartAt();
 
   if (!locationCode) {
     return NextResponse.json({ error: "location is required" }, { status: 400 });
@@ -86,7 +87,7 @@ export async function GET(req: NextRequest) {
           eq(locationStockEvents.destinationLocationId, location.id)
         ),
         item ? eq(locationStockEvents.itemId, item.id) : undefined,
-        gte(locationStockEvents.createdAt, LEDGER_START_AT)
+        gte(locationStockEvents.createdAt, ledgerStartAt)
       )
     )
     .orderBy(asc(locationStockEvents.createdAt), asc(locationStockEvents.id));
@@ -97,8 +98,8 @@ export async function GET(req: NextRequest) {
   );
   const startBalance = liveTotal - netSinceStart;
 
-  const truncated = Boolean(fromParam && fromParam < LEDGER_START_AT);
-  const effectiveFrom = fromParam && fromParam > LEDGER_START_AT ? fromParam : LEDGER_START_AT;
+  const truncated = Boolean(fromParam && fromParam < ledgerStartAt);
+  const effectiveFrom = fromParam && fromParam > ledgerStartAt ? fromParam : ledgerStartAt;
 
   let running = startBalance;
   let openingBalance = startBalance;
@@ -151,7 +152,7 @@ export async function GET(req: NextRequest) {
     sku: item?.sku ?? null,
     name: item?.name ?? null,
     anchorOpeningQuantity: startBalance,
-    anchorOpeningAt: formatUtcDateTime(LEDGER_START_AT),
+    anchorOpeningAt: formatUtcDateTime(ledgerStartAt),
     truncated,
     rangeFrom: formatUtcDateTime(effectiveFrom),
     rangeTo: toParam ? formatUtcDateTime(toParam) : null,

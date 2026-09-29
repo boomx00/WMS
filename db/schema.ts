@@ -61,6 +61,30 @@ export const roles = pgTable(
 
 export const rolesRelations = relations(roles, ({ many }) => ({
   users: many(users),
+  pagePermissions: many(rolePagePermissions),
+}));
+
+// Which web pages a (non-admin) role may open. One row = one granted page.
+// Admin always has every page and never needs rows here. `pagePath` must be
+// a grantable path from APP_PAGES in lib/pages.ts.
+export const rolePagePermissions = pgTable(
+  "role_page_permissions",
+  {
+    id: serial("id").primaryKey(),
+    roleId: integer("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    pagePath: text("page_path").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("role_page_permissions_role_page_idx").on(table.roleId, table.pagePath)]
+);
+
+export const rolePagePermissionsRelations = relations(rolePagePermissions, ({ one }) => ({
+  role: one(roles, {
+    fields: [rolePagePermissions.roleId],
+    references: [roles.id],
+  }),
 }));
 
 export const users = pgTable(
@@ -261,6 +285,9 @@ export const settings = pgTable("settings", {
   allowDefaultPicking: boolean("allow_default_picking").notNull().default(true),
   allowNegativeFloorStock: boolean("allow_negative_floor_stock").notNull().default(false),
   allowNegativeRackStock: boolean("allow_negative_rack_stock").notNull().default(false),
+  // Total Stock ledgers are shown from this moment forward. Null = fall back
+  // to DEFAULT_LEDGER_START_AT in lib/ledger.ts. Stored as UTC wall time.
+  ledgerStartAt: timestamp("ledger_start_at"),
 });
 export const itemLedgerAnchors = pgTable(
   "item_ledger_anchors",
