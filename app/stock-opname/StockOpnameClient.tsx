@@ -339,7 +339,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
 
       {open && (
         <div className="px-4 pb-4">
-          {(session.status === "DONE" || session.status === "CONFIRMED") && (
+          {/* {(session.status === "DONE" || session.status === "CONFIRMED") && (
             <div className="mb-4 flex items-center gap-3">
               <button
                 onClick={handleAdjust}
@@ -351,7 +351,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
               {adjustResult && <span className="text-xs text-emerald-400">{adjustResult}</span>}
               {adjustError && <span className="text-xs text-red-400">{adjustError}</span>}
             </div>
-          )}
+          )} */}
 
                     {session.status !== "CONFIRMED" && (
             <div className="mb-4">
@@ -491,14 +491,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                               <span className="text-[10px] text-zinc-600">Manual review</span>
                             )
                           ) : (
-                            <AdjustLineButton
-                              opnameNumber={session.opnameNumber}
-                              locationCode={loc.locationCode}
-                              itemId={item.itemId}
-                              countedQty={item.countedQty}
-                              difference={item.difference}
-                              onAdjusted={refetchReport}
-                            />
+                            <span className="text-[10px] text-zinc-600">Manual review</span>
                           )}
                         </td>
                       </tr>
