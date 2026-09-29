@@ -20,6 +20,25 @@ async function getTotalCount() {
 async function getEventsForPage(page: number) {
   const offset = (page - 1) * PAGE_SIZE;
 
+  // finalStockAtDestinationSql is a pair of correlated subqueries per row,
+  // so it must only ever run against the PAGE_SIZE rows we're actually
+  // returning — not against every row Postgres has to walk past to
+  // satisfy OFFSET. With a plain LIMIT/OFFSET on the full select list,
+  // Postgres evaluates that expensive subquery offset+PAGE_SIZE times
+  // (e.g. ~5000 times for page 100) before discarding everything but the
+  // last 50, which is what was timing out.
+  //
+  // Fix: pick this page's ids first from a lean id-only subquery (fast —
+  // backed by location_stock_events_created_at_id_idx), then join
+  // everything else, including finalStock, onto just those PAGE_SIZE ids.
+  const pageIds = db
+    .select({ id: locationStockEvents.id })
+    .from(locationStockEvents)
+    .orderBy(desc(locationStockEvents.createdAt), desc(locationStockEvents.id))
+    .limit(PAGE_SIZE)
+    .offset(offset)
+    .as("page_ids");
+
   return db
     .select({
       id: locationStockEvents.id,
@@ -38,15 +57,17 @@ async function getEventsForPage(page: number) {
       finalStock: finalStockAtDestinationSql,
     })
     .from(locationStockEvents)
+    .innerJoin(pageIds, eq(locationStockEvents.id, pageIds.id))
     .innerJoin(items, eq(locationStockEvents.itemId, items.id))
     .leftJoin(sourceLoc, eq(locationStockEvents.sourceLocationId, sourceLoc.id))
     .leftJoin(destLoc, eq(locationStockEvents.destinationLocationId, destLoc.id))
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
-        .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
+    .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
-    .orderBy(desc(locationStockEvents.createdAt))
-    .limit(PAGE_SIZE)
-    .offset(offset);
+    // Same tiebreak as pageIds — several events can share the exact same
+    // createdAt (e.g. a tagged/untagged pick pair inserted in one
+    // transaction), so ordering by createdAt alone isn't deterministic.
+    .orderBy(desc(locationStockEvents.createdAt), desc(locationStockEvents.id));
 }
 
 export default async function MovementHistoryV2Page({

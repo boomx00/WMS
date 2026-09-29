@@ -11,8 +11,7 @@ import {
   varchar,
   unique
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
-
+import { relations, desc } from "drizzle-orm";
 // ============================================================
 // Locations
 // ============================================================
@@ -381,6 +380,8 @@ export const locationStockEvents = pgTable(
     index("location_stock_events_item_created_idx").on(table.itemId, table.createdAt),
     index("location_stock_events_source_loc_idx").on(table.sourceLocationId),
     index("location_stock_events_dest_loc_idx").on(table.destinationLocationId),
+        index("location_stock_events_created_at_id_idx").on(desc(table.createdAt), desc(table.id)),
+
   ]
 );
   
