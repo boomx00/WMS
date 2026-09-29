@@ -259,7 +259,18 @@ export const settings = pgTable("settings", {
   allowNegativeFloorStock: boolean("allow_negative_floor_stock").notNull().default(false),
   allowNegativeRackStock: boolean("allow_negative_rack_stock").notNull().default(false),
 });
-
+export const itemLedgerAnchors = pgTable(
+  "item_ledger_anchors",
+  {
+    id: serial("id").primaryKey(),
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => items.id),
+    openingQuantity: integer("opening_quantity").notNull(),
+    openingAt: timestamp("opening_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("item_ledger_anchors_item_idx").on(table.itemId)]
+);
 export const salesOrders = pgTable(
   "sales_orders",
   {

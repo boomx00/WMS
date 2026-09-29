@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
+import LedgerModal from "./LedgerModal";
 
 export type SkuLocation = {
   locationCode: string;
@@ -94,6 +95,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("sku");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [ledgerSku, setLedgerSku] = useState<string | null>(null);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -127,8 +129,6 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
         case "pallets": {
           const pa = palletValue(a.totalQuantity, a.palletCartonQty);
           const pb = palletValue(b.totalQuantity, b.palletCartonQty);
-          // SKUs with no pallet size set always sink to the bottom,
-          // whichever direction is active.
           if (pa === null && pb === null) return 0;
           if (pa === null) return 1;
           if (pb === null) return -1;
@@ -192,12 +192,13 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
               <SortableTh label="Locations" sortKey="locations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Total (cartons)" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Pallets" sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <th className="px-4 py-3 font-medium text-right">Ledger</th>
             </tr>
           </thead>
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
                   {search.trim() ? "No SKUs match your search." : "No stock recorded."}
                 </td>
               </tr>
@@ -240,11 +241,22 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                       <td className="px-4 py-3 text-right font-mono text-zinc-400">
                         {formatPallets(sku.totalQuantity, sku.palletCartonQty)}
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLedgerSku(sku.sku);
+                          }}
+                          className="px-3 py-1.5 rounded-md border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+                        >
+                          Details
+                        </button>
+                      </td>
                     </tr>
 
                     {open && (
                       <tr className="bg-zinc-950/40">
-                        <td colSpan={6} className="pl-12 pr-4 py-3">
+                        <td colSpan={7} className="pl-12 pr-4 py-3">
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="text-zinc-500 text-left">
@@ -257,10 +269,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                             </thead>
                             <tbody>
                               {sku.locations.map((loc) => (
-                                <tr
-                                  key={loc.locationCode}
-                                  className="border-t border-zinc-800/70"
-                                >
+                                <tr key={loc.locationCode} className="border-t border-zinc-800/70">
                                   <td className="py-2 pr-4 font-mono text-zinc-300">
                                     {loc.locationCode}
                                   </td>
@@ -288,6 +297,8 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           </tbody>
         </table>
       </div>
+
+      {ledgerSku && <LedgerModal sku={ledgerSku} onClose={() => setLedgerSku(null)} />}
     </div>
   );
 }
