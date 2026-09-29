@@ -216,22 +216,26 @@ export const palletEventTypeEnum = pgEnum("pallet_event_type", [
   "DEFAULT_OUTBOUND",
   "ADJUSTMENT",
 ]);
-export const palletEvents = pgTable("pallet_events", {
-  id: serial("id").primaryKey(),
-  palletId: integer("pallet_id")
-    .notNull()
-    .references(() => pallets.id),
-  type: palletEventTypeEnum("type").notNull(),
-  locationId: integer("location_id")
-    .notNull()
-    .references(() => locations.id),
-  userId: integer("user_id")
-    .notNull()
-    .references(() => users.id),
-  quantity: integer("quantity").notNull(),
-  salesOrderId: integer("sales_order_id").references(() => salesOrders.id), // nullable — only set for Ship events
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+export const palletEvents = pgTable(
+  "pallet_events",
+  {
+    id: serial("id").primaryKey(),
+    palletId: integer("pallet_id")
+      .notNull()
+      .references(() => pallets.id),
+    type: palletEventTypeEnum("type").notNull(),
+    locationId: integer("location_id")
+      .notNull()
+      .references(() => locations.id),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    quantity: integer("quantity").notNull(),
+    salesOrderId: integer("sales_order_id").references(() => salesOrders.id), // nullable — only set for Ship events
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("pallet_events_sales_order_idx").on(table.salesOrderId)]
+);
 
 export const palletEventsRelations = relations(palletEvents, ({ one }) => ({
   pallet: one(pallets, {
@@ -283,19 +287,23 @@ export const salesOrders = pgTable(
     truckLeaveTime: timestamp("truck_leave_time", { mode: "string" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("sales_orders_so_number_idx").on(table.soNumber)]
+(table) => [uniqueIndex("sales_orders_so_number_idx").on(table.soNumber), index("sales_orders_order_date_idx").on(desc(table.orderDate))]
 );
 
-export const salesOrderItems = pgTable("sales_order_items", {
-  id: serial("id").primaryKey(),
-  salesOrderId: integer("sales_order_id")
-    .notNull()
-    .references(() => salesOrders.id),
-  itemId: integer("item_id")
-    .notNull()
-    .references(() => items.id),
-  quantity: integer("quantity").notNull(),
-});
+export const salesOrderItems = pgTable(
+  "sales_order_items",
+  {
+    id: serial("id").primaryKey(),
+    salesOrderId: integer("sales_order_id")
+      .notNull()
+      .references(() => salesOrders.id),
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => items.id),
+    quantity: integer("quantity").notNull(),
+  },
+  (table) => [index("sales_order_items_sales_order_idx").on(table.salesOrderId)]
+);
 
 export const salesOrdersRelations = relations(salesOrders, ({ many }) => ({
   items: many(salesOrderItems),
@@ -381,6 +389,7 @@ export const locationStockEvents = pgTable(
     index("location_stock_events_source_loc_idx").on(table.sourceLocationId),
     index("location_stock_events_dest_loc_idx").on(table.destinationLocationId),
         index("location_stock_events_created_at_id_idx").on(desc(table.createdAt), desc(table.id)),
+index("location_stock_events_sales_order_idx").on(table.salesOrderId, table.itemId)
 
   ]
 );
@@ -498,7 +507,10 @@ export const tambahanOrders = pgTable(
     createdAt: timestamp("created_at").defaultNow().notNull(),
         convertedSoNumber: text("converted_so_number"), // just the paperwork number — no FK, no separate SO row
   },
-  (table) => [uniqueIndex("tambahan_orders_number_idx").on(table.tambahanNumber)]
+  (table) => [
+    uniqueIndex("tambahan_orders_number_idx").on(table.tambahanNumber),
+    index("tambahan_orders_parent_so_idx").on(table.parentSalesOrderId),
+  ]
 );
 
 export const tambahanOrdersRelations = relations(tambahanOrders, ({ one }) => ({

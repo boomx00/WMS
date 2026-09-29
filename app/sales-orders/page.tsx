@@ -4,7 +4,7 @@ import { eq, inArray, desc, sql, and } from "drizzle-orm";
 import SalesOrdersClient from "./SalesOrdersClient";
 import { getSession } from "@/lib/auth";
 import { users, roles } from "@/db/schema";
-import { getPickedForSoQuantity } from "@/lib/pickedForSo";
+import { getPickedForSoQuantities } from "@/lib/pickedForSo";
 import { tambahanOrders } from "@/db/schema";
 async function getIsAdmin(): Promise<boolean> {
   const session = await getSession();
@@ -39,82 +39,83 @@ async function getSalesOrdersForPage(page: number) {
 
   const orderIds = orders.map((o) => o.id);
 
-const lines = await db
-  .select({
-    salesOrderId: salesOrderItems.salesOrderId,
-    itemId: salesOrderItems.itemId,
-    quantity: salesOrderItems.quantity,
-    itemSku: items.sku,
-    itemName: items.name,
-    palletCartonQty: items.palletCartonQty,
-  })
-  .from(salesOrderItems)
-  .innerJoin(items, eq(salesOrderItems.itemId, items.id))
-  .where(inArray(salesOrderItems.salesOrderId, orderIds));
-
   const { palletEvents, pallets, locationStockEvents, locations, users } = await import("@/db/schema");
 
-  const shippedRows = await db
-    .select({
-      salesOrderId: palletEvents.salesOrderId,
-      itemId: pallets.itemId,
-      shipped: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int`,
-    })
-    .from(palletEvents)
-    .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
-    .where(
-      sql`${palletEvents.type} = 'OUTBOUND' AND ${inArray(palletEvents.salesOrderId, orderIds)}`
-    )
-    .groupBy(palletEvents.salesOrderId, pallets.itemId);
-  const activeTambahanRows = await db
-    .select({ parentSalesOrderId: tambahanOrders.parentSalesOrderId })
-    .from(tambahanOrders)
-    .where(and(inArray(tambahanOrders.parentSalesOrderId, orderIds), eq(tambahanOrders.status, "ACTIVE")));
-  const activeTambahanSet = new Set(activeTambahanRows.map((r) => r.parentSalesOrderId));
-  // Who picked what, from where — one row per (SO, item, location, user).
-  const pickSourceRows = await db
-    .select({
-      salesOrderId: locationStockEvents.salesOrderId,
-      itemId: locationStockEvents.itemId,
-      locationCode: locations.code,
-      type: locationStockEvents.type,
-      username: users.username,
-      quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
-    })
-    .from(locationStockEvents)
-    .innerJoin(locations, eq(locationStockEvents.sourceLocationId, locations.id))
-    .innerJoin(users, eq(locationStockEvents.userId, users.id))
-    .where(
-      sql`${locationStockEvents.type} IN ('PICKING', 'DEFAULT_PICKING') AND ${inArray(locationStockEvents.salesOrderId, orderIds)}`
-    )
-    .groupBy(
-      locationStockEvents.salesOrderId,
-      locationStockEvents.itemId,
-      locations.code,
-      locationStockEvents.type,
-      users.username
-    );
+  // All independent — run in parallel instead of one after another.
+  const [lines, pickedMap, activeTambahanRows, pickSourceRows, shippedByRows] = await Promise.all([
+    db
+      .select({
+        salesOrderId: salesOrderItems.salesOrderId,
+        itemId: salesOrderItems.itemId,
+        quantity: salesOrderItems.quantity,
+        itemSku: items.sku,
+        itemName: items.name,
+        palletCartonQty: items.palletCartonQty,
+      })
+      .from(salesOrderItems)
+      .innerJoin(items, eq(salesOrderItems.itemId, items.id))
+      .where(inArray(salesOrderItems.salesOrderId, orderIds)),
 
-  // Who shipped what, one row per (SO, item, user).
-  const shippedByRows = await db
-    .select({
-      salesOrderId: palletEvents.salesOrderId,
-      itemId: pallets.itemId,
-      username: users.username,
-      quantity: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int`,
-    })
-    .from(palletEvents)
-    .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
-    .innerJoin(users, eq(palletEvents.userId, users.id))
-    .where(
-      sql`${palletEvents.type} = 'OUTBOUND' AND ${inArray(palletEvents.salesOrderId, orderIds)}`
-    )
-    .groupBy(palletEvents.salesOrderId, pallets.itemId, users.username);
+    // Net picked/earmarked qty for every line on this page in ONE query.
+    getPickedForSoQuantities(db, orderIds),
+
+    db
+      .select({ parentSalesOrderId: tambahanOrders.parentSalesOrderId })
+      .from(tambahanOrders)
+      .where(and(inArray(tambahanOrders.parentSalesOrderId, orderIds), eq(tambahanOrders.status, "ACTIVE"))),
+
+    // Who picked what, from where — one row per (SO, item, location, user).
+    db
+      .select({
+        salesOrderId: locationStockEvents.salesOrderId,
+        itemId: locationStockEvents.itemId,
+        locationCode: locations.code,
+        type: locationStockEvents.type,
+        username: users.username,
+        quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+      })
+      .from(locationStockEvents)
+      .innerJoin(locations, eq(locationStockEvents.sourceLocationId, locations.id))
+      .innerJoin(users, eq(locationStockEvents.userId, users.id))
+      .where(
+        sql`${locationStockEvents.type} IN ('PICKING', 'DEFAULT_PICKING') AND ${inArray(locationStockEvents.salesOrderId, orderIds)}`
+      )
+      .groupBy(
+        locationStockEvents.salesOrderId,
+        locationStockEvents.itemId,
+        locations.code,
+        locationStockEvents.type,
+        users.username
+      ),
+
+    // Who shipped what, one row per (SO, item, user). Also used for the
+    // shipped totals (was a separate, duplicate scan of pallet_events).
+    db
+      .select({
+        salesOrderId: palletEvents.salesOrderId,
+        itemId: pallets.itemId,
+        username: users.username,
+        quantity: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)::int`,
+      })
+      .from(palletEvents)
+      .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
+      .innerJoin(users, eq(palletEvents.userId, users.id))
+      .where(
+        sql`${palletEvents.type} = 'OUTBOUND' AND ${inArray(palletEvents.salesOrderId, orderIds)}`
+      )
+      .groupBy(palletEvents.salesOrderId, pallets.itemId, users.username),
+  ]);
+
+  const activeTambahanSet = new Set(activeTambahanRows.map((r) => r.parentSalesOrderId));
 
   const shippedMap = new Map<string, number>();
-  for (const row of shippedRows) {
+  const shippedByMap = new Map<string, { username: string; quantity: number }[]>();
+  for (const row of shippedByRows) {
     if (row.salesOrderId === null) continue;
-    shippedMap.set(`${row.salesOrderId}-${row.itemId}`, row.shipped);
+    const key = `${row.salesOrderId}-${row.itemId}`;
+    shippedMap.set(key, (shippedMap.get(key) ?? 0) + row.quantity);
+    if (!shippedByMap.has(key)) shippedByMap.set(key, []);
+    shippedByMap.get(key)!.push({ username: row.username, quantity: row.quantity });
   }
 
   const pickSourceMap = new Map<
@@ -133,35 +134,24 @@ const lines = await db
     });
   }
 
-  const shippedByMap = new Map<string, { username: string; quantity: number }[]>();
-  for (const row of shippedByRows) {
-    if (row.salesOrderId === null) continue;
-    const key = `${row.salesOrderId}-${row.itemId}`;
-    if (!shippedByMap.has(key)) shippedByMap.set(key, []);
-    shippedByMap.get(key)!.push({ username: row.username, quantity: row.quantity });
-  }
-
   const linesByOrder = new Map<number, typeof lines>();
   for (const l of lines) {
     if (!linesByOrder.has(l.salesOrderId)) linesByOrder.set(l.salesOrderId, []);
     linesByOrder.get(l.salesOrderId)!.push(l);
   }
 
-return Promise.all(
-  orders.map(async (o) => {
-    const orderItems = await Promise.all(
-      (linesByOrder.get(o.id) ?? []).map(async (line) => {
-        const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
-        const picked = Math.max(0, await getPickedForSoQuantity(db, o.id, line.itemId));
+  return orders.map((o) => {
+    const orderItems = (linesByOrder.get(o.id) ?? []).map((line) => {
+      const shipped = shippedMap.get(`${o.id}-${line.itemId}`) ?? 0;
+      const picked = Math.max(0, pickedMap.get(`${o.id}-${line.itemId}`) ?? 0);
 
-        const status: "PENDING" | "PICKING" | "SHIPPED" =
-          shipped >= line.quantity ? "SHIPPED" : shipped > 0 || picked > 0 ? "PICKING" : "PENDING";
+      const status: "PENDING" | "PICKING" | "SHIPPED" =
+        shipped >= line.quantity ? "SHIPPED" : shipped > 0 || picked > 0 ? "PICKING" : "PENDING";
 
-        const pickedFrom = pickSourceMap.get(`${o.id}-${line.itemId}`) ?? [];
-        const shippedBy = shippedByMap.get(`${o.id}-${line.itemId}`) ?? [];
-        return { ...line, shipped, picked, status, pickedFrom, shippedBy };
-      })
-    );
+      const pickedFrom = pickSourceMap.get(`${o.id}-${line.itemId}`) ?? [];
+      const shippedBy = shippedByMap.get(`${o.id}-${line.itemId}`) ?? [];
+      return { ...line, shipped, picked, status, pickedFrom, shippedBy };
+    });
 
     const allComplete = orderItems.length > 0 && orderItems.every((l) => l.status === "SHIPPED");
     const anyActivity = orderItems.some((l) => l.shipped > 0 || l.picked > 0);
@@ -178,14 +168,8 @@ return Promise.all(
       new Set(orderItems.flatMap((l) => l.pickedFrom.map((p) => p.username)))
     );
 
-    return {
-      ...o,
-      items: orderItems,
-      overallStatus,
-      pickedByUsers,
-    };
-  })
-);
+    return { ...o, items: orderItems, overallStatus, pickedByUsers };
+  });
 }
 
 export default async function SalesOrdersPage({
