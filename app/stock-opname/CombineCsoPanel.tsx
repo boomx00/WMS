@@ -10,6 +10,15 @@ type CsoSession = {
   countedLines: number;
 };
 
+type SystemLocationEntry = { locationCode: string; quantity: number };
+type CountedLocationEntry = {
+  opnameNumber: string;
+  locationCode: string;
+  countedQty: number;
+  countedAt: string | null;
+  countedByUsername: string | null;
+};
+
 type CombinedItem = {
   itemId: number;
   itemSku: string;
@@ -18,6 +27,8 @@ type CombinedItem = {
   systemQty: number;
   difference: number;
   status: "MATCH" | "MISMATCH";
+  systemLocations: SystemLocationEntry[];
+  countedLocations: CountedLocationEntry[];
 };
 
 type CombineResponse = {
@@ -42,6 +53,7 @@ export default function CombineCsoPanel() {
   const [result, setResult] = useState<CombineResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"ALL" | "MATCH" | "MISMATCH">("ALL");
+  const [expandedItemId, setExpandedItemId] = useState<number | null>(null);
 
   useEffect(() => {
     refreshSessions();
@@ -75,6 +87,7 @@ export default function CombineCsoPanel() {
     setCombining(true);
     setError(null);
     setResult(null);
+    setExpandedItemId(null);
 
     const res = await fetch("/api/stock-opname/combine", {
       method: "POST",
@@ -184,6 +197,7 @@ export default function CombineCsoPanel() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-zinc-900 text-zinc-500 text-left">
+                  <th className="px-3 py-2 font-medium"></th>
                   <th className="px-3 py-2 font-medium">SKU</th>
                   <th className="px-3 py-2 font-medium">Product</th>
                   <th className="px-3 py-2 font-medium text-right">Combined Counted Qty</th>
@@ -195,40 +209,119 @@ export default function CombineCsoPanel() {
               <tbody>
                 {filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-3 py-6 text-center text-zinc-600">
+                    <td colSpan={7} className="px-3 py-6 text-center text-zinc-600">
                       No rows in this category.
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.map((item) => (
-                    <tr key={item.itemId} className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors">
-                      <td className="px-3 py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
-                      <td className="px-3 py-1.5 text-zinc-500">{item.itemName}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{item.combinedQty.toLocaleString()}</td>
-                      <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
-                        {item.systemQty.toLocaleString()}
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-mono">
-                        {item.difference === 0 ? (
-                          <span className="text-emerald-400">0</span>
-                        ) : (
-                          <span className={item.difference > 0 ? "text-amber-400" : "text-red-400"}>
-                            {item.difference > 0 ? "+" : ""}
-                            {item.difference.toLocaleString()}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-1.5">
-                        <span
-                          className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
-                            item.status === "MATCH" ? "bg-emerald-950 text-emerald-300" : "bg-amber-950 text-amber-300"
-                          }`}
+                  filteredItems.map((item) => {
+                    const expanded = expandedItemId === item.itemId;
+                    return (
+                      <>
+                        <tr
+                          key={item.itemId}
+                          onClick={() => setExpandedItemId(expanded ? null : item.itemId)}
+                          className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors cursor-pointer"
                         >
-                          {item.status === "MATCH" ? "Match" : "Mismatch"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                          <td className="px-3 py-1.5 text-zinc-600 w-5">
+                            <span className={`inline-block transition-transform ${expanded ? "rotate-90" : ""}`}>▶</span>
+                          </td>
+                          <td className="px-3 py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
+                          <td className="px-3 py-1.5 text-zinc-500">{item.itemName}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{item.combinedQty.toLocaleString()}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
+                            {item.systemQty.toLocaleString()}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono">
+                            {item.difference === 0 ? (
+                              <span className="text-emerald-400">0</span>
+                            ) : (
+                              <span className={item.difference > 0 ? "text-amber-400" : "text-red-400"}>
+                                {item.difference > 0 ? "+" : ""}
+                                {item.difference.toLocaleString()}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <span
+                              className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                                item.status === "MATCH" ? "bg-emerald-950 text-emerald-300" : "bg-amber-950 text-amber-300"
+                              }`}
+                            >
+                              {item.status === "MATCH" ? "Match" : "Mismatch"}
+                            </span>
+                          </td>
+                        </tr>
+                        {expanded && (
+                          <tr key={`${item.itemId}-detail`} className="border-t border-zinc-800/60">
+                            <td colSpan={7} className="px-4 py-3 bg-zinc-950/50">
+                              <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                  <h4 className="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">
+                                    Total System Stock by Location ({item.systemLocations.length})
+                                  </h4>
+                                  {item.systemLocations.length === 0 ? (
+                                    <p className="text-xs text-zinc-700">No current stock anywhere in the system.</p>
+                                  ) : (
+                                    <table className="w-full text-xs">
+                                      <thead>
+                                        <tr className="text-zinc-600 text-left border-b border-zinc-800">
+                                          <th className="py-1 pr-4">Location</th>
+                                          <th className="py-1 pr-4 text-right">Qty</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {item.systemLocations.map((loc, i) => (
+                                          <tr key={i} className="border-b border-zinc-900 last:border-0">
+                                            <td className="py-1 pr-4 font-mono text-zinc-300">{loc.locationCode}</td>
+                                            <td className="py-1 pr-4 text-right font-mono text-zinc-400">
+                                              {loc.quantity.toLocaleString()}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <h4 className="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">
+                                    CSO Locations Counted ({item.countedLocations.length})
+                                  </h4>
+                                  {item.countedLocations.length === 0 ? (
+                                    <p className="text-xs text-zinc-700">Not counted in any selected session.</p>
+                                  ) : (
+                                    <table className="w-full text-xs">
+                                      <thead>
+                                        <tr className="text-zinc-600 text-left border-b border-zinc-800">
+                                          <th className="py-1 pr-4">Session</th>
+                                          <th className="py-1 pr-4">Location</th>
+                                          <th className="py-1 pr-4 text-right">Counted</th>
+                                          <th className="py-1 pr-4">By</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {item.countedLocations.map((loc, i) => (
+                                          <tr key={i} className="border-b border-zinc-900 last:border-0">
+                                            <td className="py-1 pr-4 font-mono text-amber-500">{loc.opnameNumber}</td>
+                                            <td className="py-1 pr-4 font-mono text-zinc-300">{loc.locationCode}</td>
+                                            <td className="py-1 pr-4 text-right font-mono text-zinc-400">
+                                              {loc.countedQty.toLocaleString()}
+                                            </td>
+                                            <td className="py-1 pr-4 text-zinc-500">{loc.countedByUsername ?? "—"}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })
                 )}
               </tbody>
             </table>
