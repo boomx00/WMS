@@ -255,67 +255,56 @@ export default function CombineCsoPanel() {
                         {expanded && (
                           <tr key={`${item.itemId}-detail`} className="border-t border-zinc-800/60">
                             <td colSpan={7} className="px-4 py-3 bg-zinc-950/50">
-                              <div className="grid grid-cols-2 gap-6">
-                                <div>
-                                  <h4 className="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">
-                                    Total System Stock by Location ({item.systemLocations.length})
-                                  </h4>
-                                  {item.systemLocations.length === 0 ? (
-                                    <p className="text-xs text-zinc-700">No current stock anywhere in the system.</p>
-                                  ) : (
-                                    <table className="w-full text-xs">
-                                      <thead>
-                                        <tr className="text-zinc-600 text-left border-b border-zinc-800">
-                                          <th className="py-1 pr-4">Location</th>
-                                          <th className="py-1 pr-4 text-right">Qty</th>
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-zinc-600 text-left border-b border-zinc-800">
+                                    <th className="py-1 pr-4">Location</th>
+                                    <th className="py-1 pr-4 text-right">System Qty</th>
+                                    <th className="py-1 pr-4">CSO Session</th>
+                                    <th className="py-1 pr-4 text-right">Counted Qty</th>
+                                    <th className="py-1 pr-4">By</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {buildLocationRows(item).map((row) =>
+                                    row.counted.length === 0 ? (
+                                      <tr key={row.locationCode} className="border-b border-zinc-900 last:border-0">
+                                        <td className="py-1 pr-4 font-mono text-zinc-300">{row.locationCode}</td>
+                                        <td className="py-1 pr-4 text-right font-mono text-zinc-400">
+                                          {row.systemQty !== null ? row.systemQty.toLocaleString() : "—"}
+                                        </td>
+                                        <td colSpan={3} className="py-1 pr-4 text-zinc-600 italic">
+                                          (Not scanned)
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      row.counted.map((c, i) => (
+                                        <tr key={`${row.locationCode}-${i}`} className="border-b border-zinc-900 last:border-0">
+                                          {i === 0 ? (
+                                            <>
+                                              <td
+                                                className="py-1 pr-4 font-mono text-zinc-300 align-top"
+                                                rowSpan={row.counted.length}
+                                              >
+                                                {row.locationCode}
+                                              </td>
+                                              <td
+                                                className="py-1 pr-4 text-right font-mono text-zinc-400 align-top"
+                                                rowSpan={row.counted.length}
+                                              >
+                                                {row.systemQty !== null ? row.systemQty.toLocaleString() : "—"}
+                                              </td>
+                                            </>
+                                          ) : null}
+                                          <td className="py-1 pr-4 font-mono text-amber-500">{c.opnameNumber}</td>
+                                          <td className="py-1 pr-4 text-right font-mono">{c.countedQty.toLocaleString()}</td>
+                                          <td className="py-1 pr-4 text-zinc-500">{c.countedByUsername ?? "—"}</td>
                                         </tr>
-                                      </thead>
-                                      <tbody>
-                                        {item.systemLocations.map((loc, i) => (
-                                          <tr key={i} className="border-b border-zinc-900 last:border-0">
-                                            <td className="py-1 pr-4 font-mono text-zinc-300">{loc.locationCode}</td>
-                                            <td className="py-1 pr-4 text-right font-mono text-zinc-400">
-                                              {loc.quantity.toLocaleString()}
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
+                                      ))
+                                    )
                                   )}
-                                </div>
-
-                                <div>
-                                  <h4 className="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">
-                                    CSO Locations Counted ({item.countedLocations.length})
-                                  </h4>
-                                  {item.countedLocations.length === 0 ? (
-                                    <p className="text-xs text-zinc-700">Not counted in any selected session.</p>
-                                  ) : (
-                                    <table className="w-full text-xs">
-                                      <thead>
-                                        <tr className="text-zinc-600 text-left border-b border-zinc-800">
-                                          <th className="py-1 pr-4">Session</th>
-                                          <th className="py-1 pr-4">Location</th>
-                                          <th className="py-1 pr-4 text-right">Counted</th>
-                                          <th className="py-1 pr-4">By</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {item.countedLocations.map((loc, i) => (
-                                          <tr key={i} className="border-b border-zinc-900 last:border-0">
-                                            <td className="py-1 pr-4 font-mono text-amber-500">{loc.opnameNumber}</td>
-                                            <td className="py-1 pr-4 font-mono text-zinc-300">{loc.locationCode}</td>
-                                            <td className="py-1 pr-4 text-right font-mono text-zinc-400">
-                                              {loc.countedQty.toLocaleString()}
-                                            </td>
-                                            <td className="py-1 pr-4 text-zinc-500">{loc.countedByUsername ?? "—"}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  )}
-                                </div>
-                              </div>
+                                </tbody>
+                              </table>
                             </td>
                           </tr>
                         )}
@@ -339,4 +328,24 @@ function SummaryStat({ label, value, accent }: { label: string; value: number; a
       <div className="text-xs text-zinc-500">{label}</div>
     </div>
   );
+}
+
+function buildLocationRows(item: CombinedItem) {
+  const countedByLocation = new Map<string, CountedLocationEntry[]>();
+  for (const c of item.countedLocations) {
+    if (!countedByLocation.has(c.locationCode)) countedByLocation.set(c.locationCode, []);
+    countedByLocation.get(c.locationCode)!.push(c);
+  }
+
+  const systemByLocation = new Map(item.systemLocations.map((s) => [s.locationCode, s.quantity]));
+
+  const allCodes = Array.from(new Set([...systemByLocation.keys(), ...countedByLocation.keys()])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  return allCodes.map((locationCode) => ({
+    locationCode,
+    systemQty: systemByLocation.get(locationCode) ?? null,
+    counted: countedByLocation.get(locationCode) ?? [],
+  }));
 }
