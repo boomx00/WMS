@@ -14,7 +14,7 @@ export async function GET() {
     .select()
     .from(stockOpname)
     .where(ilike(stockOpname.opnameNumber, "CSO-%"))
-    .orderBy(stockOpname.opnameNumber);
+    .orderBy(stockOpname.createdAt);
 
   const opnameNumbers = sessions.map((s) => s.opnameNumber);
 
