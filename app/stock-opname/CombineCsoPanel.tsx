@@ -257,21 +257,25 @@ export default function CombineCsoPanel() {
                             <td colSpan={7} className="px-4 py-3 bg-zinc-950/50">
                               <table className="w-full text-xs">
                                 <thead>
-                                  <tr className="text-zinc-600 text-left border-b border-zinc-800">
-                                    <th className="py-1 pr-4">Location</th>
-                                    <th className="py-1 pr-4 text-right">System Qty</th>
-                                    <th className="py-1 pr-4">CSO Session</th>
-                                    <th className="py-1 pr-4 text-right">Counted Qty</th>
-                                    <th className="py-1 pr-4">By</th>
-                                  </tr>
+                                <tr className="text-zinc-600 text-left border-b border-zinc-800">
+                                  <th className="py-1 pr-4">Location</th>
+                                  <th className="py-1 pr-4 text-right">System Qty</th>
+                                  <th className="py-1 pr-4">Match</th>
+                                  <th className="py-1 pr-4">CSO Session</th>
+                                  <th className="py-1 pr-4 text-right">Counted Qty</th>
+                                  <th className="py-1 pr-4">By</th>
+                                </tr>
                                 </thead>
-                                <tbody>
+                                                                <tbody>
                                   {buildLocationRows(item).map((row) =>
                                     row.counted.length === 0 ? (
                                       <tr key={row.locationCode} className="border-b border-zinc-900 last:border-0">
                                         <td className="py-1 pr-4 font-mono text-zinc-300">{row.locationCode}</td>
                                         <td className="py-1 pr-4 text-right font-mono text-zinc-400">
                                           {row.systemQty !== null ? row.systemQty.toLocaleString() : "—"}
+                                        </td>
+                                        <td className="py-1 pr-4">
+                                          <MatchBadge status={row.matchStatus} />
                                         </td>
                                         <td colSpan={3} className="py-1 pr-4 text-zinc-600 italic">
                                           (Not scanned)
@@ -293,6 +297,9 @@ export default function CombineCsoPanel() {
                                                 rowSpan={row.counted.length}
                                               >
                                                 {row.systemQty !== null ? row.systemQty.toLocaleString() : "—"}
+                                              </td>
+                                              <td className="py-1 pr-4 align-top" rowSpan={row.counted.length}>
+                                                <MatchBadge status={row.matchStatus} />
                                               </td>
                                             </>
                                           ) : null}
@@ -343,9 +350,23 @@ function buildLocationRows(item: CombinedItem) {
     a.localeCompare(b)
   );
 
-  return allCodes.map((locationCode) => ({
-    locationCode,
-    systemQty: systemByLocation.get(locationCode) ?? null,
-    counted: countedByLocation.get(locationCode) ?? [],
-  }));
+  return allCodes.map((locationCode) => {
+    const counted = countedByLocation.get(locationCode) ?? [];
+    const systemQty = systemByLocation.get(locationCode) ?? null;
+    const countedTotal = counted.reduce((sum, c) => sum + c.countedQty, 0);
+    const matchStatus: "MATCH" | "MISMATCH" = (systemQty ?? 0) === countedTotal ? "MATCH" : "MISMATCH";
+    return { locationCode, systemQty, counted, matchStatus };
+  });
+}
+
+function MatchBadge({ status }: { status: "MATCH" | "MISMATCH" }) {
+  return (
+    <span
+      className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+        status === "MATCH" ? "bg-emerald-950 text-emerald-300" : "bg-amber-950 text-amber-300"
+      }`}
+    >
+      {status === "MATCH" ? "Match" : "Mismatch"}
+    </span>
+  );
 }
