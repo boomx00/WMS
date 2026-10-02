@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameItems, stockOpnameLocations, locationStock, items } from "@/db/schema";
+import { stockOpname, stockOpnameItems, stockOpnameLocations, locationStock, items, locations, users } from "@/db/schema";
 import { eq, and, inArray, isNotNull, isNull, ilike, sql, desc } from "drizzle-orm";
 
 // GET /api/stock-opname/combine
@@ -10,7 +10,7 @@ import { eq, and, inArray, isNotNull, isNull, ilike, sql, desc } from "drizzle-o
 // counted/total line counts, so the Combine CSO panel can offer them for
 // selection.
 export async function GET() {
- const sessions = await db
+  const sessions = await db
     .select()
     .from(stockOpname)
     .where(ilike(stockOpname.opnameNumber, "CSO-%"))
@@ -73,7 +73,10 @@ function sanitizeList(input: unknown): string[] {
 // to the whole system's stock once every section is in. Lines with no
 // SKU (confirmed-empty locations) don't contribute to any SKU's total —
 // their count is surfaced separately as emptyConfirmations instead.
-// Read-only — nothing gets changed.
+// Each item also carries a location-level breakdown — total system stock
+// per location, and each individual CSO count line that fed into the
+// combined total — so the frontend can expand a row and compare them
+// side by side. Read-only — nothing gets changed.
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const opnameNumbers = sanitizeList(body.opnameNumbers);
@@ -112,6 +115,65 @@ export async function POST(req: NextRequest) {
   const itemRows = allItemIds.length > 0 ? await db.select().from(items).where(inArray(items.id, allItemIds)) : [];
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
 
+  // Per-location breakdown, so each row can expand to show: where the
+  // system currently has this SKU, and which individual CSO location
+  // counts (across the selected sessions) fed into the combined total.
+  const systemLocationRows =
+    allItemIds.length > 0
+      ? await db
+          .select({
+            itemId: locationStock.itemId,
+            locationCode: locations.code,
+            quantity: locationStock.quantity,
+          })
+          .from(locationStock)
+          .innerJoin(locations, eq(locationStock.locationId, locations.id))
+          .where(inArray(locationStock.itemId, allItemIds))
+      : [];
+
+  const systemLocationsByItem = new Map<number, { locationCode: string; quantity: number }[]>();
+  for (const row of systemLocationRows) {
+    if (row.quantity === 0) continue;
+    if (!systemLocationsByItem.has(row.itemId)) systemLocationsByItem.set(row.itemId, []);
+    systemLocationsByItem.get(row.itemId)!.push({ locationCode: row.locationCode, quantity: row.quantity });
+  }
+  for (const entries of systemLocationsByItem.values()) {
+    entries.sort((a, b) => a.locationCode.localeCompare(b.locationCode));
+  }
+
+  const countedLineRows = await db
+    .select({
+      itemId: stockOpnameItems.itemId,
+      opnameNumber: stockOpnameItems.opnameNumber,
+      locationCode: locations.code,
+      countedQty: stockOpnameItems.countedQty,
+      countedAt: stockOpnameItems.countedAt,
+      countedByUsername: users.username,
+    })
+    .from(stockOpnameItems)
+    .innerJoin(locations, eq(stockOpnameItems.locationId, locations.id))
+    .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
+    .where(and(inArray(stockOpnameItems.opnameNumber, opnameNumbers), isNotNull(stockOpnameItems.itemId)));
+
+  const countedLinesByItem = new Map<
+    number,
+    { opnameNumber: string; locationCode: string; countedQty: number; countedAt: string | null; countedByUsername: string | null }[]
+  >();
+  for (const row of countedLineRows) {
+    const itemId = row.itemId as number;
+    if (!countedLinesByItem.has(itemId)) countedLinesByItem.set(itemId, []);
+    countedLinesByItem.get(itemId)!.push({
+      opnameNumber: row.opnameNumber,
+      locationCode: row.locationCode,
+      countedQty: row.countedQty ?? 0,
+      countedAt: row.countedAt ? row.countedAt.toISOString() : null,
+      countedByUsername: row.countedByUsername,
+    });
+  }
+  for (const entries of countedLinesByItem.values()) {
+    entries.sort((a, b) => a.locationCode.localeCompare(b.locationCode));
+  }
+
   const resultItems = allItemIds
     .map((itemId) => {
       const combinedQty = combinedByItem.get(itemId) ?? 0;
@@ -126,6 +188,8 @@ export async function POST(req: NextRequest) {
         systemQty,
         difference,
         status: (difference === 0 ? "MATCH" : "MISMATCH") as "MATCH" | "MISMATCH",
+        systemLocations: systemLocationsByItem.get(itemId) ?? [],
+        countedLocations: countedLinesByItem.get(itemId) ?? [],
       };
     })
     .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference) || a.itemSku.localeCompare(b.itemSku));
