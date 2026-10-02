@@ -25,8 +25,7 @@ async function getTotalStock(): Promise<SkuStock[]> {
       locationArea: locations.area,
       quantity: locationStock.quantity,
       // Formatted in SQL (24-hour, UTC) so the browser can't shift the timezone
-      updatedAt: sql<string>`to_char(${locationStock.updatedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI')`,
-    })
+      updatedAt: sql<string>`to_char(${locationStock.updatedAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI')`,    })
     .from(locationStock)
     .innerJoin(locations, eq(locationStock.locationId, locations.id))
     .innerJoin(items, eq(locationStock.itemId, items.id))
