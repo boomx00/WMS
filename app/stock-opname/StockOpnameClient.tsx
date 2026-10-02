@@ -316,11 +316,11 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
           {session.assignedToUsername && (
             <span className="text-xs text-zinc-500">· PIC: {session.assignedToUsername}</span>
           )}
-          <span className="text-xs text-zinc-600">
+                    <span className="text-xs text-zinc-600" suppressHydrationWarning>
             · Commenced: {session.commencedAt ? new Date(session.commencedAt).toLocaleString() : "Not started"}
           </span>
           {session.completedAt && (
-            <span className="text-xs text-zinc-600">
+            <span className="text-xs text-zinc-600" suppressHydrationWarning>
               · Finished (PDA): {new Date(session.completedAt).toLocaleString()}
             </span>
           )}
