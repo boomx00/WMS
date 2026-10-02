@@ -3,8 +3,7 @@ import { db } from "@/lib/db";
 import { items, locationStock, locationStockEvents, locations, users, salesOrders, tambahanOrders } from "@/db/schema";
 import { eq, and, or, gte, asc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { getLedgerStartAt, parseDateParam, formatUtcDateTime, locationDelta } from "@/lib/ledger";
-
+import { getLedgerStartAt, parseDateParam, formatLocalDateTime, locationDelta } from "@/lib/ledger";
 export const dynamic = "force-dynamic";
 
 const sourceLoc = alias(locations, "source_loc");
@@ -71,7 +70,7 @@ export async function GET(req: NextRequest) {
       tambahanNumber: tambahanOrders.tambahanNumber,
       username: users.username,
       createdAtRaw: locationStockEvents.createdAt,
-      createdAt: sql<string>`to_char(${locationStockEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI')`,
+      createdAt: sql<string>`to_char(${locationStockEvents.createdAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI')`,
     })
     .from(locationStockEvents)
     .innerJoin(items, eq(locationStockEvents.itemId, items.id))
@@ -152,10 +151,10 @@ export async function GET(req: NextRequest) {
     sku: item?.sku ?? null,
     name: item?.name ?? null,
     anchorOpeningQuantity: startBalance,
-    anchorOpeningAt: formatUtcDateTime(ledgerStartAt),
+    anchorOpeningAt: formatLocalDateTime(ledgerStartAt),
     truncated,
-    rangeFrom: formatUtcDateTime(effectiveFrom),
-    rangeTo: toParam ? formatUtcDateTime(toParam) : null,
+    rangeFrom: formatLocalDateTime(effectiveFrom),
+    rangeTo: toParam ? formatLocalDateTime(toParam) : null,
     openingBalance,
     closingBalance: running,
     entries,

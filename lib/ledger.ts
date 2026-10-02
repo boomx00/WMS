@@ -1,5 +1,5 @@
 // Shared by both Total Stock ledger endpoints (per-SKU and per-location) so
-// they agree on the same start date and delta rules.
+// they agree on the same start date, delta rules, and display timezone.
 //
 // Server-only: getLedgerStartAt() reads the DB. Don't import this file from
 // client components.
@@ -19,14 +19,26 @@ export async function getLedgerStartAt(): Promise<Date> {
   return row?.ledgerStartAt ?? DEFAULT_LEDGER_START_AT;
 }
 
+// Display timezone for everything shown in the ledger UI — currently
+// hardcoded to Jakarta/Bangkok (UTC+7). All underlying storage and
+// business-logic math (ledger start, date-range filtering) stays in UTC;
+// only final display strings go through this offset. If this WMS is ever
+// deployed for a client in a different timezone, this is the one constant
+// that needs to change.
+export const DISPLAY_TZ_OFFSET_HOURS = 7;
+
 export function parseDateParam(raw: string | null): Date | null {
   if (!raw) return null;
   const d = new Date(`${raw}T00:00:00.000Z`);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function formatUtcDateTime(d: Date): string {
-  return d.toISOString().slice(0, 16).replace("T", " ");
+// Renders an absolute instant (a JS Date, always UTC internally) as a
+// 24-hour "YYYY-MM-DD HH:MM" string in the display timezone — NOT UTC.
+// Used for anything the ledger UI shows directly to the person.
+export function formatLocalDateTime(d: Date): string {
+  const shifted = new Date(d.getTime() + DISPLAY_TZ_OFFSET_HOURS * 60 * 60 * 1000);
+  return shifted.toISOString().slice(0, 16).replace("T", " ");
 }
 
 // Whether an event changes a SKU's TOTAL warehouse stock (summed across

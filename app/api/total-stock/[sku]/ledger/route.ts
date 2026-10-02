@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { items, locationStock, locationStockEvents, locations, users, salesOrders, tambahanOrders } from "@/db/schema";
-import { eq, and, gte, asc, sql } from "drizzle-orm";
+import {
+  items,
+  locationStock,
+  locationStockEvents,
+  locations,
+  users,
+  salesOrders,
+  tambahanOrders,
+} from "@/db/schema";
+import { eq, and, gte, sql, asc } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { getLedgerStartAt, parseDateParam, formatUtcDateTime, totalDelta } from "@/lib/ledger";
+import { getLedgerStartAt, parseDateParam, formatLocalDateTime, totalDelta } from "@/lib/ledger";
 
 export const dynamic = "force-dynamic";
 
@@ -19,12 +27,13 @@ export async function GET(
   const fromParam = parseDateParam(req.nextUrl.searchParams.get("from"));
   const toParam = parseDateParam(req.nextUrl.searchParams.get("to"));
   const toExclusive = toParam ? new Date(toParam.getTime() + 24 * 60 * 60 * 1000) : null;
-  const ledgerStartAt = await getLedgerStartAt();
 
   const [item] = await db.select().from(items).where(eq(items.sku, sku));
   if (!item) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
+
+  const ledgerStartAt = await getLedgerStartAt();
 
   const [totalRow] = await db
     .select({ total: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::int` })
@@ -32,6 +41,9 @@ export async function GET(
     .where(eq(locationStock.itemId, item.id));
   const liveTotal = totalRow?.total ?? 0;
 
+  // Every event for this item from the (configurable) start date onward —
+  // needed both to walk the display range forward and to back out the
+  // opening balance at ledgerStartAt from the live total above.
   const events = await db
     .select({
       id: locationStockEvents.id,
@@ -43,7 +55,7 @@ export async function GET(
       tambahanNumber: tambahanOrders.tambahanNumber,
       username: users.username,
       createdAtRaw: locationStockEvents.createdAt,
-      createdAt: sql<string>`to_char(${locationStockEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI')`,
+      createdAt: sql<string>`to_char(${locationStockEvents.createdAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI')`,
     })
     .from(locationStockEvents)
     .leftJoin(sourceLoc, eq(locationStockEvents.sourceLocationId, sourceLoc.id))
@@ -51,9 +63,17 @@ export async function GET(
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
     .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
-    .where(and(eq(locationStockEvents.itemId, item.id), gte(locationStockEvents.createdAt, ledgerStartAt)))
+    .where(
+      and(
+        eq(locationStockEvents.itemId, item.id),
+        gte(locationStockEvents.createdAt, ledgerStartAt)
+      )
+    )
     .orderBy(asc(locationStockEvents.createdAt), asc(locationStockEvents.id));
 
+  // Back out the balance at ledgerStartAt by subtracting every event's
+  // total-effect from the live number — equivalent to summing forward
+  // from that date, but doesn't need a stored starting snapshot.
   const netSinceStart = events.reduce(
     (sum, ev) => sum + totalDelta(ev.sourceCode != null, ev.destinationCode != null, ev.quantity),
     0
@@ -95,10 +115,10 @@ export async function GET(
     sku: item.sku,
     name: item.name,
     anchorOpeningQuantity: startBalance,
-    anchorOpeningAt: formatUtcDateTime(ledgerStartAt),
+    anchorOpeningAt: formatLocalDateTime(ledgerStartAt),
     truncated,
-    rangeFrom: formatUtcDateTime(effectiveFrom),
-    rangeTo: toParam ? formatUtcDateTime(toParam) : null,
+    rangeFrom: formatLocalDateTime(effectiveFrom),
+    rangeTo: toParam ? formatLocalDateTime(toParam) : null,
     openingBalance,
     closingBalance: running,
     entries,
