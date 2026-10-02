@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import VerifyStockIntegrityPanel from "./ExcelVerifyPanel";
+import VerifyStockIntegrityPanel from "./VerifyStockIntegrityPanel";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 type Session = {

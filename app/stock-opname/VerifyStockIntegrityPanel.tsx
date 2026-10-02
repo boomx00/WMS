@@ -9,8 +9,11 @@ export default function VerifyStockIntegrityPanel() {
 
   return (
     <div>
-      <h1>SSSSSSSSSSSSSSSS</h1>
-      <CombineCsoPanel /> 
+      <div className="flex gap-2 mb-5">
+        <SubTabButton label="Combine CSO" active={subTab === "combine"} onClick={() => setSubTab("combine")} />
+        <SubTabButton label="Excel Upload" active={subTab === "excel"} onClick={() => setSubTab("excel")} />
+      </div>
+      {subTab === "combine" ? <CombineCsoPanel /> : <ExcelVerifyPanel />}
     </div>
   );
 }
