@@ -88,11 +88,11 @@ export default function StockOpnameClient({
     <div>
       <div className="flex gap-1 mb-6 border-b border-zinc-800">
         <TabButton label="Stock Opname" active={activeTab === "opname"} onClick={() => setActiveTab("opname")} />
-        {/* <TabButton
+        <TabButton
           label="Verify Stock Integrity"
           active={activeTab === "verify"}
           onClick={() => setActiveTab("verify")}
-        /> */}
+        />
       </div>
 
       {activeTab === "verify" ? (
