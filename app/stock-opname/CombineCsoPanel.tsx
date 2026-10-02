@@ -329,12 +329,12 @@ export default function CombineCsoPanel() {
 }
 function buildLocationRows(item: CombinedItem) {
   const countedByLocation = new Map<string, CountedLocationEntry[]>();
-  for (const c of item.countedLocations) {
+  for (const c of item.countedLocations ?? []) {
     if (!countedByLocation.has(c.locationCode)) countedByLocation.set(c.locationCode, []);
     countedByLocation.get(c.locationCode)!.push(c);
   }
 
-  const systemByLocation = new Map(item.systemLocations.map((s) => [s.locationCode, s.quantity]));
+  const systemByLocation = new Map((item.systemLocations ?? []).map((s) => [s.locationCode, s.quantity]));
 
   const allCodes = Array.from(new Set([...systemByLocation.keys(), ...countedByLocation.keys()])).sort((a, b) =>
     a.localeCompare(b)

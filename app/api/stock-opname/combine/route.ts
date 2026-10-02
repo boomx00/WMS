@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { stockOpname, stockOpnameItems, stockOpnameLocations, locationStock, items } from "@/db/schema";
-import { eq, and, inArray, isNotNull, isNull, ilike, sql } from "drizzle-orm";
+import { eq, and, inArray, isNotNull, isNull, ilike, sql, desc } from "drizzle-orm";
 
 // GET /api/stock-opname/combine
 // Lists every stock opname session whose opnameNumber starts with "CSO-"
@@ -14,7 +14,7 @@ export async function GET() {
     .select()
     .from(stockOpname)
     .where(ilike(stockOpname.opnameNumber, "CSO-%"))
-    .orderBy(stockOpname.createdAt);
+    .orderBy(desc(stockOpname.createdAt));
 
   const opnameNumbers = sessions.map((s) => s.opnameNumber);
 
