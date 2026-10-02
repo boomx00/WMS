@@ -86,7 +86,7 @@ export default function ExcelVerifyPanel() {
   return (
     <div>
       <p className="text-xs text-zinc-500 mb-4">
-        Uploadczzzzzzzzzzzzzzzzzzzzzzz an Excel file with columns <span className="font-mono">LOC</span>,{" "}
+        Upload an Excel file with columns <span className="font-mono">LOC</span>,{" "}
         <span className="font-mono">Kode Material</span>, <span className="font-mono">SKU AWAL</span>,{" "}
         <span className="font-mono">PALET</span>, <span className="font-mono">BOX/PALET</span>, and{" "}
         <span className="font-mono">TOTAL BOX</span>. Kode Material and SKU Awal (from the file) sit on the

@@ -10,11 +10,11 @@ import { eq, and, inArray, isNotNull, isNull, ilike, sql } from "drizzle-orm";
 // counted/total line counts, so the Combine CSO panel can offer them for
 // selection.
 export async function GET() {
-  const sessions = await db
+ const sessions = await db
     .select()
     .from(stockOpname)
     .where(ilike(stockOpname.opnameNumber, "CSO-%"))
-    .orderBy(stockOpname.opnameNumber);
+    .orderBy(stockOpname.createdAt);
 
   const opnameNumbers = sessions.map((s) => s.opnameNumber);
 

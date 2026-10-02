@@ -257,7 +257,7 @@ export default function CombineCsoPanel() {
                             <td colSpan={7} className="px-4 py-3 bg-zinc-950/50">
                               <table className="w-full text-xs">
                                 <thead>
-                                <tr className="text-zinc-600 text-left border-b border-zinc-800">
+                                                                  <tr className="text-zinc-600 text-left border-b border-zinc-800">
                                   <th className="py-1 pr-4">Location</th>
                                   <th className="py-1 pr-4 text-right">System Qty</th>
                                   <th className="py-1 pr-4">Match</th>
@@ -266,7 +266,7 @@ export default function CombineCsoPanel() {
                                   <th className="py-1 pr-4">By</th>
                                 </tr>
                                 </thead>
-                                                                <tbody>
+                                                               <tbody>
                                   {buildLocationRows(item).map((row) =>
                                     row.counted.length === 0 ? (
                                       <tr key={row.locationCode} className="border-b border-zinc-900 last:border-0">
@@ -327,16 +327,6 @@ export default function CombineCsoPanel() {
     </div>
   );
 }
-
-function SummaryStat({ label, value, accent }: { label: string; value: number; accent?: string }) {
-  return (
-    <div>
-      <div className={`text-xl font-semibold ${accent ?? "text-zinc-200"}`}>{value.toLocaleString()}</div>
-      <div className="text-xs text-zinc-500">{label}</div>
-    </div>
-  );
-}
-
 function buildLocationRows(item: CombinedItem) {
   const countedByLocation = new Map<string, CountedLocationEntry[]>();
   for (const c of item.countedLocations) {
@@ -357,6 +347,14 @@ function buildLocationRows(item: CombinedItem) {
     const matchStatus: "MATCH" | "MISMATCH" = (systemQty ?? 0) === countedTotal ? "MATCH" : "MISMATCH";
     return { locationCode, systemQty, counted, matchStatus };
   });
+}
+function SummaryStat({ label, value, accent }: { label: string; value: number; accent?: string }) {
+  return (
+    <div>
+      <div className={`text-xl font-semibold ${accent ?? "text-zinc-200"}`}>{value.toLocaleString()}</div>
+      <div className="text-xs text-zinc-500">{label}</div>
+    </div>
+  );
 }
 
 function MatchBadge({ status }: { status: "MATCH" | "MISMATCH" }) {
