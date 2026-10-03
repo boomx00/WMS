@@ -61,22 +61,27 @@ function sanitizeList(input: unknown): string[] {
   return input.map((v) => String(v).trim()).filter(Boolean);
 }
 
+type CountedEntry = {
+  opnameNumber: string;
+  countedQty: number;
+  countedAt: string | null;
+  countedByUsername: string | null;
+};
+
 // POST /api/stock-opname/combine
 // body: { opnameNumbers: string[] }
 //
-// Sums every counted line's countedQty across the selected sessions, per
-// SKU, and checks that combined total against the system's CURRENT total
-// stock for that SKU across every location — not just the locations that
-// were counted. This is deliberately different from the per-session
-// report (which checks location-by-location): this is for several people
-// each counting their own section, whose combined counts should add up
-// to the whole system's stock once every section is in. Lines with no
-// SKU (confirmed-empty locations) don't contribute to any SKU's total —
-// their count is surfaced separately as emptyConfirmations instead.
-// Each item also carries a location-level breakdown — total system stock
-// per location, and each individual CSO count line that fed into the
-// combined total — so the frontend can expand a row and compare them
-// side by side. Read-only — nothing gets changed.
+// Combines counts across the selected sessions PER LOCATION first, not
+// just per SKU — because the same physical location can legitimately be
+// counted by more than one CSO session. If every session that counted a
+// given location agrees on the quantity, that location contributes its
+// quantity ONCE to the SKU's combined total (not once per session — two
+// sessions agreeing on 500 is still 500, not 1000). If sessions disagree
+// on a location's quantity, that location is left UNRESOLVED (contributes
+// nothing to the default total) and flagged for the person to pick which
+// session's count to trust — the frontend does that selection and
+// recomputes the total client-side; this endpoint always reports the
+// default (conflicts excluded) state. Read-only — nothing gets changed.
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const opnameNumbers = sanitizeList(body.opnameNumbers);
@@ -85,62 +90,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "At least one opnameNumber is required" }, { status: 400 });
   }
 
-  const countedAgg = await db
-    .select({
-      itemId: stockOpnameItems.itemId,
-      combinedQty: sql<number>`sum(${stockOpnameItems.countedQty})`.mapWith(Number),
-    })
-    .from(stockOpnameItems)
-    .where(and(inArray(stockOpnameItems.opnameNumber, opnameNumbers), isNotNull(stockOpnameItems.itemId)))
-    .groupBy(stockOpnameItems.itemId);
-
   const [emptyRow] = await db
     .select({ count: sql<number>`count(*)`.mapWith(Number) })
     .from(stockOpnameItems)
     .where(and(inArray(stockOpnameItems.opnameNumber, opnameNumbers), isNull(stockOpnameItems.itemId)));
 
-  const systemAgg = await db
-    .select({
-      itemId: locationStock.itemId,
-      systemQty: sql<number>`sum(${locationStock.quantity})`.mapWith(Number),
-    })
-    .from(locationStock)
-    .groupBy(locationStock.itemId);
-
-  const combinedByItem = new Map(countedAgg.map((r) => [r.itemId as number, r.combinedQty]));
-  const systemByItem = new Map(systemAgg.map((r) => [r.itemId, r.systemQty]));
-
-  const allItemIds = Array.from(new Set([...combinedByItem.keys(), ...systemByItem.keys()]));
-
-  const itemRows = allItemIds.length > 0 ? await db.select().from(items).where(inArray(items.id, allItemIds)) : [];
-  const itemById = new Map(itemRows.map((i) => [i.id, i]));
-
-  // Per-location breakdown, so each row can expand to show: where the
-  // system currently has this SKU, and which individual CSO location
-  // counts (across the selected sessions) fed into the combined total.
-  const systemLocationRows =
-    allItemIds.length > 0
-      ? await db
-          .select({
-            itemId: locationStock.itemId,
-            locationCode: locations.code,
-            quantity: locationStock.quantity,
-          })
-          .from(locationStock)
-          .innerJoin(locations, eq(locationStock.locationId, locations.id))
-          .where(inArray(locationStock.itemId, allItemIds))
-      : [];
-
-  const systemLocationsByItem = new Map<number, { locationCode: string; quantity: number }[]>();
-  for (const row of systemLocationRows) {
-    if (row.quantity === 0) continue;
-    if (!systemLocationsByItem.has(row.itemId)) systemLocationsByItem.set(row.itemId, []);
-    systemLocationsByItem.get(row.itemId)!.push({ locationCode: row.locationCode, quantity: row.quantity });
-  }
-  for (const entries of systemLocationsByItem.values()) {
-    entries.sort((a, b) => a.locationCode.localeCompare(b.locationCode));
-  }
-
+  // Every counted (location, item) line across the selected sessions.
   const countedLineRows = await db
     .select({
       itemId: stockOpnameItems.itemId,
@@ -155,31 +110,105 @@ export async function POST(req: NextRequest) {
     .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
     .where(and(inArray(stockOpnameItems.opnameNumber, opnameNumbers), isNotNull(stockOpnameItems.itemId)));
 
-  const countedLinesByItem = new Map<
-    number,
-    { opnameNumber: string; locationCode: string; countedQty: number; countedAt: string | null; countedByUsername: string | null }[]
-  >();
+  // item -> location -> every session's count at that location
+  const rawByItemLocation = new Map<number, Map<string, CountedEntry[]>>();
   for (const row of countedLineRows) {
     const itemId = row.itemId as number;
-    if (!countedLinesByItem.has(itemId)) countedLinesByItem.set(itemId, []);
-    countedLinesByItem.get(itemId)!.push({
+    if (!rawByItemLocation.has(itemId)) rawByItemLocation.set(itemId, new Map());
+    const byLoc = rawByItemLocation.get(itemId)!;
+    if (!byLoc.has(row.locationCode)) byLoc.set(row.locationCode, []);
+    byLoc.get(row.locationCode)!.push({
       opnameNumber: row.opnameNumber,
-      locationCode: row.locationCode,
       countedQty: row.countedQty ?? 0,
       countedAt: row.countedAt ? row.countedAt.toISOString() : null,
       countedByUsername: row.countedByUsername,
     });
   }
-  for (const entries of countedLinesByItem.values()) {
-    entries.sort((a, b) => a.locationCode.localeCompare(b.locationCode));
+
+  // Total system quantity per item, across every location — the figure
+  // the combined count is ultimately checked against.
+  const systemAgg = await db
+    .select({
+      itemId: locationStock.itemId,
+      systemQty: sql<number>`sum(${locationStock.quantity})`.mapWith(Number),
+    })
+    .from(locationStock)
+    .groupBy(locationStock.itemId);
+  const systemByItem = new Map(systemAgg.map((r) => [r.itemId, r.systemQty]));
+
+  // Live system quantity per item, broken down by location — for the
+  // side-by-side detail view.
+  const allItemIds = Array.from(new Set([...rawByItemLocation.keys(), ...systemByItem.keys()]));
+
+  const systemLocationRows =
+    allItemIds.length > 0
+      ? await db
+          .select({
+            itemId: locationStock.itemId,
+            locationCode: locations.code,
+            quantity: locationStock.quantity,
+          })
+          .from(locationStock)
+          .innerJoin(locations, eq(locationStock.locationId, locations.id))
+          .where(inArray(locationStock.itemId, allItemIds))
+      : [];
+
+  const systemByItemLocation = new Map<number, Map<string, number>>();
+  for (const row of systemLocationRows) {
+    if (row.quantity === 0) continue;
+    if (!systemByItemLocation.has(row.itemId)) systemByItemLocation.set(row.itemId, new Map());
+    systemByItemLocation.get(row.itemId)!.set(row.locationCode, row.quantity);
+  }
+
+  const itemRows = allItemIds.length > 0 ? await db.select().from(items).where(inArray(items.id, allItemIds)) : [];
+  const itemById = new Map(itemRows.map((i) => [i.id, i]));
+
+  function buildBreakdownForItem(itemId: number) {
+    const countedMap = rawByItemLocation.get(itemId) ?? new Map<string, CountedEntry[]>();
+    const systemMap = systemByItemLocation.get(itemId) ?? new Map<string, number>();
+    const allCodes = Array.from(new Set([...countedMap.keys(), ...systemMap.keys()])).sort((a, b) =>
+      a.localeCompare(b)
+    );
+
+    let hasConflict = false;
+    let combinedQty = 0;
+
+    const locationBreakdown = allCodes.map((locationCode) => {
+      const entries = (countedMap.get(locationCode) ?? []).sort((a, b) => a.opnameNumber.localeCompare(b.opnameNumber));
+      const systemQty = systemMap.has(locationCode) ? systemMap.get(locationCode)! : null;
+
+      let resolvedQty: number | null = null;
+      let conflict = false;
+
+      if (entries.length > 0) {
+        const distinctQtys = new Set(entries.map((e) => e.countedQty));
+        if (distinctQtys.size === 1) {
+          resolvedQty = entries[0].countedQty;
+        } else {
+          conflict = true;
+          hasConflict = true;
+        }
+      }
+
+      if (resolvedQty !== null) combinedQty += resolvedQty;
+
+      return { locationCode, systemQty, entries, resolvedQty, conflict };
+    });
+
+    return { locationBreakdown, combinedQty, hasConflict };
   }
 
   const resultItems = allItemIds
     .map((itemId) => {
-      const combinedQty = combinedByItem.get(itemId) ?? 0;
+      const { locationBreakdown, combinedQty, hasConflict } = buildBreakdownForItem(itemId);
       const systemQty = systemByItem.get(itemId) ?? 0;
       const difference = combinedQty - systemQty;
       const item = itemById.get(itemId);
+      const status: "MATCH" | "MISMATCH" | "NEEDS_REVIEW" = hasConflict
+        ? "NEEDS_REVIEW"
+        : difference === 0
+          ? "MATCH"
+          : "MISMATCH";
       return {
         itemId,
         itemSku: item?.sku ?? `#${itemId}`,
@@ -187,14 +216,18 @@ export async function POST(req: NextRequest) {
         combinedQty,
         systemQty,
         difference,
-        status: (difference === 0 ? "MATCH" : "MISMATCH") as "MATCH" | "MISMATCH",
-        systemLocations: systemLocationsByItem.get(itemId) ?? [],
-        countedLocations: countedLinesByItem.get(itemId) ?? [],
+        status,
+        hasConflict,
+        locationBreakdown,
       };
     })
-    .sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference) || a.itemSku.localeCompare(b.itemSku));
+    .sort((a, b) => {
+      if (a.hasConflict !== b.hasConflict) return a.hasConflict ? -1 : 1;
+      return Math.abs(b.difference) - Math.abs(a.difference) || a.itemSku.localeCompare(b.itemSku);
+    });
 
   const matches = resultItems.filter((i) => i.status === "MATCH").length;
+  const needsReview = resultItems.filter((i) => i.status === "NEEDS_REVIEW").length;
 
   return NextResponse.json({
     opnameNumbers,
@@ -204,7 +237,8 @@ export async function POST(req: NextRequest) {
     summary: {
       totalSkus: resultItems.length,
       matches,
-      mismatches: resultItems.length - matches,
+      mismatches: resultItems.length - matches - needsReview,
+      needsReview,
       totalCombinedQty: resultItems.reduce((sum, i) => sum + i.combinedQty, 0),
       totalSystemQty: resultItems.reduce((sum, i) => sum + i.systemQty, 0),
     },
