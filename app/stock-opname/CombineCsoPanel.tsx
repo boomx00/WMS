@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import * as XLSX from "xlsx";
 
 type CsoSession = {
   opnameNumber: string;
@@ -10,14 +11,22 @@ type CsoSession = {
   countedLines: number;
 };
 
-type SystemLocationEntry = { locationCode: string; quantity: number };
-type CountedLocationEntry = {
+type CountedEntry = {
   opnameNumber: string;
-  locationCode: string;
   countedQty: number;
   countedAt: string | null;
   countedByUsername: string | null;
 };
+
+type LocationBreakdownRow = {
+  locationCode: string;
+  systemQty: number | null;
+  entries: CountedEntry[];
+  resolvedQty: number | null; // null when entries disagree and nothing's been picked server-side
+  conflict: boolean;
+};
+
+type ItemStatus = "MATCH" | "MISMATCH" | "NEEDS_REVIEW";
 
 type CombinedItem = {
   itemId: number;
@@ -26,9 +35,9 @@ type CombinedItem = {
   combinedQty: number;
   systemQty: number;
   difference: number;
-  status: "MATCH" | "MISMATCH";
-  systemLocations: SystemLocationEntry[];
-  countedLocations: CountedLocationEntry[];
+  status: ItemStatus;
+  hasConflict: boolean;
+  locationBreakdown: LocationBreakdownRow[];
 };
 
 type CombineResponse = {
@@ -40,10 +49,61 @@ type CombineResponse = {
     totalSkus: number;
     matches: number;
     mismatches: number;
+    needsReview: number;
     totalCombinedQty: number;
     totalSystemQty: number;
   };
 };
+
+// Selections key: `${itemId}-${locationCode}` -> chosen opnameNumber, for
+// locations where sessions disagreed on the quantity.
+type Selections = Record<string, string>;
+
+function selectionKey(itemId: number, locationCode: string) {
+  return `${itemId}-${locationCode}`;
+}
+
+function effectiveQtyForLocation(loc: LocationBreakdownRow, selections: Selections, itemId: number): number | null {
+  if (!loc.conflict) return loc.resolvedQty;
+  const chosen = selections[selectionKey(itemId, loc.locationCode)];
+  if (!chosen) return null;
+  return loc.entries.find((e) => e.opnameNumber === chosen)?.countedQty ?? null;
+}
+
+function effectiveItem(item: CombinedItem, selections: Selections) {
+  let combinedQty = 0;
+  let unresolved = false;
+  for (const loc of item.locationBreakdown) {
+    const qty = effectiveQtyForLocation(loc, selections, item.itemId);
+    if (qty !== null) combinedQty += qty;
+    if (loc.conflict && qty === null) unresolved = true;
+  }
+  const difference = combinedQty - item.systemQty;
+  const status: ItemStatus = unresolved ? "NEEDS_REVIEW" : difference === 0 ? "MATCH" : "MISMATCH";
+  return { combinedQty, difference, status };
+}
+
+function describeLocation(loc: LocationBreakdownRow, selections: Selections, itemId: number): string {
+  if (loc.entries.length === 0) return "(Not scanned)";
+  if (!loc.conflict) return loc.entries.map((e) => e.opnameNumber).join(" & ");
+  const chosen = selections[selectionKey(itemId, loc.locationCode)];
+  if (!chosen) return `Conflict: ${loc.entries.map((e) => `${e.opnameNumber}=${e.countedQty}`).join(" vs ")}`;
+  return `Resolved: ${chosen} (of ${loc.entries.map((e) => e.opnameNumber).join(", ")})`;
+}
+
+function StatusBadge({ status }: { status: ItemStatus }) {
+  const styles: Record<ItemStatus, string> = {
+    MATCH: "bg-emerald-950 text-emerald-300",
+    MISMATCH: "bg-amber-950 text-amber-300",
+    NEEDS_REVIEW: "bg-purple-950 text-purple-300",
+  };
+  const labels: Record<ItemStatus, string> = {
+    MATCH: "Match",
+    MISMATCH: "Mismatch",
+    NEEDS_REVIEW: "Needs Review",
+  };
+  return <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${styles[status]}`}>{labels[status]}</span>;
+}
 
 export default function CombineCsoPanel() {
   const [sessions, setSessions] = useState<CsoSession[]>([]);
@@ -52,8 +112,9 @@ export default function CombineCsoPanel() {
   const [combining, setCombining] = useState(false);
   const [result, setResult] = useState<CombineResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"ALL" | "MATCH" | "MISMATCH">("ALL");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | ItemStatus>("ALL");
   const [expandedItemId, setExpandedItemId] = useState<number | null>(null);
+  const [selections, setSelections] = useState<Selections>({});
 
   useEffect(() => {
     refreshSessions();
@@ -88,6 +149,7 @@ export default function CombineCsoPanel() {
     setError(null);
     setResult(null);
     setExpandedItemId(null);
+    setSelections({});
 
     const res = await fetch("/api/stock-opname/combine", {
       method: "POST",
@@ -106,11 +168,59 @@ export default function CombineCsoPanel() {
     setStatusFilter("ALL");
   }
 
-  const filteredItems = result
-    ? statusFilter === "ALL"
-      ? result.items
-      : result.items.filter((i) => i.status === statusFilter)
-    : [];
+  function chooseConflict(itemId: number, locationCode: string, opnameNumber: string) {
+    setSelections((prev) => ({ ...prev, [selectionKey(itemId, locationCode)]: opnameNumber }));
+  }
+
+  function handleExport() {
+    if (!result) return;
+
+    const summaryRows = result.items.map((item) => {
+      const eff = effectiveItem(item, selections);
+      return {
+        SKU: item.itemSku,
+        Product: item.itemName,
+        "Combined Qty": eff.combinedQty,
+        "System Qty": item.systemQty,
+        Difference: eff.difference,
+        Status: eff.status,
+      };
+    });
+
+    const detailRows = result.items.flatMap((item) =>
+      item.locationBreakdown.map((loc) => {
+        const qty = effectiveQtyForLocation(loc, selections, item.itemId);
+        const match = qty === null ? (loc.systemQty === null || loc.systemQty === 0 ? "" : "UNRESOLVED") : qty === (loc.systemQty ?? 0) ? "MATCH" : "MISMATCH";
+        return {
+          SKU: item.itemSku,
+          Location: loc.locationCode,
+          "System Qty": loc.systemQty ?? "",
+          Resolution: describeLocation(loc, selections, item.itemId),
+          "Effective Qty": qty ?? "",
+          Match: match,
+        };
+      })
+    );
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), "Summary");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailRows), "Location Detail");
+    XLSX.writeFile(wb, `combine-cso-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+
+  const itemsWithEffective = (result?.items ?? []).map((item) => ({ item, eff: effectiveItem(item, selections) }));
+
+  const filteredItems =
+    statusFilter === "ALL" ? itemsWithEffective : itemsWithEffective.filter(({ eff }) => eff.status === statusFilter);
+
+  const liveSummary = result
+    ? {
+        matches: itemsWithEffective.filter(({ eff }) => eff.status === "MATCH").length,
+        mismatches: itemsWithEffective.filter(({ eff }) => eff.status === "MISMATCH").length,
+        needsReview: itemsWithEffective.filter(({ eff }) => eff.status === "NEEDS_REVIEW").length,
+        totalCombinedQty: itemsWithEffective.reduce((sum, { eff }) => sum + eff.combinedQty, 0),
+      }
+    : null;
 
   return (
     <div>
@@ -118,8 +228,9 @@ export default function CombineCsoPanel() {
         Select the individual CSO stock opname sessions that together cover the warehouse (e.g.{" "}
         <span className="font-mono">CSO-Budi-01</span>, <span className="font-mono">CSO-Siti-02</span>), then
         combine them — every counted line across the selected sessions is summed per SKU and checked against
-        the system's current total stock for that SKU across every location, not just what was counted. This
-        is a read-only check — nothing gets changed.
+        the system's current total stock for that SKU across every location, not just what was counted. If two
+        sessions counted the same location and agree on the quantity, it's counted once, not twice. If they
+        disagree, you'll be asked which one to use. This is a read-only check — nothing gets changed.
       </p>
 
       <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
@@ -155,24 +266,37 @@ export default function CombineCsoPanel() {
         )}
       </div>
 
-      <button
-        onClick={handleCombine}
-        disabled={selected.size === 0 || combining}
-        className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors mb-4"
-      >
-        {combining ? "Combining..." : `Combine & Compare (${selected.size})`}
-      </button>
+      <div className="flex items-center gap-3 mb-4">
+        <button
+          onClick={handleCombine}
+          disabled={selected.size === 0 || combining}
+          className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+        >
+          {combining ? "Combining..." : `Combine & Compare (${selected.size})`}
+        </button>
+        {result && (
+          <button
+            onClick={handleExport}
+            className="px-4 py-2 rounded-md border border-zinc-700 text-zinc-300 text-sm font-medium hover:bg-zinc-800 transition-colors"
+          >
+            Export to Excel
+          </button>
+        )}
+      </div>
 
       {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
 
-      {result && (
+      {result && liveSummary && (
         <div>
           <div className="flex gap-6 mb-5 flex-wrap">
             <SummaryStat label="Sessions" value={result.sessionCount} />
             <SummaryStat label="SKUs" value={result.summary.totalSkus} />
-            <SummaryStat label="Match" value={result.summary.matches} accent="text-emerald-400" />
-            <SummaryStat label="Mismatch" value={result.summary.mismatches} accent="text-amber-400" />
-            <SummaryStat label="Combined Qty" value={result.summary.totalCombinedQty} />
+            <SummaryStat label="Match" value={liveSummary.matches} accent="text-emerald-400" />
+            <SummaryStat label="Mismatch" value={liveSummary.mismatches} accent="text-amber-400" />
+            {liveSummary.needsReview > 0 && (
+              <SummaryStat label="Needs Review" value={liveSummary.needsReview} accent="text-purple-400" />
+            )}
+            <SummaryStat label="Combined Qty" value={liveSummary.totalCombinedQty} />
             <SummaryStat label="System Qty" value={result.summary.totalSystemQty} />
             {result.emptyConfirmations > 0 && (
               <SummaryStat label="Empty Confirmations" value={result.emptyConfirmations} accent="text-zinc-500" />
@@ -180,7 +304,7 @@ export default function CombineCsoPanel() {
           </div>
 
           <div className="flex items-center gap-2 mb-3">
-            {(["ALL", "MISMATCH", "MATCH"] as const).map((s) => (
+            {(["ALL", "NEEDS_REVIEW", "MISMATCH", "MATCH"] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setStatusFilter(s)}
@@ -188,7 +312,7 @@ export default function CombineCsoPanel() {
                   statusFilter === s ? "bg-amber-500 text-zinc-950" : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
                 }`}
               >
-                {s === "ALL" ? "All" : s === "MATCH" ? "Match" : "Mismatch"}
+                {s === "ALL" ? "All" : s === "MATCH" ? "Match" : s === "MISMATCH" ? "Mismatch" : "Needs Review"}
               </button>
             ))}
           </div>
@@ -214,7 +338,7 @@ export default function CombineCsoPanel() {
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.map((item) => {
+                  filteredItems.map(({ item, eff }) => {
                     const expanded = expandedItemId === item.itemId;
                     return (
                       <>
@@ -228,28 +352,22 @@ export default function CombineCsoPanel() {
                           </td>
                           <td className="px-3 py-1.5 font-mono text-zinc-300">{item.itemSku}</td>
                           <td className="px-3 py-1.5 text-zinc-500">{item.itemName}</td>
-                          <td className="px-3 py-1.5 text-right font-mono">{item.combinedQty.toLocaleString()}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{eff.combinedQty.toLocaleString()}</td>
                           <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
                             {item.systemQty.toLocaleString()}
                           </td>
                           <td className="px-3 py-1.5 text-right font-mono">
-                            {item.difference === 0 ? (
+                            {eff.difference === 0 ? (
                               <span className="text-emerald-400">0</span>
                             ) : (
-                              <span className={item.difference > 0 ? "text-amber-400" : "text-red-400"}>
-                                {item.difference > 0 ? "+" : ""}
-                                {item.difference.toLocaleString()}
+                              <span className={eff.difference > 0 ? "text-amber-400" : "text-red-400"}>
+                                {eff.difference > 0 ? "+" : ""}
+                                {eff.difference.toLocaleString()}
                               </span>
                             )}
                           </td>
                           <td className="px-3 py-1.5">
-                            <span
-                              className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
-                                item.status === "MATCH" ? "bg-emerald-950 text-emerald-300" : "bg-amber-950 text-amber-300"
-                              }`}
-                            >
-                              {item.status === "MATCH" ? "Match" : "Mismatch"}
-                            </span>
+                            <StatusBadge status={eff.status} />
                           </td>
                         </tr>
                         {expanded && (
@@ -257,59 +375,81 @@ export default function CombineCsoPanel() {
                             <td colSpan={7} className="px-4 py-3 bg-zinc-950/50">
                               <table className="w-full text-xs">
                                 <thead>
-                                                                  <tr className="text-zinc-600 text-left border-b border-zinc-800">
-                                  <th className="py-1 pr-4">Location</th>
-                                  <th className="py-1 pr-4 text-right">System Qty</th>
-                                  <th className="py-1 pr-4">Match</th>
-                                  <th className="py-1 pr-4">CSO Session</th>
-                                  <th className="py-1 pr-4 text-right">Counted Qty</th>
-                                  <th className="py-1 pr-4">By</th>
-                                </tr>
+                                  <tr className="text-zinc-600 text-left border-b border-zinc-800">
+                                    <th className="py-1 pr-4">Location</th>
+                                    <th className="py-1 pr-4 text-right">System Qty</th>
+                                    <th className="py-1 pr-4">Match</th>
+                                    <th className="py-1 pr-4">CSO Count(s)</th>
+                                  </tr>
                                 </thead>
-                                                               <tbody>
-                                  {buildLocationRows(item).map((row) =>
-                                    row.counted.length === 0 ? (
-                                      <tr key={row.locationCode} className="border-b border-zinc-900 last:border-0">
-                                        <td className="py-1 pr-4 font-mono text-zinc-300">{row.locationCode}</td>
-                                        <td className="py-1 pr-4 text-right font-mono text-zinc-400">
-                                          {row.systemQty !== null ? row.systemQty.toLocaleString() : "—"}
+                                <tbody>
+                                  {item.locationBreakdown.map((loc) => {
+                                    const effQty = effectiveQtyForLocation(loc, selections, item.itemId);
+                                    const locMatch: ItemStatus | null =
+                                      effQty === null && !loc.conflict
+                                        ? (loc.systemQty ?? 0) === 0
+                                          ? "MATCH"
+                                          : "MISMATCH"
+                                        : effQty !== null
+                                          ? effQty === (loc.systemQty ?? 0)
+                                            ? "MATCH"
+                                            : "MISMATCH"
+                                          : null;
+                                    return (
+                                      <tr key={loc.locationCode} className="border-b border-zinc-900 last:border-0 align-top">
+                                        <td className="py-1.5 pr-4 font-mono text-zinc-300">{loc.locationCode}</td>
+                                        <td className="py-1.5 pr-4 text-right font-mono text-zinc-400">
+                                          {loc.systemQty !== null ? loc.systemQty.toLocaleString() : "—"}
                                         </td>
-                                        <td className="py-1 pr-4">
-                                          <MatchBadge status={row.matchStatus} />
+                                        <td className="py-1.5 pr-4">
+                                          {locMatch ? (
+                                            <StatusBadge status={locMatch} />
+                                          ) : (
+                                            <StatusBadge status="NEEDS_REVIEW" />
+                                          )}
                                         </td>
-                                        <td colSpan={3} className="py-1 pr-4 text-zinc-600 italic">
-                                          (Not scanned)
+                                        <td className="py-1.5 pr-4">
+                                          {loc.entries.length === 0 ? (
+                                            <span className="text-zinc-600 italic">(Not scanned)</span>
+                                          ) : !loc.conflict ? (
+                                            <span>
+                                              <span className="font-mono text-amber-500">
+                                                {loc.entries.map((e) => e.opnameNumber).join(" & ")}
+                                              </span>
+                                              <span className="text-zinc-400">
+                                                , quantity {loc.resolvedQty?.toLocaleString()}
+                                              </span>
+                                            </span>
+                                          ) : (
+                                            <div className="space-y-1">
+                                              {loc.entries.map((e) => (
+                                                <label
+                                                  key={e.opnameNumber}
+                                                  className="flex items-center gap-2 cursor-pointer"
+                                                >
+                                                  <input
+                                                    type="radio"
+                                                    name={`conflict-${item.itemId}-${loc.locationCode}`}
+                                                    checked={
+                                                      selections[selectionKey(item.itemId, loc.locationCode)] ===
+                                                      e.opnameNumber
+                                                    }
+                                                    onChange={() => chooseConflict(item.itemId, loc.locationCode, e.opnameNumber)}
+                                                  />
+                                                  <span className="font-mono text-amber-500">{e.opnameNumber}</span>
+                                                  <span className="font-mono">{e.countedQty.toLocaleString()}</span>
+                                                  <span className="text-zinc-500">{e.countedByUsername ?? "—"}</span>
+                                                </label>
+                                              ))}
+                                              {!selections[selectionKey(item.itemId, loc.locationCode)] && (
+                                                <span className="text-[10px] text-purple-400">Pick one to resolve</span>
+                                              )}
+                                            </div>
+                                          )}
                                         </td>
                                       </tr>
-                                    ) : (
-                                      row.counted.map((c, i) => (
-                                        <tr key={`${row.locationCode}-${i}`} className="border-b border-zinc-900 last:border-0">
-                                          {i === 0 ? (
-                                            <>
-                                              <td
-                                                className="py-1 pr-4 font-mono text-zinc-300 align-top"
-                                                rowSpan={row.counted.length}
-                                              >
-                                                {row.locationCode}
-                                              </td>
-                                              <td
-                                                className="py-1 pr-4 text-right font-mono text-zinc-400 align-top"
-                                                rowSpan={row.counted.length}
-                                              >
-                                                {row.systemQty !== null ? row.systemQty.toLocaleString() : "—"}
-                                              </td>
-                                              <td className="py-1 pr-4 align-top" rowSpan={row.counted.length}>
-                                                <MatchBadge status={row.matchStatus} />
-                                              </td>
-                                            </>
-                                          ) : null}
-                                          <td className="py-1 pr-4 font-mono text-amber-500">{c.opnameNumber}</td>
-                                          <td className="py-1 pr-4 text-right font-mono">{c.countedQty.toLocaleString()}</td>
-                                          <td className="py-1 pr-4 text-zinc-500">{c.countedByUsername ?? "—"}</td>
-                                        </tr>
-                                      ))
-                                    )
-                                  )}
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </td>
@@ -327,44 +467,12 @@ export default function CombineCsoPanel() {
     </div>
   );
 }
-function buildLocationRows(item: CombinedItem) {
-  const countedByLocation = new Map<string, CountedLocationEntry[]>();
-  for (const c of item.countedLocations ?? []) {
-    if (!countedByLocation.has(c.locationCode)) countedByLocation.set(c.locationCode, []);
-    countedByLocation.get(c.locationCode)!.push(c);
-  }
 
-  const systemByLocation = new Map((item.systemLocations ?? []).map((s) => [s.locationCode, s.quantity]));
-
-  const allCodes = Array.from(new Set([...systemByLocation.keys(), ...countedByLocation.keys()])).sort((a, b) =>
-    a.localeCompare(b)
-  );
-
-  return allCodes.map((locationCode) => {
-    const counted = countedByLocation.get(locationCode) ?? [];
-    const systemQty = systemByLocation.get(locationCode) ?? null;
-    const countedTotal = counted.reduce((sum, c) => sum + c.countedQty, 0);
-    const matchStatus: "MATCH" | "MISMATCH" = (systemQty ?? 0) === countedTotal ? "MATCH" : "MISMATCH";
-    return { locationCode, systemQty, counted, matchStatus };
-  });
-}
 function SummaryStat({ label, value, accent }: { label: string; value: number; accent?: string }) {
   return (
     <div>
       <div className={`text-xl font-semibold ${accent ?? "text-zinc-200"}`}>{value.toLocaleString()}</div>
       <div className="text-xs text-zinc-500">{label}</div>
     </div>
-  );
-}
-
-function MatchBadge({ status }: { status: "MATCH" | "MISMATCH" }) {
-  return (
-    <span
-      className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
-        status === "MATCH" ? "bg-emerald-950 text-emerald-300" : "bg-amber-950 text-amber-300"
-      }`}
-    >
-      {status === "MATCH" ? "Match" : "Mismatch"}
-    </span>
   );
 }
