@@ -160,30 +160,33 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
     });
   }
 
-  
-// DEFECT = stock at DESTROY locations. GOOD STOCK = Floor + Rack, per
-// smtg's definition. TOTAL is the same grand total already shown in the
-// SKU row (every location type, Outbound WH and Leftover included) —
-// it won't always equal DEFECT + GOOD STOCK, since Outbound WH/Leftover
-// stock counts toward TOTAL but neither bucket.
+// GOOD STOCK = the specific FLOOR-coded location + all Rack locations —
+// non-defective, non-export only. DEFECT and EXPOR are both their own
+// specific locations (codes "DEFECT" and "EXPOR") that happen to share
+// type FLOOR with the general floor location, so none of the three can
+// be told apart by locationType alone — all three are matched by
+// locationCode and kept mutually exclusive from Good Stock.
 function exportRow(sku: SkuStock): (string | number)[] {
   const defect = sku.locations
-    .filter((l) => l.locationType === "DESTROY")
+    .filter((l) => l.locationCode === "DEFECT")
+    .reduce((sum, l) => sum + l.quantity, 0);
+  const expor = sku.locations
+    .filter((l) => l.locationCode === "EXPOR")
     .reduce((sum, l) => sum + l.quantity, 0);
   const good = sku.locations
-    .filter((l) => l.locationType === "FLOOR" || l.locationType === "RACK")
+    .filter((l) => l.locationCode === "FLOOR" || l.locationType === "RACK")
+    .reduce((sum, l) => sum + l.quantity, 0);
+  const outboundWh = sku.locations
+    .filter((l) => l.locationType === "OUTBOUND_WH")
     .reduce((sum, l) => sum + l.quantity, 0);
 
-  return [sku.sku, sku.name, defect, good, sku.totalQuantity];
+  return [sku.sku, sku.name, defect, expor, good, outboundWh, sku.totalQuantity];
 }
-
   function exportAll() {
-    // Exports every SKU regardless of the current search box — "all" means
-    // all, not just what's currently filtered/visible on screen.
     const rows = skus.map(exportRow);
     downloadCsv(
       `total-stock-${new Date().toISOString().slice(0, 10)}.csv`,
-      ["SKU CODE", "SKU NAME", "DEFECT", "GOOD STOCK", "TOTAL"],
+      ["SKU CODE", "SKU NAME", "DEFECT", "EXPOR", "GOOD STOCK", "OUTBOUND_WH", "TOTAL"],
       rows
     );
   }
