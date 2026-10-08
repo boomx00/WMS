@@ -70,11 +70,10 @@ export default function SalesOrdersShippedPanel() {
     setError(null);
     setExpanded(new Set());
 
-    const startIso = new Date(start).toISOString();
-    const endIso = new Date(end).toISOString();
-
+    // Send the raw local wall-clock values from the datetime-local inputs
+    // (no UTC conversion) — the truck times in the DB are local wall-clock.
     const res = await fetch(
-      `/api/analytics/sales-orders-shipped?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`
+      `/api/analytics/sales-orders-shipped?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`
     );
 
     setLoading(false);
@@ -101,9 +100,9 @@ export default function SalesOrdersShippedPanel() {
     <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
       <h2 className="text-sm font-medium mb-1">Sales Orders Shipped</h2>
       <p className="text-xs text-zinc-500 mb-4">
-        Sales orders whose truck entered in a date range, and what left
-        against each one — filtered by truck enter/leave time, not by when
-        individual SHIP events were logged.
+        Sales orders whose truck entered or left in a date range, and what
+        left against each one — filtered by truck enter/leave time, not by
+        when individual SHIP events were logged.
       </p>
 
       <div className="flex items-end gap-3 mb-6 flex-wrap">
@@ -138,7 +137,7 @@ export default function SalesOrdersShippedPanel() {
 
       {data &&
         (data.salesOrders.length === 0 ? (
-          <p className="text-sm text-zinc-600">No sales orders' trucks entered in this range.</p>
+          <p className="text-sm text-zinc-600">No sales orders had a truck enter or leave in this range.</p>
         ) : (
           <div>
             <div className="flex gap-6 mb-5">

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locationStockEvents, items, salesOrders } from "@/db/schema";
-import { eq, and, gte, lte, isNotNull, inArray } from "drizzle-orm";
+import { eq, and, or, gte, lte, isNotNull, inArray } from "drizzle-orm";
 
 // GET /api/analytics/sales-orders-shipped?start=...&end=...
 //
@@ -19,17 +19,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "start and end query params are required" }, { status: 400 });
   }
 
-  const start = new Date(startParam);
-  const end = new Date(endParam);
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+  // truckEnterTime/truckLeaveTime are timezone-less timestamps holding the
+  // local wall-clock time (what the user sees is what's stored). So the
+  // range must be compared as wall-clock strings too — NOT converted to
+  // UTC, which would shift the window by the viewer's UTC offset.
+  // Expected format from the client: "YYYY-MM-DDTHH:mm" (datetime-local).
+  const WALL_CLOCK = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/;
+  if (!WALL_CLOCK.test(startParam) || !WALL_CLOCK.test(endParam)) {
     return NextResponse.json({ error: "Invalid date format" }, { status: 400 });
   }
-
-  // truckEnterTime/truckLeaveTime are stored as plain (timezone-less)
-  // strings, so compare against ISO strings rather than Date objects —
-  // matches how the column is declared ({ mode: "string" }).
-  const startIso = start.toISOString();
-  const endIso = end.toISOString();
+  const startIso = startParam.replace("T", " ");
+  const endIso = endParam.replace("T", " ");
 
   const orders = await db
     .select({
@@ -40,11 +40,21 @@ export async function GET(req: NextRequest) {
       truckLeaveTime: salesOrders.truckLeaveTime,
     })
     .from(salesOrders)
+    // An order counts as "performed in the range" if its truck entered OR
+    // left within it — so a truck that arrived before the range start but
+    // left inside it (or vice versa) is still shown.
     .where(
-      and(
-        isNotNull(salesOrders.truckEnterTime),
-        gte(salesOrders.truckEnterTime, startIso),
-        lte(salesOrders.truckEnterTime, endIso)
+      or(
+        and(
+          isNotNull(salesOrders.truckEnterTime),
+          gte(salesOrders.truckEnterTime, startIso),
+          lte(salesOrders.truckEnterTime, endIso)
+        ),
+        and(
+          isNotNull(salesOrders.truckLeaveTime),
+          gte(salesOrders.truckLeaveTime, startIso),
+          lte(salesOrders.truckLeaveTime, endIso)
+        )
       )
     );
 
@@ -113,7 +123,11 @@ export async function GET(req: NextRequest) {
         lines,
       };
     })
-    .sort((a, b) => new Date(b.truckEnterTime!).getTime() - new Date(a.truckEnterTime!).getTime());
+    .sort((a, b) => {
+      const at = a.truckEnterTime ?? a.truckLeaveTime ?? "";
+      const bt = b.truckEnterTime ?? b.truckLeaveTime ?? "";
+      return bt.localeCompare(at);
+    });
 
   const totalUnits = salesOrdersOut.reduce((sum, o) => sum + o.totalQuantity, 0);
   const totalSkus = new Set(shipEvents.map((e) => e.itemId)).size;
