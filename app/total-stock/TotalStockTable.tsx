@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
 import LedgerModal from "./LedgerModal";
 import LocationLedgerModal from "./LocationLedgerModal";
-
+import { downloadCsv } from "./exportLedgerCsv";
 export type SkuLocation = {
   locationCode: string;
   locationType: string;
@@ -160,6 +160,34 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
     });
   }
 
+  
+// DEFECT = stock at DESTROY locations. GOOD STOCK = Floor + Rack, per
+// smtg's definition. TOTAL is the same grand total already shown in the
+// SKU row (every location type, Outbound WH and Leftover included) —
+// it won't always equal DEFECT + GOOD STOCK, since Outbound WH/Leftover
+// stock counts toward TOTAL but neither bucket.
+function exportRow(sku: SkuStock): (string | number)[] {
+  const defect = sku.locations
+    .filter((l) => l.locationType === "DESTROY")
+    .reduce((sum, l) => sum + l.quantity, 0);
+  const good = sku.locations
+    .filter((l) => l.locationType === "FLOOR" || l.locationType === "RACK")
+    .reduce((sum, l) => sum + l.quantity, 0);
+
+  return [sku.sku, sku.name, defect, good, sku.totalQuantity];
+}
+
+  function exportAll() {
+    // Exports every SKU regardless of the current search box — "all" means
+    // all, not just what's currently filtered/visible on screen.
+    const rows = skus.map(exportRow);
+    downloadCsv(
+      `total-stock-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["SKU CODE", "SKU NAME", "DEFECT", "GOOD STOCK", "TOTAL"],
+      rows
+    );
+  }
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -182,6 +210,12 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
         />
         <RefreshButton onClick={handleRefresh} loading={isRefreshing} />
+        <button
+          onClick={exportAll}
+          className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+        >
+          Export All
+        </button>
       </div>
 
       <div className="border border-zinc-800 rounded-lg overflow-x-auto">
