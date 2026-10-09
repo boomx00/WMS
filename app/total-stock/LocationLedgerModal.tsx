@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { downloadCsv } from "./exportLedgerCsv";
-
+import { downloadXlsx } from "./exportLedgerXlsx";
 type LedgerEntry = {
   id: number;
   type: string;
@@ -118,18 +118,10 @@ export default function LocationLedgerModal({
     if (!data) return;
     const rows: (string | number)[][] = [
       ["Opening balance", "", "", "", "", "", data.openingBalance],
-      ...data.entries.map((e) => [
-        e.createdAt,
-        e.type,
-        e.itemSku,
-        describeEvent(e),
-        e.username,
-        e.delta,
-        e.runningTotal,
-      ]),
+      ...data.entries.map((e) => [e.createdAt, e.type, e.itemSku, describeEvent(e), e.username, e.delta, e.runningTotal]),
     ];
-    const filename = data.sku ? `${data.locationCode}-${data.sku}-ledger.csv` : `${data.locationCode}-ledger.csv`;
-    downloadCsv(filename, ["When", "Type", "SKU", "Detail", "By", "Delta", "Balance"], rows);
+    const filename = data.sku ? `${data.locationCode}-${data.sku}-ledger.xlsx` : `${data.locationCode}-ledger.xlsx`;
+    downloadXlsx(filename, ["When", "Type", "SKU", "Detail", "By", "Delta", "Balance"], rows);
   }
 
   return (

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { downloadCsv } from "./exportLedgerCsv";
-
+import { downloadXlsx } from "./exportLedgerXlsx";
 type LedgerEntry = {
   id: number;
   type: string;
@@ -105,16 +105,9 @@ export default function LedgerModal({ sku, onClose }: { sku: string; onClose: ()
     if (!data) return;
     const rows: (string | number)[][] = [
       ["Opening balance", "", "", "", "", data.openingBalance],
-      ...data.entries.map((e) => [
-        e.createdAt,
-        e.type,
-        describeEvent(e),
-        e.username,
-        e.delta,
-        e.runningTotal,
-      ]),
+      ...data.entries.map((e) => [e.createdAt, e.type, describeEvent(e), e.username, e.delta, e.runningTotal]),
     ];
-    downloadCsv(`${data.sku}-ledger.csv`, ["When", "Type", "Detail", "By", "Delta", "Balance"], rows);
+    downloadXlsx(`${data.sku}-ledger.xlsx`, ["When", "Type", "Detail", "By", "Delta", "Balance"], rows);
   }
 
   return (

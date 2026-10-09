@@ -6,6 +6,7 @@ import RefreshButton from "@/components/RefreshButton";
 import LedgerModal from "./LedgerModal";
 import LocationLedgerModal from "./LocationLedgerModal";
 import { downloadCsv } from "./exportLedgerCsv";
+import { downloadXlsx } from "./exportLedgerXlsx";
 export type SkuLocation = {
   locationCode: string;
   locationType: string;
@@ -184,8 +185,8 @@ function exportRow(sku: SkuStock): (string | number)[] {
 }
   function exportAll() {
     const rows = skus.map(exportRow);
-    downloadCsv(
-      `total-stock-${new Date().toISOString().slice(0, 10)}.csv`,
+    downloadXlsx(
+      `total-stock-${new Date().toISOString().slice(0, 10)}.xlsx`,
       ["SKU CODE", "SKU NAME", "DEFECT", "EXPOR", "GOOD STOCK", "OUTBOUND_WH", "TOTAL"],
       rows
     );
