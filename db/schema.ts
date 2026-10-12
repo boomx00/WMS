@@ -434,6 +434,7 @@ export const locationStockEvents = pgTable(
     tambahanOrderId: integer("tambahan_order_id").references(() => tambahanOrders.id),
     otherTransactionId: integer("other_transaction_id").references(() => otherTransactions.id),
     bulkAdjustmentId: integer("bulk_adjustment_id").references(() => bulkAdjustments.id),
+    workOrderNumber: text("work_order_number"), // MO number, set only on INBOUND/DEFAULT_INBOUND events
   },
   (table) => [
     index("location_stock_events_item_created_idx").on(table.itemId, table.createdAt),

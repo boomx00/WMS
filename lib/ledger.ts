@@ -66,3 +66,33 @@ export function locationDelta(
   if (eventSourceLocationId === locationId) delta -= quantity;
   return delta;
 }
+
+export type Bucket = "good" | "export" | "defect";
+export const BUCKETS: Bucket[] = ["good", "export", "defect"];
+
+// Good Stock = the location coded FLOOR + every Rack location. Export and
+// Defect are each one specific location (codes EXPOR / DEFECT) that happen
+// to share type FLOOR with the general floor — so they're matched by code,
+// not type, same reasoning as the Total Stock table's columns.
+export function classifyLocation(code: string | null, type: string | null): Bucket | null {
+  if (code === "FLOOR" || type === "RACK") return "good";
+  if (code === "EXPOR") return "export";
+  if (code === "DEFECT") return "defect";
+  return null;
+}
+
+// How much ONE bucket's balance changes from an event, given which bucket
+// (if any) its source and destination each fall into. A move between two
+// locations in the SAME bucket (e.g. Rack-to-Rack, both "good") nets to
+// zero — correct, since nothing entered or left that bucket as a whole.
+export function bucketDelta(
+  bucket: Bucket,
+  sourceBucket: Bucket | null,
+  destBucket: Bucket | null,
+  quantity: number
+): number {
+  let delta = 0;
+  if (destBucket === bucket) delta += quantity;
+  if (sourceBucket === bucket) delta -= quantity;
+  return delta;
+}

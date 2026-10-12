@@ -143,6 +143,7 @@ export async function POST(req: NextRequest) {
       destinationLocationId: floor.id,
       quantity,
       userId: session.userId,
+      workOrderNumber,
     });
     return pallet;
   });

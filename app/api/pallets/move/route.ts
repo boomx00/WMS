@@ -353,6 +353,7 @@ await tx.insert(palletEvents).values({
           destinationLocationId: currentLocation.id,
           quantity,
           userId: session.userId,
+          workOrderNumber: parsed.workOrderNumber,
         });
 
         const [moved] = await tx
