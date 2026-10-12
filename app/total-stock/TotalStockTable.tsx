@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
 import LedgerModal from "./LedgerModal";
 import LocationLedgerModal from "./LocationLedgerModal";
-import { downloadCsv } from "./exportLedgerCsv";
 import { downloadXlsx } from "./exportLedgerXlsx";
+
 export type SkuLocation = {
   locationCode: string;
   locationType: string;
@@ -24,7 +24,7 @@ export type SkuStock = {
   locations: SkuLocation[];
 };
 
-type SortKey = "sku" | "name" | "locations" | "total" | "pallets";
+type SortKey = "sku" | "name" | "locations" | "export" | "defect" | "floor" | "rack" | "total" | "pallets";
 type SortDir = "asc" | "desc";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -50,6 +50,41 @@ function formatPallets(quantity: number, palletCartonQty: number): string {
   const num = palletValue(quantity, palletCartonQty);
   if (num === null) return "—";
   return Number.isInteger(num) ? num.toString() : num.toFixed(2).replace(/\.?0+$/, "");
+}
+
+// Export and Defect are specific locations (codes EXPOR / DEFECT) that
+// happen to share type FLOOR with the general floor location, so Floor
+// here deliberately means "the location coded FLOOR" — not everything
+// typed FLOOR — to keep the four buckets mutually exclusive. Total still
+// includes every location (Outbound WH, Leftover, etc.), so it won't
+// always equal exactly Export + Defect + Floor + Rack.
+function skuBreakdown(sku: SkuStock) {
+  const exportQty = sku.locations
+    .filter((l) => l.locationCode === "EXPOR")
+    .reduce((sum, l) => sum + l.quantity, 0);
+  const defectQty = sku.locations
+    .filter((l) => l.locationCode === "DEFECT")
+    .reduce((sum, l) => sum + l.quantity, 0);
+  const floorQty = sku.locations
+    .filter((l) => l.locationCode === "FLOOR")
+    .reduce((sum, l) => sum + l.quantity, 0);
+  const rackQty = sku.locations
+    .filter((l) => l.locationType === "RACK")
+    .reduce((sum, l) => sum + l.quantity, 0);
+
+  return { exportQty, defectQty, floorQty, rackQty };
+}
+
+// Same breakdown as skuBreakdown(), reshaped into a flat row for the
+// CSV/XLSX export — kept in sync with the on-screen columns so the file
+// never disagrees with what's shown in the table.
+function exportRow(sku: SkuStock): (string | number)[] {
+  const { exportQty, defectQty, floorQty, rackQty } = skuBreakdown(sku);
+  const outboundWh = sku.locations
+    .filter((l) => l.locationType === "OUTBOUND_WH")
+    .reduce((sum, l) => sum + l.quantity, 0);
+
+  return [sku.sku, sku.name, defectQty, exportQty, floorQty, rackQty, outboundWh, sku.totalQuantity];
 }
 
 function SortableTh({
@@ -127,6 +162,14 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           return dirMul * a.name.localeCompare(b.name, undefined, { numeric: true });
         case "locations":
           return dirMul * (a.locations.length - b.locations.length);
+        case "export":
+          return dirMul * (skuBreakdown(a).exportQty - skuBreakdown(b).exportQty);
+        case "defect":
+          return dirMul * (skuBreakdown(a).defectQty - skuBreakdown(b).defectQty);
+        case "floor":
+          return dirMul * (skuBreakdown(a).floorQty - skuBreakdown(b).floorQty);
+        case "rack":
+          return dirMul * (skuBreakdown(a).rackQty - skuBreakdown(b).rackQty);
         case "total":
           return dirMul * (a.totalQuantity - b.totalQuantity);
         case "pallets": {
@@ -161,37 +204,14 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
     });
   }
 
-// GOOD STOCK = the specific FLOOR-coded location + all Rack locations —
-// non-defective, non-export only. DEFECT and EXPOR are both their own
-// specific locations (codes "DEFECT" and "EXPOR") that happen to share
-// type FLOOR with the general floor location, so none of the three can
-// be told apart by locationType alone — all three are matched by
-// locationCode and kept mutually exclusive from Good Stock.
-function exportRow(sku: SkuStock): (string | number)[] {
-  const defect = sku.locations
-    .filter((l) => l.locationCode === "DEFECT")
-    .reduce((sum, l) => sum + l.quantity, 0);
-  const expor = sku.locations
-    .filter((l) => l.locationCode === "EXPOR")
-    .reduce((sum, l) => sum + l.quantity, 0);
-  const good = sku.locations
-    .filter((l) => l.locationCode === "FLOOR" || l.locationType === "RACK")
-    .reduce((sum, l) => sum + l.quantity, 0);
-  const outboundWh = sku.locations
-    .filter((l) => l.locationType === "OUTBOUND_WH")
-    .reduce((sum, l) => sum + l.quantity, 0);
-
-  return [sku.sku, sku.name, defect, expor, good, outboundWh, sku.totalQuantity];
-}
   function exportAll() {
     const rows = skus.map(exportRow);
     downloadXlsx(
       `total-stock-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      ["SKU CODE", "SKU NAME", "DEFECT", "EXPOR", "GOOD STOCK", "OUTBOUND_WH", "TOTAL"],
+      ["SKU CODE", "SKU NAME", "DEFECT", "EXPOR", "FLOOR", "RACK", "OUTBOUND_WH", "TOTAL"],
       rows
     );
   }
-
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -230,6 +250,10 @@ function exportRow(sku: SkuStock): (string | number)[] {
               <SortableTh label="SKU" sortKey="sku" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Product" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Locations" sortKey="locations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Export" sortKey="export" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Defect" sortKey="defect" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Floor" sortKey="floor" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Rack" sortKey="rack" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Total (cartons)" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Pallets" sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <th className="px-4 py-3 font-medium text-right">Ledger</th>
@@ -238,13 +262,14 @@ function exportRow(sku: SkuStock): (string | number)[] {
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={11} className="px-4 py-8 text-center text-zinc-600">
                   {search.trim() ? "No SKUs match your search." : "No stock recorded."}
                 </td>
               </tr>
             ) : (
               visible.map((sku) => {
                 const open = expanded.has(sku.itemId);
+                const { exportQty, defectQty, floorQty, rackQty } = skuBreakdown(sku);
 
                 return (
                   <Fragment key={sku.itemId}>
@@ -275,6 +300,18 @@ function exportRow(sku: SkuStock): (string | number)[] {
                       <td className="px-4 py-3 text-right text-zinc-400">
                         {sku.locations.length.toLocaleString()}
                       </td>
+                      <td className="px-4 py-3 text-right font-mono text-zinc-400">
+                        {exportQty.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-zinc-400">
+                        {defectQty.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-zinc-400">
+                        {floorQty.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-zinc-400">
+                        {rackQty.toLocaleString()}
+                      </td>
                       <td className="px-4 py-3 text-right font-mono">
                         {sku.totalQuantity.toLocaleString()}
                       </td>
@@ -296,7 +333,7 @@ function exportRow(sku: SkuStock): (string | number)[] {
 
                     {open && (
                       <tr className="bg-zinc-950/40">
-                        <td colSpan={7} className="pl-12 pr-4 py-3">
+                        <td colSpan={11} className="pl-12 pr-4 py-3">
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="text-zinc-500 text-left">
