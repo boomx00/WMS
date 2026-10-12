@@ -24,7 +24,7 @@ export type SkuStock = {
   locations: SkuLocation[];
 };
 
-type SortKey = "sku" | "name" | "locations" | "export" | "defect" | "floor" | "rack" | "total" | "pallets";
+type SortKey = "sku" | "name" | "locations" | "export" | "defect" | "good" | "total" | "pallets";
 type SortDir = "asc" | "desc";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -55,9 +55,9 @@ function formatPallets(quantity: number, palletCartonQty: number): string {
 // Export and Defect are specific locations (codes EXPOR / DEFECT) that
 // happen to share type FLOOR with the general floor location, so Floor
 // here deliberately means "the location coded FLOOR" — not everything
-// typed FLOOR — to keep the four buckets mutually exclusive. Total still
-// includes every location (Outbound WH, Leftover, etc.), so it won't
-// always equal exactly Export + Defect + Floor + Rack.
+// typed FLOOR — to keep these mutually exclusive. Good Stock = that Floor
+// + every Rack. Total still includes every location (Outbound WH,
+// Leftover, etc.), so it won't always equal Export + Defect + Good Stock.
 function skuBreakdown(sku: SkuStock) {
   const exportQty = sku.locations
     .filter((l) => l.locationCode === "EXPOR")
@@ -72,19 +72,16 @@ function skuBreakdown(sku: SkuStock) {
     .filter((l) => l.locationType === "RACK")
     .reduce((sum, l) => sum + l.quantity, 0);
 
-  return { exportQty, defectQty, floorQty, rackQty };
+  return { exportQty, defectQty, goodQty: floorQty + rackQty };
 }
 
-// Same breakdown as skuBreakdown(), reshaped into a flat row for the
-// CSV/XLSX export — kept in sync with the on-screen columns so the file
-// never disagrees with what's shown in the table.
 function exportRow(sku: SkuStock): (string | number)[] {
-  const { exportQty, defectQty, floorQty, rackQty } = skuBreakdown(sku);
+  const { exportQty, defectQty, goodQty } = skuBreakdown(sku);
   const outboundWh = sku.locations
     .filter((l) => l.locationType === "OUTBOUND_WH")
     .reduce((sum, l) => sum + l.quantity, 0);
 
-  return [sku.sku, sku.name, defectQty, exportQty, floorQty, rackQty, outboundWh, sku.totalQuantity];
+  return [sku.sku, sku.name, defectQty, exportQty, goodQty, outboundWh, sku.totalQuantity];
 }
 
 function SortableTh({
@@ -166,10 +163,8 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           return dirMul * (skuBreakdown(a).exportQty - skuBreakdown(b).exportQty);
         case "defect":
           return dirMul * (skuBreakdown(a).defectQty - skuBreakdown(b).defectQty);
-        case "floor":
-          return dirMul * (skuBreakdown(a).floorQty - skuBreakdown(b).floorQty);
-        case "rack":
-          return dirMul * (skuBreakdown(a).rackQty - skuBreakdown(b).rackQty);
+        case "good":
+          return dirMul * (skuBreakdown(a).goodQty - skuBreakdown(b).goodQty);
         case "total":
           return dirMul * (a.totalQuantity - b.totalQuantity);
         case "pallets": {
@@ -208,10 +203,11 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
     const rows = skus.map(exportRow);
     downloadXlsx(
       `total-stock-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      ["SKU CODE", "SKU NAME", "DEFECT", "EXPOR", "FLOOR", "RACK", "OUTBOUND_WH", "TOTAL"],
+      ["SKU CODE", "SKU NAME", "DEFECT", "EXPOR", "GOOD STOCK", "OUTBOUND_WH", "TOTAL"],
       rows
     );
   }
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-3 mb-4">
@@ -252,8 +248,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
               <SortableTh label="Locations" sortKey="locations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Export" sortKey="export" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Defect" sortKey="defect" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Floor" sortKey="floor" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Rack" sortKey="rack" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label="Good Stock" sortKey="good" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Total (cartons)" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <SortableTh label="Pallets" sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <th className="px-4 py-3 font-medium text-right">Ledger</th>
@@ -262,14 +257,14 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           <tbody>
             {visible.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-4 py-8 text-center text-zinc-600">
+                <td colSpan={10} className="px-4 py-8 text-center text-zinc-600">
                   {search.trim() ? "No SKUs match your search." : "No stock recorded."}
                 </td>
               </tr>
             ) : (
               visible.map((sku) => {
                 const open = expanded.has(sku.itemId);
-                const { exportQty, defectQty, floorQty, rackQty } = skuBreakdown(sku);
+                const { exportQty, defectQty, goodQty } = skuBreakdown(sku);
 
                 return (
                   <Fragment key={sku.itemId}>
@@ -307,10 +302,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                         {defectQty.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-zinc-400">
-                        {floorQty.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono text-zinc-400">
-                        {rackQty.toLocaleString()}
+                        {goodQty.toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-right font-mono">
                         {sku.totalQuantity.toLocaleString()}
@@ -333,7 +325,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
 
                     {open && (
                       <tr className="bg-zinc-950/40">
-                        <td colSpan={11} className="pl-12 pr-4 py-3">
+                        <td colSpan={10} className="pl-12 pr-4 py-3">
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="text-zinc-500 text-left">
