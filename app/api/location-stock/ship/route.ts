@@ -42,7 +42,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker"]);
+  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker", "Leader"]);
   if (!authorized) {
     return NextResponse.json(
       { error: "Only Checker and Admin roles can perform shipping" },
