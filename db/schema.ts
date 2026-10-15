@@ -191,6 +191,11 @@ export const pallets = pgTable(
   {
     id: serial("id").primaryKey(),
     label: text("label").notNull(),
+    // The label exactly as printed/scanned (may carry a legacy sku, e.g.
+    // *5020004006*0024*5000*MO008213). `label` above is always rewritten to
+    // the current sku and is what every lookup uses; this is display-only.
+    // Null for pallets inbounded before this column existed.
+    printedLabel: text("printed_label"),
 
     itemId: integer("item_id")
       .notNull()

@@ -16,6 +16,7 @@ type Line = {
 type Pallet = {
   palletId: number;
   label: string;
+  printedLabel: string | null;
   quantity: number;
   status: string;
   itemSku: string;
@@ -42,6 +43,11 @@ type MesRecord = {
   STATUS: string;
   STATUS_STR: string;
   MO_CODE: string;
+  // Added by the cross-check route: LABEL_NO rewritten to the current sku
+  // (only when the printed code is a recorded legacy_sku). Used for matching
+  // only — LABEL_NO stays as printed and is what gets displayed.
+  MATCH_KEY?: string;
+  CURRENT_SKU?: string | null;
 };
 
 type MesCheckState = {
@@ -57,7 +63,9 @@ type CrossCheckRow = {
 };
 
 function normalizeLabelForMatch(label: string): string {
-  return label.trim().toUpperCase();
+  // Leading '*' is a barcode start char that may or may not be captured —
+  // ignore it so "*SKU*seq*qty*MO" and "SKU*seq*qty*MO" match each other.
+  return label.trim().replace(/^\*+/, "").toUpperCase();
 }
 
 // Union of every label seen on either side, so a label that only exists in
@@ -65,7 +73,9 @@ function normalizeLabelForMatch(label: string): string {
 // whichever side doesn't have it.
 function buildCrossCheckRows(pallets: Pallet[], mesRecords: MesRecord[]): CrossCheckRow[] {
   const wmsByLabel = new Map(pallets.map((p) => [normalizeLabelForMatch(p.label), p]));
-  const mesByLabel = new Map(mesRecords.map((r) => [normalizeLabelForMatch(r.LABEL_NO), r]));
+  const mesByLabel = new Map(
+    mesRecords.map((r) => [normalizeLabelForMatch(r.MATCH_KEY ?? r.LABEL_NO), r])
+  );
   const allKeys = new Set([...wmsByLabel.keys(), ...mesByLabel.keys()]);
 
   return Array.from(allKeys)
@@ -73,7 +83,10 @@ function buildCrossCheckRows(pallets: Pallet[], mesRecords: MesRecord[]): CrossC
     .map((key) => {
       const wms = wmsByLabel.get(key) ?? null;
       const mes = mesByLabel.get(key) ?? null;
-      return { label: wms?.label ?? mes?.LABEL_NO ?? key, wms, mes };
+      // Prefer the label as printed (MES), so a legacy-coded pallet still
+      // shows its physical label even though WMS stores it under the
+      // current sku.
+      return { label: mes?.LABEL_NO ?? wms?.printedLabel ?? wms?.label ?? key, wms, mes };
     });
 }
 
@@ -231,7 +244,7 @@ export default function WorkOrdersTable({
                       const mesCheck = mesChecks[wo.workOrderNumber];
                       const rows: CrossCheckRow[] = mesCheck?.records
                         ? buildCrossCheckRows(wo.pallets, mesCheck.records)
-                        : wo.pallets.map((p) => ({ label: p.label, wms: p, mes: null }));
+                        : wo.pallets.map((p) => ({ label: p.printedLabel ?? p.label, wms: p, mes: null }));
                       const showMesColumn = !!mesCheck?.records;
 
                       const matched = showMesColumn ? rows.filter((r) => r.wms && r.mes).length : 0;

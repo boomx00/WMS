@@ -81,6 +81,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
 
+  // The SKU printed on the label must be this item's current sku, or its
+  // recorded legacy sku (e.g. 5020004006 is only accepted for 14013074701 if
+  // items.legacy_sku says so). Anything else means the label and the
+  // submitted sku disagree — reject instead of booking stock to the wrong item.
+  const printedSku = rawLabel.replace(/^\*+/, "").split("*")[0];
+  const isCurrent = printedSku === item.sku;
+  const isLegacy = !!item.legacySku && printedSku === item.legacySku;
+  if (!isCurrent && !isLegacy) {
+    return NextResponse.json(
+      {
+        error: `Label SKU ${printedSku} is not ${item.sku} or its recorded legacy code${
+          item.legacySku ? ` (${item.legacySku})` : ""
+        }.`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // normalizeLabel must have resolved to this same item's current sku.
+  if (label.replace(/^\*+/, "").split("*")[0] !== item.sku) {
+    return NextResponse.json(
+      { error: `Label ${rawLabel} does not resolve to SKU ${item.sku}.` },
+      { status: 400 }
+    );
+  }
+
   // Check if this exact (normalized) label already exists anywhere as an
   // active pallet — prevents accidentally double-inbounding the same
   // physical pallet.
@@ -120,6 +146,7 @@ export async function POST(req: NextRequest) {
       .insert(pallets)
       .values({
         label,
+        printedLabel: rawLabel,
         itemId: item.id,
         workOrderNumber,
         quantity,

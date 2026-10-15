@@ -42,6 +42,7 @@ export async function getWorkOrderSummary(workOrderNumbers: string[]) {
       workOrderNumber: pallets.workOrderNumber,
       palletId: pallets.id,
       label: pallets.label,
+      printedLabel: pallets.printedLabel,
       quantity: pallets.quantity,
       status: pallets.status,
       itemSku: items.sku,
