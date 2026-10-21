@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { stockOpname, stockOpnameItems } from "@/db/schema";
-import { eq, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, isNull, desc, sql, inArray } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
 // GET /api/stock-opname/my-sessions
+// By-location sessions only — per-SKU sessions (SOSKU-...) have their own
+// list at GET /api/stock-opname/sku, so they don't show up under
+// "By Location" on the PDA.
 export async function GET() {
   const session = await getSession();
   if (!session) {
@@ -14,7 +17,7 @@ export async function GET() {
   const sessions = await db
     .select()
     .from(stockOpname)
-    .where(eq(stockOpname.assignedTo, session.userId))
+    .where(and(eq(stockOpname.assignedTo, session.userId), isNull(stockOpname.skuItemId)))
     .orderBy(desc(stockOpname.createdAt));
 
   if (sessions.length === 0) return NextResponse.json([]);

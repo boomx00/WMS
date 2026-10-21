@@ -466,6 +466,8 @@ export const stockOpname = pgTable("stock_opname", {
   confirmedBy: integer("confirmed_by").references(() => users.id), // ADD
   confirmDescription: text("confirm_description"),                 // ADD
   confirmedBulkAdjustmentId: integer("confirmed_bulk_adjustment_id"), // ADD — no .references() here to avoid a same-file circular type issue; FK is enforced at the DB level by the migration above
+  skuItemId: integer("sku_item_id").references(() => items.id),
+  skuSystemQty: integer("sku_system_qty"),
 });
 
 

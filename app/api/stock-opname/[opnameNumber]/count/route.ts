@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
+import { stockOpname, stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
 import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
@@ -45,6 +45,22 @@ export async function PATCH(
     );
   }
 
+  // A per-SKU session (SOSKU-...) is locked to exactly one SKU: it can't
+  // take an empty-location confirmation (there's no "location" scope to
+  // confirm empty) and can't take counts for any other SKU.
+  const [opnameRow] = await db
+    .select({ skuItemId: stockOpname.skuItemId })
+    .from(stockOpname)
+    .where(eq(stockOpname.opnameNumber, opnameNumber));
+  const lockedSkuItemId = opnameRow?.skuItemId ?? null;
+
+  if (lockedSkuItemId !== null && isEmptyConfirmation) {
+    return NextResponse.json(
+      { error: "This is a per-SKU opname — enter the SKU's quantity for the location (0 if none)." },
+      { status: 400 }
+    );
+  }
+
   const [location] = await db.select().from(locations).where(eq(locations.code, locationCode));
   if (!location) {
     return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
@@ -61,6 +77,14 @@ export async function PATCH(
     [item] = await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)));
     if (!item) {
       return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+    }
+
+    if (lockedSkuItemId !== null && item.id !== lockedSkuItemId) {
+      const [lockedItem] = await db.select({ sku: items.sku }).from(items).where(eq(items.id, lockedSkuItemId));
+      return NextResponse.json(
+        { error: `Opname ini khusus SKU ${lockedItem?.sku ?? "lain"}, bukan ${item.sku}` },
+        { status: 409 }
+      );
     }
   }
 
