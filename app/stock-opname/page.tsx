@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameItems, users, stockOpnameLocations, bulkAdjustments } from "@/db/schema";
-import { desc, sql } from "drizzle-orm";
+import { stockOpname, stockOpnameItems, stockOpnameSkus, users, stockOpnameLocations, bulkAdjustments } from "@/db/schema";
+import { desc, sql, isNotNull } from "drizzle-orm";
+import { isSkuOpname } from "@/lib/skuOpname";
 import StockOpnameClient from "./StockOpnameClient";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +32,29 @@ async function getSessions() {
     .from(stockOpnameItems)
     .groupBy(stockOpnameItems.opnameNumber);
 
+  // Per-SKU (SOSKU-) sessions: the sum of every SKU's locked system quantity,
+  // and the sum of everything counted so far.
+  const skuLockedRows = await db
+    .select({
+      opnameNumber: stockOpnameSkus.opnameNumber,
+      skuCount: sql<number>`count(*)::int`,
+      lockedQty: sql<number>`coalesce(sum(${stockOpnameSkus.systemQty}), 0)::int`,
+    })
+    .from(stockOpnameSkus)
+    .groupBy(stockOpnameSkus.opnameNumber);
+
+  const skuCountedRows = await db
+    .select({
+      opnameNumber: stockOpnameItems.opnameNumber,
+      countedQty: sql<number>`coalesce(sum(${stockOpnameItems.countedQty}), 0)::int`,
+    })
+    .from(stockOpnameItems)
+    .where(isNotNull(stockOpnameItems.itemId))
+    .groupBy(stockOpnameItems.opnameNumber);
+
+  const skuLockedMap = new Map(skuLockedRows.map((r) => [r.opnameNumber, r]));
+  const skuCountedMap = new Map(skuCountedRows.map((r) => [r.opnameNumber, r.countedQty]));
+
   const totalMap = new Map(locationRows.map((r) => [r.opnameNumber, r.total]));
   const countedMap = new Map(countedRows.map((r) => [r.opnameNumber, r.counted]));
   const commencedMap = new Map(countedRows.map((r) => [r.opnameNumber, r.commencedAt]));
@@ -58,6 +82,10 @@ async function getSessions() {
       countedLines: counted,
       discrepancies: 0,
       status,
+      isSkuSession: isSkuOpname(s.opnameNumber),
+      skuCount: skuLockedMap.get(s.opnameNumber)?.skuCount ?? 0,
+      skuLockedQty: skuLockedMap.get(s.opnameNumber)?.lockedQty ?? 0,
+      skuCountedQty: skuCountedMap.get(s.opnameNumber) ?? 0,
       commencedAt: commencedMap.get(s.opnameNumber) ?? null,
       confirmedAdjustmentCode: s.confirmedBulkAdjustmentId
         ? adjustmentCodeById.get(s.confirmedBulkAdjustmentId) ?? null

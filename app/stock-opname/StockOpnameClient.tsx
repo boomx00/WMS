@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import VerifyStockIntegrityPanel from "./VerifyStockIntegrityPanel";
+import SkuOpnameDetail, { type SkuDetailResponse } from "./SkuOpnameDetail";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 type Session = {
@@ -19,6 +20,11 @@ type Session = {
   confirmedAt: string | Date | null;
   confirmDescription: string | null;
   confirmedAdjustmentCode: string | null;
+  // Per-SKU (SOSKU-) sessions only — summed across every SKU in the session.
+  isSkuSession: boolean;
+  skuCount: number;
+  skuLockedQty: number;
+  skuCountedQty: number;
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -256,13 +262,15 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<ReportResponse | null>(null);
+  const [skuDetail, setSkuDetail] = useState<SkuDetailResponse | null>(null);
+  const isSku = session.isSkuSession;
   const [loading, setLoading] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
   const [adjustResult, setAdjustResult] = useState<string | null>(null);
   const [adjustError, setAdjustError] = useState<string | null>(null);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   async function toggle() {
-    if (!open && !report) {
+    if (!open && !(isSku ? skuDetail : report)) {
       await refetchReport();
     }
     setOpen((prev) => !prev);
@@ -270,8 +278,13 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
 
   async function refetchReport() {
     setLoading(true);
-    const res = await fetch(`/api/stock-opname/${session.opnameNumber}/report`);
-    if (res.ok) setReport(await res.json());
+    if (isSku) {
+      const res = await fetch(`/api/stock-opname/sku/${session.opnameNumber}`);
+      if (res.ok) setSkuDetail(await res.json());
+    } else {
+      const res = await fetch(`/api/stock-opname/${session.opnameNumber}/report`);
+      if (res.ok) setReport(await res.json());
+    }
     setLoading(false);
   }
 
@@ -326,9 +339,23 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
           )}
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-xs text-zinc-500">
-            {session.countedLines}/{session.totalLines} counted
-          </span>
+          {isSku ? (
+            <span className="flex items-center gap-3 text-xs text-zinc-500">
+              <span>{session.skuCount} SKU</span>
+              <span>
+                Locked qty: <span className="font-mono text-zinc-300">{session.skuLockedQty.toLocaleString()}</span>
+              </span>
+              <span>
+                Stock opname qty:{" "}
+                <span className="font-mono text-zinc-300">{session.skuCountedQty.toLocaleString()}</span>
+              </span>
+              <DifferenceBadge difference={session.skuCountedQty - session.skuLockedQty} />
+            </span>
+          ) : (
+            <span className="text-xs text-zinc-500">
+              {session.countedLines}/{session.totalLines} counted
+            </span>
+          )}
           <span
             className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[session.status]}`}
           >
@@ -388,6 +415,12 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
 
           {loading ? (
             <p className="text-xs text-zinc-600">Loading...</p>
+          ) : isSku ? (
+            skuDetail ? (
+              <SkuOpnameDetail detail={skuDetail} />
+            ) : (
+              <p className="text-xs text-red-400">Failed to load report</p>
+            )
           ) : !report ? (
             <p className="text-xs text-red-400">Failed to load report</p>
           ) : (

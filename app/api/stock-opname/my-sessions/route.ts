@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { stockOpname, stockOpnameItems } from "@/db/schema";
-import { eq, and, isNull, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, notLike, desc, sql, inArray } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { SKU_OPNAME_PREFIX } from "@/lib/skuOpname";
 
 // GET /api/stock-opname/my-sessions
 // By-location sessions only — per-SKU sessions (SOSKU-...) have their own
@@ -17,7 +18,7 @@ export async function GET() {
   const sessions = await db
     .select()
     .from(stockOpname)
-    .where(and(eq(stockOpname.assignedTo, session.userId), isNull(stockOpname.skuItemId)))
+    .where(and(eq(stockOpname.assignedTo, session.userId), notLike(stockOpname.opnameNumber, `${SKU_OPNAME_PREFIX}%`)))
     .orderBy(desc(stockOpname.createdAt));
 
   if (sessions.length === 0) return NextResponse.json([]);

@@ -466,9 +466,20 @@ export const stockOpname = pgTable("stock_opname", {
   confirmedBy: integer("confirmed_by").references(() => users.id), // ADD
   confirmDescription: text("confirm_description"),                 // ADD
   confirmedBulkAdjustmentId: integer("confirmed_bulk_adjustment_id"), // ADD — no .references() here to avoid a same-file circular type issue; FK is enforced at the DB level by the migration above
-  skuItemId: integer("sku_item_id").references(() => items.id),
-  skuSystemQty: integer("sku_system_qty"),
+
 });
+export const stockOpnameSkus = pgTable(
+  "stock_opname_skus",
+  {
+    id: serial("id").primaryKey(),
+    opnameNumber: varchar("opname_number", { length: 50 }).notNull().references(() => stockOpname.opnameNumber),
+    itemId: integer("item_id").notNull().references(() => items.id),
+    systemQty: integer("system_qty").notNull(),
+    addedBy: integer("added_by").references(() => users.id),
+    addedAt: timestamp("added_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("stock_opname_skus_unique_idx").on(table.opnameNumber, table.itemId)]
+);
 
 
 export const pageLabels = pgTable("page_labels", {

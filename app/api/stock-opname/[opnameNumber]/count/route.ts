@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
+import { stockOpnameSkus, stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
 import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
+import { isSkuOpname } from "@/lib/skuOpname";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -45,16 +46,12 @@ export async function PATCH(
     );
   }
 
-  // A per-SKU session (SOSKU-...) is locked to exactly one SKU: it can't
-  // take an empty-location confirmation (there's no "location" scope to
-  // confirm empty) and can't take counts for any other SKU.
-  const [opnameRow] = await db
-    .select({ skuItemId: stockOpname.skuItemId })
-    .from(stockOpname)
-    .where(eq(stockOpname.opnameNumber, opnameNumber));
-  const lockedSkuItemId = opnameRow?.skuItemId ?? null;
+  // A per-SKU session (SOSKU-...) only counts the SKUs that were added to it,
+  // and can't take an empty-location confirmation (there's no "location"
+  // scope to confirm empty).
+  const isSkuSession = isSkuOpname(opnameNumber);
 
-  if (lockedSkuItemId !== null && isEmptyConfirmation) {
+  if (isSkuSession && isEmptyConfirmation) {
     return NextResponse.json(
       { error: "This is a per-SKU opname — enter the SKU's quantity for the location (0 if none)." },
       { status: 400 }
@@ -79,12 +76,17 @@ export async function PATCH(
       return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
     }
 
-    if (lockedSkuItemId !== null && item.id !== lockedSkuItemId) {
-      const [lockedItem] = await db.select({ sku: items.sku }).from(items).where(eq(items.id, lockedSkuItemId));
-      return NextResponse.json(
-        { error: `Opname ini khusus SKU ${lockedItem?.sku ?? "lain"}, bukan ${item.sku}` },
-        { status: 409 }
-      );
+    if (isSkuSession) {
+      const [skuRow] = await db
+        .select({ id: stockOpnameSkus.id })
+        .from(stockOpnameSkus)
+        .where(and(eq(stockOpnameSkus.opnameNumber, opnameNumber), eq(stockOpnameSkus.itemId, item.id)));
+      if (!skuRow) {
+        return NextResponse.json(
+          { error: `SKU ${item.sku} belum ditambahkan ke opname ini` },
+          { status: 409 }
+        );
+      }
     }
   }
 
