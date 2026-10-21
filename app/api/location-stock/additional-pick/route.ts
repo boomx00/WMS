@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { locations, items, settings, locationStockEvents, locationStock, salesOrders, tambahanOrders } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { adjustLocationStock } from "@/lib/locationStock";
 
 function sanitize(input: string): string {
@@ -22,6 +23,9 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessPdaAllowed(session, "pda.pickTambahan");
+  if (denied) return denied;
 
   const body = await req.json();
   const locationCode = sanitize(body.locationCode ?? "");

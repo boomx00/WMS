@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { stockOpname, users } from "@/db/schema";
 import { eq, like, desc } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 
 // POST /api/stock-opname/custom
 // body: { notes? }
@@ -12,6 +13,9 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessPdaAllowed(session, "pda.stockOpname");
+  if (denied) return denied;
 
   const body = await req.json().catch(() => ({}));
   const notes = typeof body.notes === "string" ? body.notes.trim() : "";

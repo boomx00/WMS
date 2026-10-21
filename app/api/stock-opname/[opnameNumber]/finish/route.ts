@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { stockOpname } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 
 // PATCH /api/stock-opname/:opnameNumber/finish
 export async function PATCH(
@@ -13,6 +14,9 @@ export async function PATCH(
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessPdaAllowed(session, "pda.stockOpname");
+  if (denied) return denied;
 
   const { opnameNumber } = await params;
 

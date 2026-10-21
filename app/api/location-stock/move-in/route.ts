@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { locations, items, settings, locationStockEvents, locationStock } from "@/db/schema";
 import { eq, or, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { adjustLocationStock } from "@/lib/locationStock";
 
@@ -27,6 +28,9 @@ export async function PATCH(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessPdaAllowed(session, "pda.moveIn");
+  if (denied) return denied;
 
   const body = await req.json();
   const rawLabel = sanitize(body.label ?? "");

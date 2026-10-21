@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items, locationStockEvents, locations } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 
@@ -24,6 +25,9 @@ export async function POST(
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessPdaAllowed(session, "pda.ship");
+  if (denied) return denied;
 
   const { soNumber } = await params;
   const body = await req.json();

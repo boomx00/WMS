@@ -4,6 +4,7 @@ import { pallets, palletEvents, locations, items } from "@/db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { denyUnlessAllowed } from "@/lib/pagePermissions";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { adjustLocationStock } from "@/lib/locationStock";
 import { locationStockEvents } from "@/db/schema";
@@ -43,7 +44,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const denied = await denyUnlessAllowed(session, "scan.inbound");
+  // The web's System Control page and the PDA both inbound through here.
+  const denied =
+    session.client === "web"
+      ? await denyUnlessAllowed(session, "scan.inbound")
+      : await denyUnlessPdaAllowed(session, "pda.inbound");
   if (denied) return denied;
 
   const body = await req.json();

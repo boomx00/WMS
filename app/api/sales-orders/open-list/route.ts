@@ -1,157 +1,38 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import {
-  salesOrders,
-  salesOrderItems,
-  pallets,
-  palletEvents,
-  locationStockEvents,
-} from "@/db/schema";
-import { eq, inArray, sql } from "drizzle-orm";
-import { tambahanOrders } from "@/db/schema";
+import { salesOrders } from "@/db/schema";
+import { getSoProgress, type SoStage } from "@/lib/soProgress";
+
+export const dynamic = "force-dynamic";
+
+// GET /api/sales-orders/open-list
+// Every SO that isn't fully shipped, for the PDA's Picking and Shipping lists.
+//   pickStatus — shown on Picking (DONE once every line is fully picked)
+//   shipStatus — shown on Shipping (DONE once every line is fully shipped)
+//   status     — same as shipStatus, kept for older PDA builds
 export async function GET() {
-  const orders = await db.select().from(salesOrders);
+  const [orders, progress] = await Promise.all([
+    db.select().from(salesOrders),
+    getSoProgress(),
+  ]);
 
-  const lines = await db
-    .select({
-      salesOrderId: salesOrderItems.salesOrderId,
-      itemId: salesOrderItems.itemId,
-      orderedQty: salesOrderItems.quantity,
-    })
-    .from(salesOrderItems);
-
-  const pickedRows = await db
-    .select({
-      salesOrderId: locationStockEvents.salesOrderId,
-      itemId: locationStockEvents.itemId,
-      picked: sql<number>`
-        coalesce(sum(${locationStockEvents.quantity}), 0)::int
-      `,
-    })
-    .from(locationStockEvents)
-    .where(
-      inArray(locationStockEvents.type, [
-        "PICKING",
-        "DEFAULT_PICKING",
-      ])
-    )
-    .groupBy(
-      locationStockEvents.salesOrderId,
-      locationStockEvents.itemId
-    );
-
-  const shippedRows = await db
-    .select({
-      salesOrderId: palletEvents.salesOrderId,
-      itemId: pallets.itemId,
-      shipped: sql<number>`
-        coalesce(sum(${palletEvents.quantity}), 0)::int
-      `,
-    })
-    .from(palletEvents)
-    .innerJoin(
-      pallets,
-      eq(palletEvents.palletId, pallets.id)
-    )
-    .where(eq(palletEvents.type, "OUTBOUND"))
-    .groupBy(
-      palletEvents.salesOrderId,
-      pallets.itemId
-    );
-  const activeTambahanRows = await db
-    .select({ parentSalesOrderId: tambahanOrders.parentSalesOrderId })
-    .from(tambahanOrders)
-    .where(eq(tambahanOrders.status, "ACTIVE"));
-  const activeTambahanSet = new Set(activeTambahanRows.map((r) => r.parentSalesOrderId));
-  const pickedMap = new Map<string, number>();
-
-  for (const r of pickedRows) {
-    if (r.salesOrderId === null) continue;
-
-    pickedMap.set(
-      `${r.salesOrderId}-${r.itemId}`,
-      r.picked
-    );
-  }
-
-  const shippedMap = new Map<string, number>();
-
-  for (const r of shippedRows) {
-    if (r.salesOrderId === null) continue;
-
-    shippedMap.set(
-      `${r.salesOrderId}-${r.itemId}`,
-      r.shipped
-    );
-  }
-
-  const linesByOrder = new Map<number, typeof lines>();
-
-  for (const line of lines) {
-    if (!linesByOrder.has(line.salesOrderId)) {
-      linesByOrder.set(line.salesOrderId, []);
-    }
-
-    linesByOrder
-      .get(line.salesOrderId)!
-      .push(line);
-  }
+  const rank = (s: SoStage) => (s === "IN_PROGRESS" ? 0 : s === "PENDING" ? 1 : 2);
 
   const result = orders
     .map((order) => {
-      const orderLines =
-        linesByOrder.get(order.id) ?? [];
-
-      let anyActivity = false;
-      let allDone = orderLines.length > 0;
-
-      for (const line of orderLines) {
-        const picked =
-          pickedMap.get(
-            `${order.id}-${line.itemId}`
-          ) ?? 0;
-
-        const shipped =
-          shippedMap.get(
-            `${order.id}-${line.itemId}`
-          ) ?? 0;
-
-        if (picked > 0 || shipped > 0) {
-          anyActivity = true;
-        }
-
-        if (shipped < line.orderedQty) {
-          allDone = false;
-        }
-      }
-      // An active Tambahan means this SO isn't really done — there's
-      // more to pick/ship, even though its original lines are complete.
-      if (allDone && activeTambahanSet.has(order.id)) {
-        allDone = false;
-        anyActivity = true;
-      }
-      const status = allDone
-        ? "DONE"
-        : anyActivity
-          ? "IN_PROGRESS"
-          : "PENDING";
-
+      const p = progress.get(order.id) ?? { pickStatus: "PENDING", shipStatus: "PENDING" };
       return {
         soNumber: order.soNumber,
         orderDate: order.orderDate,
-        status,
+        status: p.shipStatus,
+        pickStatus: p.pickStatus,
+        shipStatus: p.shipStatus,
       };
     })
-    .filter((order) => order.status !== "DONE")
+    .filter((order) => order.shipStatus !== "DONE")
     .sort((a, b) => {
-      if (a.status !== b.status) {
-        return a.status === "IN_PROGRESS" ? -1 : 1;
-      }
-
-      return (
-        new Date(b.orderDate).getTime() -
-        new Date(a.orderDate).getTime()
-      );
+      if (a.shipStatus !== b.shipStatus) return rank(a.shipStatus) - rank(b.shipStatus);
+      return new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime();
     });
 
   return NextResponse.json(result);

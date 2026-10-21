@@ -5,12 +5,16 @@ import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { signSession } from "@/lib/auth";
 import { getPageAccess } from "@/lib/pagePermissions";
+import { getPdaAccess } from "@/lib/pdaPermissions";
 import { firstAllowedPath } from "@/lib/pages";
 
 // POST /api/auth/login
 // body: { username, password, client? }
 // client: "web" → Manager, or a role with at least one page granted on
-// /permissions. Anything else (e.g. the PDA app) keeps the existing behaviour.
+// /permissions (Web app tab).
+// Anything else is the PDA → Manager, or a role with at least one feature
+// granted on /permissions (PDA tab). The response then carries
+// `pdaPermissions` so the PDA can hide menus the role can't use.
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { username, password, client } = body;
@@ -43,12 +47,22 @@ export async function POST(req: NextRequest) {
   // Checked after the password so we don't reveal which usernames exist
   // or what role they have to someone who doesn't know the password.
   let homePath: string | null = null;
+  let pdaPermissions: string[] | null = null;
   if (client === "web") {
     const access = await getPageAccess(user.id);
     homePath = access ? firstAllowedPath(access) : null;
     if (!homePath) {
       return NextResponse.json(
         { error: "Your role has no web access. Please use the PDA." },
+        { status: 403 }
+      );
+    }
+  } else {
+    const access = await getPdaAccess(user.id);
+    pdaPermissions = access?.allowed ?? [];
+    if (pdaPermissions.length === 0) {
+      return NextResponse.json(
+        { error: "Your role has no PDA access. Ask a Manager to set it on Permissions." },
         { status: 403 }
       );
     }
@@ -67,8 +81,10 @@ export async function POST(req: NextRequest) {
     id: user.id,
     username: user.username,
     roleId: user.roleId,
-    // Web only, so the PDA's login response stays exactly as before.
+    // Web only.
     ...(homePath ? { homePath } : {}),
+    // PDA only. Older PDA builds ignore it.
+    ...(pdaPermissions ? { pdaPermissions } : {}),
   });
 
   response.cookies.set("session", token, {

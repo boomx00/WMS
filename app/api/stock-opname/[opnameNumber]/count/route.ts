@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { stockOpnameSkus, stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
 import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { isSkuOpname } from "@/lib/skuOpname";
 
@@ -24,6 +25,9 @@ export async function PATCH(
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
+
+  const denied = await denyUnlessPdaAllowed(session, "pda.stockOpname");
+  if (denied) return denied;
 
   const { opnameNumber } = await params;
   const body = await req.json();

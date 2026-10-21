@@ -14,8 +14,9 @@ export type SessionPayload = {
   // Added so middleware (which can't query the DB) can gate web pages.
   // Optional so older tokens / other callers of signSession still type-check.
   roleName?: string;
-  // "web" for web-app logins. Absent for the PDA. Action permissions are
-  // only enforced for web sessions, so the PDA keeps working unchanged.
+  // "web" for web-app logins. Absent for the PDA. Web action permissions
+  // (lib/pages.ts) are only enforced for web sessions; PDA features
+  // (lib/pdaFeatures.ts) are enforced on their routes for every session.
   client?: "web";
 };
 

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { salesOrders, salesOrderItems, locationStockEvents, tambahanOrders } from "@/db/schema";
-import { eq, inArray, ilike, or, isNotNull } from "drizzle-orm";
+import { salesOrders, tambahanOrders } from "@/db/schema";
+import { inArray, ilike, or } from "drizzle-orm";
+import { getSoProgress } from "@/lib/soProgress";
 
 // GET /api/sales-orders/search-any?q=...
 //
@@ -67,56 +68,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([]);
   }
 
-  const orderIds = allOrders.map((o) => o.id);
-
-  const lines = await db
-    .select({
-      salesOrderId: salesOrderItems.salesOrderId,
-      itemId: salesOrderItems.itemId,
-      orderedQty: salesOrderItems.quantity,
-    })
-    .from(salesOrderItems)
-    .where(inArray(salesOrderItems.salesOrderId, orderIds));
-
-  const shippedRows = await db
-    .select({
-      salesOrderId: locationStockEvents.salesOrderId,
-      itemId: locationStockEvents.itemId,
-      shipped: locationStockEvents.quantity,
-    })
-    .from(locationStockEvents)
-    .where(inArray(locationStockEvents.salesOrderId, orderIds));
-
-  const shippedMap = new Map<string, number>();
-  for (const r of shippedRows) {
-    if (r.salesOrderId === null) continue;
-    const key = `${r.salesOrderId}-${r.itemId}`;
-    shippedMap.set(key, (shippedMap.get(key) ?? 0) + r.shipped);
-  }
-
-  const linesByOrder = new Map<number, typeof lines>();
-  for (const line of lines) {
-    if (!linesByOrder.has(line.salesOrderId)) linesByOrder.set(line.salesOrderId, []);
-    linesByOrder.get(line.salesOrderId)!.push(line);
-  }
+  // Picking and Shipping each show their own status (see lib/soProgress.ts).
+  // This used to count every stock event — picks included — as shipped,
+  // so a fully picked SO showed DONE in Shipping too.
+  const progress = await getSoProgress(allOrders.map((o) => o.id));
 
   const result = allOrders
     .map((order) => {
-      const orderLines = linesByOrder.get(order.id) ?? [];
-
-      let anyActivity = false;
-      let allDone = orderLines.length > 0;
-
-      for (const line of orderLines) {
-        const shipped = shippedMap.get(`${order.id}-${line.itemId}`) ?? 0;
-        if (shipped > 0) anyActivity = true;
-        if (shipped < line.orderedQty) allDone = false;
-      }
-
-      const status = allDone ? "DONE" : anyActivity ? "IN_PROGRESS" : "PENDING";
+      const p = progress.get(order.id)!;
       const matchNote = matchNoteByParentId.get(order.id);
-
-      return { soNumber: order.soNumber, orderDate: order.orderDate, status, matchNote };
+      return {
+        soNumber: order.soNumber,
+        orderDate: order.orderDate,
+        status: p.shipStatus, // kept for older PDA builds
+        pickStatus: p.pickStatus,
+        shipStatus: p.shipStatus,
+        matchNote,
+      };
     })
     .sort((a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime());
 

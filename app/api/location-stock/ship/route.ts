@@ -11,8 +11,8 @@ import {
 } from "@/db/schema";
 import { db } from "@/lib/db";
 import { eq, and, or, sql } from "drizzle-orm";
-import { getSession, hasRole } from "@/lib/auth";
-import { SUPER_ROLE_NAME } from "@/lib/roles";
+import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { adjustLocationStock } from "@/lib/locationStock";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
@@ -42,13 +42,8 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker", "Leader"]);
-  if (!authorized) {
-    return NextResponse.json(
-      { error: "Only Checker and Admin roles can perform shipping" },
-      { status: 403 }
-    );
-  }
+  const denied = await denyUnlessPdaAllowed(session, "pda.ship");
+  if (denied) return denied;
 
   const body = await req.json();
   const soNumber = sanitize(body.soNumber ?? "");

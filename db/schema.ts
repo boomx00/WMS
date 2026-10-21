@@ -63,6 +63,7 @@ export const rolesRelations = relations(roles, ({ many }) => ({
   users: many(users),
   pagePermissions: many(rolePagePermissions),
   actionPermissions: many(roleActionPermissions),
+  pdaPermissions: many(rolePdaPermissions),
 }));
 
 // Which web pages a (non-Manager) role may open. One row = one granted page.
@@ -107,6 +108,29 @@ export const roleActionPermissions = pgTable(
 export const roleActionPermissionsRelations = relations(roleActionPermissions, ({ one }) => ({
   role: one(roles, {
     fields: [roleActionPermissions.roleId],
+    references: [roles.id],
+  }),
+}));
+
+// Which PDA features a (non-Manager) role may use, e.g. "pda.ship".
+// `pdaKey` must be a key from PDA_FEATURES in lib/pdaFeatures.ts. Manager
+// always has every feature and never needs rows here.
+export const rolePdaPermissions = pgTable(
+  "role_pda_permissions",
+  {
+    id: serial("id").primaryKey(),
+    roleId: integer("role_id")
+      .notNull()
+      .references(() => roles.id, { onDelete: "cascade" }),
+    pdaKey: text("pda_key").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("role_pda_permissions_role_key_idx").on(table.roleId, table.pdaKey)]
+);
+
+export const rolePdaPermissionsRelations = relations(rolePdaPermissions, ({ one }) => ({
+  role: one(roles, {
+    fields: [rolePdaPermissions.roleId],
     references: [roles.id],
   }),
 }));
