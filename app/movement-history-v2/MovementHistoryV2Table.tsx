@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTime } from "@/lib/formatDateTime";
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
@@ -355,7 +356,7 @@ export default function MovementHistoryV2Table({
                   </td>
                   <td className="px-4 py-3 text-zinc-400">{row.username}</td>
                   <td className="px-4 py-3 text-right text-zinc-500 text-xs">
-                    {new Date(row.createdAt).toLocaleString()}
+                    {formatDateTime(row.createdAt)}
                   </td>
                 </tr>
               ))

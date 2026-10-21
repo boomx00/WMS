@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/formatDateTime";
+
 export type SkuDetailLine = {
   locationCode: string;
   systemQty: number;
@@ -75,6 +77,7 @@ export default function SkuOpnameDetail({ detail }: { detail: SkuDetailResponse 
                   <th className="py-2 px-3 font-medium text-right">System qty</th>
                   <th className="py-2 px-3 font-medium text-right">Stock opname qty</th>
                   <th className="py-2 px-3 font-medium">Match</th>
+                  <th className="py-2 px-3 font-medium">Counted at</th>
                 </tr>
               </thead>
               <tbody>
@@ -90,6 +93,10 @@ export default function SkuOpnameDetail({ detail }: { detail: SkuDetailResponse 
                     <td className="py-1.5 px-3 text-right font-mono">{line.countedQty.toLocaleString()}</td>
                     <td className="py-1.5 px-3">
                       <MatchBadge difference={line.difference} />
+                    </td>
+                    <td className="py-1.5 px-3 font-mono text-zinc-500 whitespace-nowrap">
+                      {formatDateTime(line.countedAt)}
+                      {line.countedByUsername ? ` · ${line.countedByUsername}` : ""}
                     </td>
                   </tr>
                 ))}

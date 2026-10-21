@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTime } from "@/lib/formatDateTime";
 import { useEffect, useMemo, useState } from "react";
 import { EVENT_TYPE_STYLES, EVENT_TYPE_LABELS } from "@/lib/eventTypes";
 
@@ -115,7 +116,7 @@ export default function MovementTable({ rows }: { rows: Row[] }) {
                   </td>
                   <td className="px-4 py-3 text-zinc-400">{row.username}</td>
                   <td className="px-4 py-3 text-right text-zinc-500 text-xs whitespace-nowrap">
-                    {new Date(row.createdAt).toLocaleString()}
+                    {formatDateTime(row.createdAt)}
                   </td>
                 </tr>
               ))

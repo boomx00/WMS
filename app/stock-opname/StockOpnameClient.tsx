@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import VerifyStockIntegrityPanel from "./VerifyStockIntegrityPanel";
+import { formatDateTime } from "@/lib/formatDateTime";
 import SkuOpnameDetail, { type SkuDetailResponse } from "./SkuOpnameDetail";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
@@ -330,11 +331,11 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
             <span className="text-xs text-zinc-500">· PIC: {session.assignedToUsername}</span>
           )}
                     <span className="text-xs text-zinc-600" suppressHydrationWarning>
-            · Commenced: {session.commencedAt ? new Date(session.commencedAt).toLocaleString() : "Not started"}
+            · Commenced: {session.commencedAt ? formatDateTime(session.commencedAt) : "Not started"}
           </span>
           {session.completedAt && (
             <span className="text-xs text-zinc-600" suppressHydrationWarning>
-              · Finished (PDA): {new Date(session.completedAt).toLocaleString()}
+              · Finished (PDA): {formatDateTime(session.completedAt)}
             </span>
           )}
         </div>
@@ -393,7 +394,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
 
           {session.status === "CONFIRMED" && (
             <div className="mb-4 border border-blue-900 bg-blue-950/30 rounded-md px-3 py-2 text-xs text-blue-300 space-y-1">
-              <div>Confirmed {session.confirmedAt ? new Date(session.confirmedAt).toLocaleString() : ""}</div>
+              <div>Confirmed {session.confirmedAt ? formatDateTime(session.confirmedAt) : ""}</div>
               {session.confirmDescription && <div className="text-blue-200">{session.confirmDescription}</div>}
               {session.confirmedAdjustmentCode && (
                 <div className="font-mono">Adjustment: {session.confirmedAdjustmentCode}</div>
@@ -514,7 +515,7 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
                         </td>
                         <td className="py-1.5 px-3 text-zinc-500">{item.countedByUsername ?? "—"}</td>
                         <td className="py-1.5 px-3 text-zinc-500">
-                          {item.countedAt ? new Date(item.countedAt).toLocaleString() : "—"}
+                          {formatDateTime(item.countedAt)}
                         </td>
                         <td className="py-1.5 px-3 text-right">
                           {item.itemId === null ? (

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatDateTime } from "@/lib/formatDateTime";
 import { useState } from "react";
 import { EVENT_TYPE_STYLES, EVENT_TYPE_LABELS } from "@/lib/eventTypes";
 
@@ -173,7 +174,7 @@ export default function MovementSummary() {
                                 <td className="py-1 text-right font-mono">{e.quantity.toLocaleString()}</td>
                                 <td className="py-1 text-zinc-400">{e.username}</td>
                                 <td className="py-1 text-right text-zinc-500">
-                                  {new Date(e.createdAt).toLocaleString()}
+                                  {formatDateTime(e.createdAt)}
                                 </td>
                               </tr>
                             ))}

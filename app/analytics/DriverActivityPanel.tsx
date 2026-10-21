@@ -1,5 +1,7 @@
 "use client";
 
+import { formatDateTime } from "@/lib/formatDateTime";
+import DateTime24Input from "@/components/DateTime24Input";
 import { Fragment, useState } from "react";
 
 type DriverSummary = {
@@ -179,21 +181,11 @@ export default function DriverActivityPanel() {
       <div className="flex items-end gap-3 mb-6 flex-wrap">
         <div>
           <label className="block text-xs text-zinc-500 mb-1">From</label>
-          <input
-            type="datetime-local"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-          />
+          <DateTime24Input value={start} onChange={setStart} />
         </div>
         <div>
           <label className="block text-xs text-zinc-500 mb-1">To</label>
-          <input
-            type="datetime-local"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-          />
+          <DateTime24Input value={end} onChange={setEnd} />
         </div>
         <button
           onClick={handleFetch}
@@ -247,7 +239,7 @@ export default function DriverActivityPanel() {
                           {row.totalCount.toLocaleString()}
                         </td>
                         <td className="px-4 py-3 text-right text-zinc-500 text-xs">
-                          {row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString() : "—"}
+                          {formatDateTime(row.lastActivityAt)}
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
@@ -408,7 +400,7 @@ function CategoryCard({
                                       {ev.quantity.toLocaleString()}
                                     </td>
                                     <td className="px-2 py-1 text-right text-zinc-500">
-                                      {new Date(ev.createdAt).toLocaleString()}
+                                      {formatDateTime(ev.createdAt)}
                                     </td>
                                   </tr>
                                 ))}

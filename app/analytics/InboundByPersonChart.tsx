@@ -1,5 +1,6 @@
 "use client";
 
+import DateTime24Input from "@/components/DateTime24Input";
 import { useState } from "react";
 
 type Row = {
@@ -70,21 +71,11 @@ export default function InboundByPersonChart() {
       <div className="flex items-end gap-3 mb-6 flex-wrap">
         <div>
           <label className="block text-xs text-zinc-500 mb-1">From</label>
-          <input
-            type="datetime-local"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-          />
+          <DateTime24Input value={start} onChange={setStart} />
         </div>
         <div>
           <label className="block text-xs text-zinc-500 mb-1">To</label>
-          <input
-            type="datetime-local"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-          />
+          <DateTime24Input value={end} onChange={setEnd} />
         </div>
         <button
           onClick={handleFetch}
