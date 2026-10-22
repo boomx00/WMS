@@ -145,6 +145,7 @@ export const users = pgTable(
       .notNull()
       .references(() => roles.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    disabledAt: timestamp("disabled_at"),
   },
   (table) => [uniqueIndex("users_username_idx").on(table.username)]
 );

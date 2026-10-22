@@ -4,7 +4,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { users, roles, rolePagePermissions, roleActionPermissions } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { isSuperRoleName } from "@/lib/roles";
 import {
   canDo,
@@ -18,13 +18,14 @@ import type { SessionPayload } from "@/lib/auth";
 
 // Reads the role fresh from the DB (not from the session token), so role
 // changes and permission changes apply on the next request.
-// Returns null if the user no longer exists.
+// Returns null if the user no longer exists or has been disabled — proxy.ts
+// then clears the session and sends them to /login.
 export async function getPageAccess(userId: number): Promise<PageAccess | null> {
   const [row] = await db
     .select({ roleId: roles.id, roleName: roles.name })
     .from(users)
     .innerJoin(roles, eq(users.roleId, roles.id))
-    .where(eq(users.id, userId));
+    .where(and(eq(users.id, userId), isNull(users.disabledAt)));
 
   if (!row) return null;
 

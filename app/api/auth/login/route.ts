@@ -44,6 +44,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid username or password" }, { status: 401 });
   }
 
+  // After the password check, like the role checks below, so this doesn't
+  // reveal which usernames exist.
+  if (user.disabledAt) {
+    return NextResponse.json(
+      { error: "This account has been disabled. Ask a Manager to re-enable it." },
+      { status: 403 }
+    );
+  }
+
   // Checked after the password so we don't reveal which usernames exist
   // or what role they have to someone who doesn't know the password.
   let homePath: string | null = null;

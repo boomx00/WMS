@@ -1,23 +1,30 @@
 import { db } from "@/lib/db";
 import { users, roles } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { sessionIsSuper } from "@/lib/auth";
+import { eq, sql } from "drizzle-orm";
+import { getSession, sessionIsSuper } from "@/lib/auth";
 import CreateUserForm from "./CreateUserForm";
 import UsersClient from "./UsersClient";
 
 export const dynamic = "force-dynamic";
 
 async function getUsers() {
-  return db
+  const rows = await db
     .select({
       id: users.id,
       username: users.username,
       roleId: users.roleId,
       roleName: roles.name,
+      disabledAt: users.disabledAt,
     })
     .from(users)
     .leftJoin(roles, eq(users.roleId, roles.id))
-    .orderBy(users.username);
+    // Active users first, disabled ones at the bottom.
+    .orderBy(sql`${users.disabledAt} is not null`, users.username);
+
+  return rows.map((row) => ({
+    ...row,
+    disabledAt: row.disabledAt ? row.disabledAt.toISOString() : null,
+  }));
 }
 
 async function getAllRoles() {
@@ -26,10 +33,11 @@ async function getAllRoles() {
 
 
 export default async function UsersPage() {
-  const [userList, roleList, isAdmin] = await Promise.all([
+  const [userList, roleList, isAdmin, session] = await Promise.all([
     getUsers(),
     getAllRoles(),
     sessionIsSuper(),
+    getSession(),
   ]);
 
   return (
@@ -47,7 +55,12 @@ export default async function UsersPage() {
         </div>
       )}
 
-      <UsersClient users={userList} roles={roleList} isAdmin={isAdmin} />
+      <UsersClient
+        users={userList}
+        roles={roleList}
+        isAdmin={isAdmin}
+        currentUserId={session?.userId ?? null}
+      />
     </div>
   );
 }

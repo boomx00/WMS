@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { users, roles } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { isSuperRoleName } from "@/lib/roles";
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
@@ -43,7 +43,24 @@ export async function getSession(): Promise<SessionPayload | null> {
 
   if (!token) return null;
 
-  return verifySession(token);
+  const session = await verifySession(token);
+  if (!session) return null;
+
+  // The token is valid for 8h, so check the DB too: a disabled (or deleted)
+  // user loses access on their very next request, on both web and PDA.
+  if (!(await isActiveUser(session.userId))) return null;
+
+  return session;
+}
+
+// True if the user exists and hasn't been disabled on /users.
+export async function isActiveUser(userId: number): Promise<boolean> {
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.id, userId), isNull(users.disabledAt)));
+
+  return !!row;
 }
 
 // Returns the current session's role name (e.g. "Manager"), or null if not
