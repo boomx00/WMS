@@ -75,13 +75,7 @@ export default async function TotalStockPage() {
 
   return (
     <div className="p-8">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold">Total Stock</h1>
-        <p className="text-zinc-500 text-sm mt-1">
-          Total stock per SKU across all locations (v2). Click a row to see
-          where the stock is.
-        </p>
-      </header>
+      
 
       <TotalStockTable skus={skus} />
     </div>

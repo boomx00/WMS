@@ -26,7 +26,7 @@ import { canAccessPath, type PageAccess } from "@/lib/pages";
 type NavItems =
   | "Inventory"
   | "Location_Stock"
-    | "Total_Stock"
+  | "Total_Stock"
   | "Sales_Orders"
   | "Movement_History"
   | "Work_Orders"
@@ -35,8 +35,20 @@ type NavItems =
   | "Stock_Opname"
   | "Settings"
   | "Other_Transactions"
+  | "Master_Data"
+  | "Item_List"
+  | "Location_List"
+  | "User_List"
+  | "Role_List"
+  | "Permissions"
 
-
+type MasterItems = 
+  | "Master_Data"
+  | "Item_List"
+  | "Location_List"
+  | "User_List"
+  | "Role_List"
+  | "Permissions"
 
 const adminItems = [
   { href: "/items", label: "Items" },
@@ -45,6 +57,8 @@ const adminItems = [
   { href: "/roles", label: "Roles" },
   { href: "/permissions", label: "Permissions" },
 ];
+
+
 
 export default function SiteNav({
   username,
@@ -63,6 +77,12 @@ export default function SiteNav({
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/login"; // full reload so no stale state survives
   }
+    // const adminItemNav:{key: MasterItems; label: string, href: string}[] = [
+    //   {key:" Items", label: labels.items, href:"/"}
+    // ]
+
+
+
 
   const navItem:{key: NavItems; label: string, href: string}[] = [
     {key: "Inventory", label: labels.inventory, href:"/"},
@@ -78,9 +98,17 @@ export default function SiteNav({
     {key: "Settings", label: labels.settings, href:"/settings"},
   ]
 
+  const masterItem:{key: MasterItems; label: string, href: string}[]=[
+    {key: "Master_Data", label: labels.master_data, href:""},
+    {key: "Item_List", label: labels.item_list, href:"/items"},
+    {key: "Location_List", label: labels.location_list, href:"/locations"},
+    {key: "User_List", label: labels.user_list, href:"/users"},
+    {key: "Permissions", label: labels.permissions, href:"/permissions"},
+  ]
+
   const visibleNavItems = navItem.filter((item) => !access || canAccessPath(item.href, access))
 
-  const visibleAdminItems = adminItems.filter((item) => !access || canAccessPath(item.href, access))
+  const visibleAdminItems = masterItem.filter((item) => !access || canAccessPath(item.href, access))
 
   return (
     <>
@@ -130,7 +158,8 @@ export default function SiteNav({
               onClick={() => setAdminOpen((prev) => !prev)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
             >
-              <span>Administration</span>
+              <span>  {visibleAdminItems.find((item) => item.key === "Master_Data")?.label}
+</span>
 
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -152,7 +181,9 @@ export default function SiteNav({
 
             {adminOpen && (
               <div className="ml-3 mt-1 space-y-1 border-l border-zinc-800 pl-2">
-                {visibleAdminItems.map((item) => (
+                {visibleAdminItems
+                .filter((item) => item.key !== "Master_Data")
+                .map((item) => (
                   <a
                     key={item.href}
                     href={item.href}
@@ -272,7 +303,9 @@ export default function SiteNav({
                 onClick={() => setAdminOpen((prev) => !prev)}
                 className="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
               >
-                <span>Administration</span>
+                <span>
+                    {visibleAdminItems.find((item) => item.key === "Master_Data")?.label}
+                </span>
 
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -294,16 +327,18 @@ export default function SiteNav({
 
               {adminOpen && (
                 <div className="ml-3 mt-1 space-y-1 border-l border-zinc-800 pl-2">
-                  {visibleAdminItems.map((item) => (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      onClick={() => setOpen(false)}
-                      className="block px-3 py-2 rounded-md text-sm text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
-                    >
-                      {item.label}
-                    </a>
-                  ))}
+               {visibleAdminItems
+  .filter((item) => item.key !== "Master_Data")
+  .map((item) => (
+    <a
+      key={item.href}
+      href={item.href}
+      onClick={() => setOpen(false)}
+      className="block px-3 py-2 rounded-md text-sm text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+    >
+      {item.label}
+    </a>
+  ))}
                 </div>
               )}
             </div>

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ItemOption } from "./types";
-
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 export default function ItemPicker({
   allItems,
   value,
@@ -14,7 +14,7 @@ export default function ItemPicker({
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
-
+  const labels = usePageLabels("sales_page")
   const selected = allItems.find((item) => item.sku === value);
 
   const filtered = query.trim()
@@ -27,6 +27,8 @@ export default function ItemPicker({
 
   return (
     <div className="relative flex-1">
+              <label className="block text-xs text-zinc-500 mb-1">{labels.products}</label>
+
       <input
         type="text"
         value={open ? query : selected ? `${selected.sku} — ${selected.name}` : ""}
@@ -41,14 +43,14 @@ export default function ItemPicker({
         onBlur={() => {
           setTimeout(() => setOpen(false), 150);
         }}
-        placeholder="Type SKU or name..."
+        placeholder={labels.placeholder_products}
         className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
       />
 
       {open && (
         <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto border border-zinc-800 rounded-md bg-zinc-900 shadow-lg">
           {filtered.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-zinc-600">No matches</div>
+            <div className="px-3 py-2 text-xs text-zinc-600">{labels.placeholder_products_nomatch}</div>
           ) : (
             filtered.slice(0, 50).map((item) => (
               <button

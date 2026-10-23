@@ -180,13 +180,7 @@ const [totalCount, orders, allItems, isAdmin] = await Promise.all([
 
   return (
     <div className="p-8 max-w-5xl">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold">Sales Orders</h1>
-        <p className="text-zinc-500 text-sm mt-1">
-          Create and view sales orders / picking lists.
-        </p>
-      </header>
-
+     
 <SalesOrdersClient
   orders={orders}
   allItems={allItems}

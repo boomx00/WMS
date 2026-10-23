@@ -6,6 +6,7 @@ import RefreshButton from "@/components/RefreshButton";
 import LedgerModal from "./LedgerModal";
 import LocationLedgerModal from "./LocationLedgerModal";
 import { downloadXlsx } from "./exportLedgerXlsx";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 export type SkuLocation = {
   locationCode: string;
@@ -131,6 +132,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [ledgerSku, setLedgerSku] = useState<string | null>(null);
   const [locationLedger, setLocationLedger] = useState<{ sku: string; location: string } | null>(null);
+    const labels = usePageLabels("total_stock");
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -210,13 +212,19 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
 
   return (
     <div>
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold">{labels.total_stock_header}</h1>
+        <p className="text-zinc-500 text-sm mt-1">
+          {labels.header_description}
+        </p>
+      </header>
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">SKUs in stock</p>
+          <p className="text-xs text-zinc-500 mb-1">{labels.sku_in_stock_card}</p>
           <p className="text-lg font-semibold">{visible.length.toLocaleString()}</p>
         </div>
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">Total stock (cartons)</p>
+          <p className="text-xs text-zinc-500 mb-1">{labels.total_stock_card}</p>
           <p className="text-lg font-semibold">{grandTotal.toLocaleString()}</p>
         </div>
       </div>
@@ -234,7 +242,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           onClick={exportAll}
           className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
         >
-          Export All
+          {labels.export_data}
         </button>
       </div>
 
@@ -243,15 +251,15 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
           <thead>
             <tr className="bg-zinc-900 text-zinc-500 text-left">
               <th className="px-4 py-3 font-medium w-8"></th>
-              <SortableTh label="SKU" sortKey="sku" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-              <SortableTh label="Product" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
-              <SortableTh label="Locations" sortKey="locations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Export" sortKey="export" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Defect" sortKey="defect" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Good Stock" sortKey="good" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Total (cartons)" sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label="Pallets" sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <th className="px-4 py-3 font-medium text-right">Ledger</th>
+              <SortableTh label={labels.th_sku} sortKey="sku" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label={labels.th_product} sortKey="name" activeKey={sortKey} dir={sortDir} onSort={handleSort} />
+              <SortableTh label={labels.th_location} sortKey="locations" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label={labels.th_export} sortKey="export" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label={labels.th_defect} sortKey="defect" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label={labels.th_good_stock} sortKey="good" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label={labels.th_total_carton} sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label={labels.th_pallts} sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <th className="px-4 py-3 font-medium text-right">{labels.th_ledger}</th>
             </tr>
           </thead>
           <tbody>
@@ -318,7 +326,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                           }}
                           className="px-3 py-1.5 rounded-md border border-zinc-800 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
                         >
-                          Details
+                          {labels.details_button}
                         </button>
                       </td>
                     </tr>
@@ -329,12 +337,12 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                           <table className="w-full text-sm">
                             <thead>
                               <tr className="text-zinc-500 text-left">
-                                <th className="py-2 pr-4 font-medium">Location</th>
-                                <th className="py-2 pr-4 font-medium">Type</th>
-                                <th className="py-2 pr-4 font-medium text-right">Quantity</th>
-                                <th className="py-2 pr-4 font-medium text-right">Pallets</th>
-                                <th className="py-2 pr-4 font-medium text-right">Updated</th>
-                                <th className="py-2 font-medium text-right">Ledger</th>
+                                <th className="py-2 pr-4 font-medium">{labels.th_location}</th>
+                                {/* <th className="py-2 pr-4 font-medium">Type</th> */}
+                                <th className="py-2 pr-4 font-medium text-right">{labels.th_quantity}</th>
+                                <th className="py-2 pr-4 font-medium text-right">{labels.th_pallets}</th>
+                                <th className="py-2 pr-4 font-medium text-right">{labels.th_updated}</th>
+                                <th className="py-2 font-medium text-right">{labels.th_ledger}</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -343,7 +351,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                                   <td className="py-2 pr-4 font-mono text-zinc-300">
                                     {loc.locationCode}
                                   </td>
-                                  <td className="py-2 pr-4 text-zinc-400">{typeLabel(loc)}</td>
+                                  {/* <td className="py-2 pr-4 text-zinc-400">{typeLabel(loc)}</td> */}
                                   <td className="py-2 pr-4 text-right font-mono">
                                     {loc.quantity.toLocaleString()}
                                   </td>
@@ -360,7 +368,7 @@ export default function TotalStockTable({ skus }: { skus: SkuStock[] }) {
                                       }
                                       className="px-2 py-1 rounded-md border border-zinc-800 text-[10px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
                                     >
-                                      Ledger
+                                      {labels.th_ledger}
                                     </button>
                                   </td>
                                 </tr>

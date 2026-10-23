@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Order, OrderLine } from "./types";
-
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 export default function ShippedCell({
   order,
   line,
@@ -19,7 +19,7 @@ export default function ShippedCell({
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  const labels = usePageLabels("sales_page")
   async function handleSave() {
     const correctedQuantity = Number(value);
     if (!Number.isFinite(correctedQuantity) || correctedQuantity < 0) {
@@ -94,7 +94,7 @@ export default function ShippedCell({
         type="text"
         value={reason}
         onChange={(e) => setReason(e.target.value)}
-        placeholder="Reason (required)"
+        placeholder={labels.reason}
         className="w-40 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-xs"
       />
       <div className="flex gap-2">

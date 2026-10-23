@@ -37,13 +37,7 @@ export default async function LocationStockPage() {
 
   return (
     <div className="p-8 max-w-4xl">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold">Location Stock</h1>
-        <p className="text-zinc-500 text-sm mt-1">
-          Live per-location totals (v2) — direct read of the location_stock
-          table, not derived from pallets.
-        </p>
-      </header>
+      
 
       <LocationStockTable rows={rows} />
     </div>

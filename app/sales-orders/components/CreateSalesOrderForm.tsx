@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ItemPicker from "./ItemPicker";
 import type { ItemOption } from "./types";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 export default function CreateSalesOrderForm({ allItems }: { allItems: ItemOption[] }) {
   const router = useRouter();
@@ -15,7 +16,7 @@ export default function CreateSalesOrderForm({ allItems }: { allItems: ItemOptio
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
+  const labels = usePageLabels("sales_page")
   function updateLine(index: number, field: "sku" | "quantity", value: string) {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [field]: value } : l)));
   }
@@ -69,9 +70,10 @@ export default function CreateSalesOrderForm({ allItems }: { allItems: ItemOptio
     <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
       <div className="flex gap-3">
         <div className="flex-1">
-          <label className="block text-xs text-zinc-500 mb-1">SO Number</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.so_number}</label>
           <input
             type="text"
+            placeholder="HPT/SO...."
             value={soNumber}
             onChange={(e) => setSoNumber(e.target.value)}
             className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
@@ -79,7 +81,7 @@ export default function CreateSalesOrderForm({ allItems }: { allItems: ItemOptio
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">Date</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.date}</label>
           <input
             type="date"
             value={orderDate}
@@ -91,41 +93,43 @@ export default function CreateSalesOrderForm({ allItems }: { allItems: ItemOptio
       </div>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-2">Items</label>
         <div className="space-y-2">
-          {lines.map((line, i) => (
-            <div key={i} className="flex gap-2">
-              <ItemPicker
-                allItems={allItems}
-                value={line.sku}
-                onChange={(sku) => updateLine(i, "sku", sku)}
-              />
-              <input
-                type="number"
-                min={1}
-                placeholder="Qty"
-                value={line.quantity}
-                onChange={(e) => updateLine(i, "quantity", e.target.value)}
-                className="w-24 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-              />
-              {lines.length > 1 && (
-                <button
-                  type="button"
-                  onClick={() => removeLine(i)}
-                  className="px-3 text-zinc-500 hover:text-red-400 text-sm"
-                >
-                  ✕
-                </button>
-              )}
-            </div>
-          ))}
+         {lines.map((line, i) => (
+  <div key={i} className="flex gap-2 items-end">
+    <ItemPicker
+      allItems={allItems}
+      value={line.sku}
+      onChange={(sku) => updateLine(i, "sku", sku)}
+    />
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-zinc-500">{labels.qty}</span>
+      <input
+        type="number"
+        min={1}
+        placeholder=""
+        value={line.quantity}
+        onChange={(e) => updateLine(i, "quantity", e.target.value)}
+        className="w-24 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+      />
+    </label>
+    {lines.length > 1 && (
+      <button
+        type="button"
+        onClick={() => removeLine(i)}
+        className="px-3 py-2 text-zinc-500 hover:text-red-400 text-sm"
+      >
+        ✕
+      </button>
+    )}
+  </div>
+))}
         </div>
         <button
           type="button"
           onClick={addLine}
           className="mt-2 text-xs text-amber-500 hover:underline"
         >
-          + Add item
+          + {labels.add_item}
         </button>
       </div>
 
@@ -134,7 +138,7 @@ export default function CreateSalesOrderForm({ allItems }: { allItems: ItemOptio
         disabled={loading || !soNumber}
         className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
       >
-        {loading ? "Creating..." : "Create Sales Order"}
+        {loading ? labels.creating : labels.create_sales_order}
       </button>
 
       {error && <p className="text-xs text-red-400">{error}</p>}

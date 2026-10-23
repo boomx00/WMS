@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
-
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 type Line = {
   workOrderNumber: string;
   itemSku: string;
@@ -107,7 +107,7 @@ export default function WorkOrdersTable({
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [mesChecks, setMesChecks] = useState<Record<string, MesCheckState>>({});
-
+const labels = usePageLabels("work_orders_page")
   // Searches the whole database, not just the 50 work orders on this page —
   // same debounced pattern used on Sales Orders and Movement History (v2).
   useEffect(() => {
@@ -177,12 +177,18 @@ export default function WorkOrdersTable({
 
   return (
     <div>
+            <header className="mb-8">
+        <h1 className="text-2xl font-semibold">{labels.page_header}</h1>
+        <p className="text-zinc-500 text-sm mt-1">
+          {labels.header_description}
+        </p>
+      </header>
       <div className="flex items-center gap-2 mb-4">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search all work orders by number or SKU..."
+          placeholder={labels.search_placeholder}
           className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
         />
         <RefreshButton onClick={handleRefresh} loading={searching} />
@@ -193,13 +199,13 @@ export default function WorkOrdersTable({
           ? "Searching..."
           : isSearching
             ? `${displayed.length.toLocaleString()} result(s) for "${search.trim()}"`
-            : `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} work orders total`}
+            : `Page ${page} of ${totalPages} · ${labels.total} ${totalCount.toLocaleString()} ${labels.record}`}
       </p>
 
       <div className="space-y-3 mb-4">
         {displayed.length === 0 ? (
           <div className="border border-dashed border-zinc-800 rounded-lg px-8 py-12 text-center text-zinc-600 text-sm">
-            {isSearching ? "No matching work orders." : "No work orders yet."}
+            {isSearching ? labels.no_matching_work_order : "No work orders yet."}
           </div>
         ) : (
           displayed.map((wo) => {
@@ -224,15 +230,15 @@ export default function WorkOrdersTable({
                   </span>
                   <span className="text-xs text-zinc-500 text-right">
                     <div>
-                      {wo.totalPallets.toLocaleString()} pallet(s) ·{" "}
+                      {wo.totalPallets.toLocaleString()} {labels.pallet} ·{" "}
                       <span className="text-zinc-300 font-mono">{wo.totalQuantity.toLocaleString()}</span>{" "}
-                      total units
+                      {labels.total_unit}
                     </div>
-                    <div className="text-zinc-600 text-[10px]">
+                    {/* <div className="text-zinc-600 text-[10px]">
                       Originally inbounded: {wo.totalOriginalInbound.toLocaleString()}
-                    </div>
+                    </div> */}
                     <div className="text-zinc-600 text-[10px]">
-                      First inbound:{" "}
+                      {labels.first_inbound}:{" "}
                       {wo.firstInboundAt ? new Date(wo.firstInboundAt).toLocaleString() : "—"}
                     </div>
                   </span>
@@ -262,14 +268,14 @@ export default function WorkOrdersTable({
                         <>
                           <div className="flex items-center justify-between px-4 py-2 border-b border-zinc-800/60 flex-wrap gap-2">
                             <div className="flex items-center gap-4 text-[10px] uppercase tracking-wide text-zinc-600">
-                              <span>WMS Inbound</span>
+                              <span>{labels.wms_inbound}</span>
                               {showMesColumn && (
                                 <>
-                                  <span className="text-emerald-400">{matched} matched</span>
+                                  <span className="text-emerald-400">{matched} {labels.matched}</span>
                                   {onlyWms > 0 && (
-                                    <span className="text-amber-400">{onlyWms} only in WMS</span>
+                                    <span className="text-amber-400">{onlyWms} {labels.only_in_wms}</span>
                                   )}
-                                  {onlyMes > 0 && <span className="text-red-400">{onlyMes} only in MES</span>}
+                                  {onlyMes > 0 && <span className="text-red-400">{onlyMes} {labels.only_in_mes}</span>}
                                 </>
                               )}
                             </div>
@@ -281,21 +287,21 @@ export default function WorkOrdersTable({
                               {mesCheck?.loading
                                 ? "Checking MES..."
                                 : showMesColumn
-                                  ? "Refresh MES Check"
-                                  : "Cross Check MES"}
+                                  ? labels.refresh_mes_check
+                                  : labels.cross_check_mes}
                             </button>
                           </div>
 
                           <div className="flex items-center border-b border-zinc-800/60 text-[10px] uppercase tracking-wide text-zinc-600">
                             <div className="flex-1 flex items-center gap-4 px-4 py-2">
                               <span>
-                                Total Carton WMS:{" "}
+                               {labels.total_carton_wms}:{" "}
                                 <span className="text-zinc-300 font-mono normal-case">
                                   {wmsCartonTotal.toLocaleString()}
                                 </span>
                               </span>
                               <span>
-                                Total Pallet WMS:{" "}
+                                 {labels.total_pallet_wms}:{" "}
                                 <span className="text-zinc-300 font-mono normal-case">
                                   {wmsPalletTotal.toLocaleString()}
                                 </span>
@@ -304,13 +310,13 @@ export default function WorkOrdersTable({
                             {showMesColumn && (
                               <div className="shrink-0 flex items-center gap-4 px-4 py-2 border-l border-zinc-800">
                                 <span>
-                                  Total Carton MES:{" "}
+                                  {labels.total_carton_mes}:{" "}
                                   <span className="text-zinc-300 font-mono normal-case">
                                     {mesCartonTotal.toLocaleString()}
                                   </span>
                                 </span>
                                 <span>
-                                  Total Pallet MES:{" "}
+                                  {labels.total_pallet_mes}:{" "}
                                   <span className="text-zinc-300 font-mono normal-case">
                                     {mesPalletTotal.toLocaleString()}
                                   </span>
@@ -328,13 +334,13 @@ export default function WorkOrdersTable({
                             <table className="flex-1 text-xs">
                               <thead>
                                 <tr className="text-zinc-500 text-left">
-                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Label</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">{labels.label}</th>
                                   <th className="px-4 py-2 font-medium whitespace-nowrap">SKU</th>
-                                  <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Qty</th>
-                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Location</th>
-                                  <th className="px-4 py-2 font-medium whitespace-nowrap">Status</th>
-                                  <th className="px-4 py-2 font-medium whitespace-nowrap w-20">Inbound By</th>
-                                  <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Inbound</th>
+                                  <th className="px-4 py-2 font-medium text-right whitespace-nowrap">{labels.qty}</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">{labels.location}</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap">{labels.status}</th>
+                                  <th className="px-4 py-2 font-medium whitespace-nowrap w-20">{labels.inbound_by}</th>
+                                  <th className="px-4 py-2 font-medium text-right whitespace-nowrap">{labels.inbound}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -397,8 +403,8 @@ export default function WorkOrdersTable({
                               <table className="shrink-0 text-xs border-l border-zinc-800">
                                 <thead>
                                   <tr className="text-zinc-500 text-left">
-                                    <th className="px-4 py-2 font-medium whitespace-nowrap">Label (MES)</th>
-                                    <th className="px-4 py-2 font-medium whitespace-nowrap">Match</th>
+                                    <th className="px-4 py-2 font-medium whitespace-nowrap">{labels.label_mes}</th>
+                                    <th className="px-4 py-2 font-medium whitespace-nowrap">{labels.match}</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -410,15 +416,15 @@ export default function WorkOrdersTable({
                                       <td className="px-4 py-2 whitespace-nowrap">
                                         {row.wms && row.mes ? (
                                           <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 whitespace-nowrap">
-                                            Match
+                                            {labels.match}
                                           </span>
                                         ) : row.mes ? (
                                           <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-950 text-red-300 whitespace-nowrap">
-                                            Missing in WMS
+                                            {labels.missing_in_wms}
                                           </span>
                                         ) : (
                                           <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 whitespace-nowrap">
-                                            Missing in MES
+                                            {labels.missing_in_mes}
                                           </span>
                                         )}
                                       </td>
@@ -446,7 +452,7 @@ export default function WorkOrdersTable({
             disabled={page <= 1}
             className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            ← Previous
+            ← {labels.previous}
           </button>
           <span className="text-xs text-zinc-500">
             Page {page} of {totalPages}
@@ -456,7 +462,7 @@ export default function WorkOrdersTable({
             disabled={page >= totalPages}
             className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            Next →
+            {labels.next} →
           </button>
         </div>
       )}

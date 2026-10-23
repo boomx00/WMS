@@ -143,17 +143,23 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
 
   return (
     <div>
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold">{labels.location_header}</h1>
+        <p className="text-zinc-500 text-sm mt-1">
+          {labels.header_description}
+        </p>
+      </header>
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">Total Stock (Floor + Rack)</p>
+          <p className="text-xs text-zinc-500 mb-1">{labels.total_stock_card}</p>
           <p className="text-lg font-semibold">{stockTotals.total.toLocaleString()}</p>
         </div>
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">Total Floor</p>
+          <p className="text-xs text-zinc-500 mb-1">{labels.total_floor_card}</p>
           <p className="text-lg font-semibold">{stockTotals.floor.toLocaleString()}</p>
         </div>
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">Total Rack</p>
+          <p className="text-xs text-zinc-500 mb-1">{labels.total_rack}</p>
           <p className="text-lg font-semibold">{stockTotals.rack.toLocaleString()}</p>
         </div>
       </div>
@@ -163,7 +169,7 @@ export default function LocationStockTable({ rows }: { rows: Row[] }) {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search all location stock by location or SKU..."
+          placeholder={labels.search_placeholder}
           className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
         />
         <RefreshButton onClick={handleRefresh} loading={searching} />

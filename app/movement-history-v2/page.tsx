@@ -83,14 +83,7 @@ export default async function MovementHistoryV2Page({
 
   return (
     <div className="p-8 max-w-7xl">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold">Movement History (v2)</h1>
-        <p className="text-zinc-500 text-sm mt-1">
-          Location-based picking and shipping activity — separate from the
-          pallet-level history on the main History page.
-        </p>
-      </header>
-
+      
       <MovementHistoryV2Table rows={rows} page={page} totalPages={totalPages} totalCount={totalCount} />
     </div>
   );

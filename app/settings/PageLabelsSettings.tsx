@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PAGE_OPTIONS, PageKey } from "@/lib/pageLabels";
+import { useRouter } from "next/navigation";
 
 type RawLabel = { en: string; id: string; zh: string };
 
@@ -11,7 +12,7 @@ export default function PageLabelsSettings({ readOnly = false }: { readOnly?: bo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
-
+  const router = useRouter();
   useEffect(() => {
     loadLabels();
   }, [page]);
@@ -44,6 +45,8 @@ export default function PageLabelsSettings({ readOnly = false }: { readOnly?: bo
     }
 
     setValues((prev) => ({ ...prev, [key]: { ...prev[key], id, zh } }));
+      router.refresh();
+
   }
 
   return (

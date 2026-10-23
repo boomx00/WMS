@@ -6,6 +6,8 @@ import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { useCan } from "@/lib/AccessContext";
 import type { ActionKey } from "@/lib/pages";
 
+
+
 function parseLabel(raw: string) {
   const parts = raw.trim().split("*");
   if (parts.length !== 4) return null;
@@ -95,7 +97,7 @@ function InboundForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
+const labels = usePageLabels("scan")
   // Best-effort auto-fill — parses the standard SKU*seq*qty*WO format if it
   // matches, but never blocks submission if it doesn't. Every field below
   // stays manually editable regardless.
@@ -152,13 +154,16 @@ function InboundForm() {
 
   return (
     <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
+        <p className="text-xs text-zinc-500">
+        {labels.inbound_description}
+      </p>
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Scan product label</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.scan_product_label}</label>
         <input
           type="text"
           value={labelInput}
           onChange={(e) => handleLabelChange(e.target.value)}
-          placeholder="*14013024102*0021*5000*M0006995"
+          placeholder="*14013024102*0021*5000*M0001231"
           autoFocus
           className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
         />
@@ -175,7 +180,7 @@ function InboundForm() {
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">Work Order</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.work_order}</label>
           <input
             type="text"
             value={workOrderNumber}
@@ -186,7 +191,7 @@ function InboundForm() {
       </div>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Quantity</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.quantity}</label>
         <input
           type="number"
           min={1}
@@ -201,7 +206,7 @@ function InboundForm() {
         disabled={loading || !labelInput || !sku || !workOrderNumber || !quantity}
         className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
       >
-        {loading ? "Scanning in..." : "Scan in at Floor"}
+        {loading ? "Scanning in..." : labels.scan_in_at_floor}
       </button>
 
       <FeedbackBox error={error} success={success} />
@@ -788,7 +793,7 @@ function AdjustForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
+  const labels = usePageLabels("scan")
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -826,18 +831,16 @@ function AdjustForm() {
   return (
     <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
       <p className="text-xs text-zinc-500">
-        Directly correct the recorded quantity of a SKU at a location —
-        for stock-count discrepancies or data entry mistakes. Logged as an
-        ADJUSTMENT event.
+        {labels.adjust_location_description}
       </p>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Location</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.location}</label>
         <input
           type="text"
           value={locationCode}
           onChange={(e) => setLocationCode(e.target.value)}
-          placeholder="A.1.1"
+          placeholder="A.1.1...."
           className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
         />
       </div>
@@ -853,7 +856,7 @@ function AdjustForm() {
       </div>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Corrected quantity</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.corrected_quantity}</label>
         <input
           type="number"
           min={0}
@@ -864,7 +867,7 @@ function AdjustForm() {
       </div>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Reason (optional)</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.reason}</label>
         <input
           type="text"
           value={reason}
@@ -879,7 +882,7 @@ function AdjustForm() {
         disabled={loading || !locationCode || !itemSku || newQuantity === ""}
         className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
       >
-        {loading ? "Adjusting..." : "Apply Adjustment"}
+        {loading ? "Adjusting..." : labels.apply_adjustment}
       </button>
 
       <FeedbackBox error={error} success={success} />
@@ -1109,7 +1112,7 @@ function AdjustBulkForm() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [linesById, setLinesById] = useState<Record<number, BulkAdjustmentLine[]>>({});
   const [linesLoadingId, setLinesLoadingId] = useState<number | null>(null);
-
+  const labels = usePageLabels("scan")
   async function toggleExpand(id: number) {
     if (expandedId === id) {
       setExpandedId(null);
@@ -1193,54 +1196,61 @@ function AdjustBulkForm() {
     <div className="space-y-6">
       <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
         <p className="text-xs text-zinc-500">
-          Directly set the stock quantity for multiple location + SKU pairs at once.
-          Each row&apos;s existing stock is removed and replaced with the value you
-          enter. The whole batch is logged together under one Adjustment ID.
+         {labels.bulk_adjustment_description}
         </p>
 
         <div className="space-y-2">
           {rows.map((row, i) => (
-            <div key={i} className="flex gap-2 items-center">
-              <input
-                type="text"
-                value={row.locationCode}
-                onChange={(e) => updateRow(i, "locationCode", e.target.value)}
-                placeholder="Location"
-                className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-              />
-              <input
-                type="text"
-                value={row.itemSku}
-                onChange={(e) => updateRow(i, "itemSku", e.target.value)}
-                placeholder="SKU"
-                className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-              />
-              <input
-                type="number"
-                value={row.newQuantity}
-                onChange={(e) => updateRow(i, "newQuantity", e.target.value)}
-                placeholder="Qty"
-                min={0}
-                className="w-28 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
-              />
-              <button
-                type="button"
-                onClick={() => removeRow(i)}
-                disabled={rows.length === 1}
-                className="text-zinc-600 hover:text-red-400 disabled:opacity-30 text-sm px-2"
-              >
-                ✕
-              </button>
-            </div>
+        <div key={i} className="flex gap-2 items-end">
+  <label className="flex-1 flex flex-col gap-1">
+    <span className="text-xs text-zinc-500">{labels.location}</span>
+    <input
+      type="text"
+      value={row.locationCode}
+      onChange={(e) => updateRow(i, "locationCode", e.target.value)}
+      placeholder="Floor, A.1.1 - H.16.1"
+      className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+    />
+  </label>
+  <label className="flex-1 flex flex-col gap-1">
+    <span className="text-xs text-zinc-500">SKU</span>
+    <input
+      type="text"
+      value={row.itemSku}
+      onChange={(e) => updateRow(i, "itemSku", e.target.value)}
+      placeholder="123123123"
+      className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+    />
+  </label>
+  <label className="w-28 flex flex-col gap-1">
+    <span className="text-xs text-zinc-500">{labels.quantity}</span>
+    <input
+      type="number"
+      value={row.newQuantity}
+      onChange={(e) => updateRow(i, "newQuantity", e.target.value)}
+      placeholder=""
+      min={0}
+      className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+    />
+  </label>
+  <button
+    type="button"
+    onClick={() => removeRow(i)}
+    disabled={rows.length === 1}
+    className="text-zinc-600 hover:text-red-400 disabled:opacity-30 text-sm px-2 py-2"
+  >
+    ✕
+  </button>
+</div>
           ))}
         </div>
 
         <button type="button" onClick={addRow} className="text-xs text-amber-500 hover:text-amber-400">
-          + Add row
+          + {labels.add_row}
         </button>
 
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">Description (optional)</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.description}</label>
           <input
             type="text"
             value={description}
@@ -1254,7 +1264,7 @@ function AdjustBulkForm() {
           disabled={loading}
           className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
         >
-          {loading ? "Applying..." : "Apply Bulk Adjustment"}
+          {loading ? "Applying..." : labels.apply_bulk_adjustment}
         </button>
 
         {error && (
@@ -1270,7 +1280,7 @@ function AdjustBulkForm() {
 
            <div className="border border-zinc-800 rounded-lg overflow-hidden">
         <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-zinc-300">Bulk Adjustments</h3>
+          <h3 className="text-sm font-medium text-zinc-300">{labels.bulk_adjustments_list}</h3>
           {listLoading && <span className="text-xs text-zinc-600">Loading...</span>}
         </div>
         {adjustments.length === 0 ? (
@@ -1280,12 +1290,12 @@ function AdjustBulkForm() {
             <thead>
               <tr className="text-left text-zinc-500 text-xs border-b border-zinc-800">
                 <th className="py-2 px-4"></th>
-                <th className="py-2 px-4">ID</th>
-                <th className="py-2 px-4">Source</th>
-                <th className="py-2 px-4">Description</th>
-                <th className="py-2 px-4 text-right">Lines</th>
-                <th className="py-2 px-4">By</th>
-                <th className="py-2 px-4">Created</th>
+                <th className="py-2 px-4">{labels.th_id}</th>
+                {/* <th className="py-2 px-4">Source</th> */}
+                <th className="py-2 px-4">{labels.th_description}</th>
+                <th className="py-2 px-4 text-right">{labels.th_lines}</th>
+                <th className="py-2 px-4">{labels.th_by}</th>
+                <th className="py-2 px-4">{labels.th_created}</th>
               </tr>
             </thead>
             <tbody>
@@ -1300,9 +1310,9 @@ function AdjustBulkForm() {
                       <span className={`inline-block transition-transform ${expandedId === a.id ? "rotate-90" : ""}`}>▶</span>
                     </td>
                     <td className="py-2 px-4 font-mono text-amber-500">{a.adjustmentCode}</td>
-                    <td className="py-2 px-4 text-zinc-400">
+                    {/* <td className="py-2 px-4 text-zinc-400">
                       {a.source === "STOCK_OPNAME" ? `Stock Opname${a.opnameNumber ? ` (${a.opnameNumber})` : ""}` : "Scan"}
-                    </td>
+                    </td> */}
                     <td className="py-2 px-4 text-zinc-400">{a.description || "—"}</td>
                     <td className="py-2 px-4 text-right font-mono">{a.lineCount}</td>
                     <td className="py-2 px-4 text-zinc-500">{a.username ?? "—"}</td>
@@ -1319,12 +1329,12 @@ function AdjustBulkForm() {
                           <table className="w-full text-xs">
                             <thead>
                               <tr className="text-left text-zinc-600 border-b border-zinc-800">
-                                <th className="py-1.5 pr-4">Location</th>
+                                <th className="py-1.5 pr-4">{labels.location}</th>
                                 <th className="py-1.5 pr-4">SKU</th>
-                                <th className="py-1.5 pr-4">Product</th>
-                                <th className="py-1.5 pr-4 text-right">Previous</th>
-                                <th className="py-1.5 pr-4 text-right">New</th>
-                                <th className="py-1.5 pr-4 text-right">Delta</th>
+                                <th className="py-1.5 pr-4">{labels.th_product}</th>
+                                <th className="py-1.5 pr-4 text-right">{labels.th_previous}</th>
+                                <th className="py-1.5 pr-4 text-right">{labels.th_new}</th>
+                                <th className="py-1.5 pr-4 text-right">{labels.th_delta}</th>
                               </tr>
                             </thead>
                             <tbody>

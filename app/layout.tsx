@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { cookies } from "next/headers";
 import "./globals.css";
 import SiteNav from "@/components/SiteNav";
 import { LanguageProvider } from "@/lib/LanguageContext";
 import { getSession } from "@/lib/auth";
 import { getPageAccess } from "@/lib/pagePermissions";
 import { AccessProvider } from "@/lib/AccessContext";
+import { LANGUAGE_COOKIE, isLanguage } from "@/lib/language";
+import { getLabelOverrides } from "@/lib/pageLabelsServer";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,17 +28,31 @@ export const metadata: Metadata = {
   },
 };
 
-export default async function RootLayout({ children }: LayoutProps<"/">) {
+async function getAccess() {
   const session = await getSession();
   const access = session ? await getPageAccess(session.userId) : null;
+  return { session, access };
+}
+
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Labels don't depend on the session, so load them alongside the
+  // session/permission lookups instead of after them.
+  const [{ session, access }, labelOverrides, cookieStore] = await Promise.all([
+    getAccess(),
+    getLabelOverrides(),
+    cookies(),
+  ]);
+
+  const cookieLang = cookieStore.get(LANGUAGE_COOKIE)?.value;
+  const language = isLanguage(cookieLang) ? cookieLang : "en";
 
   return (
     <html
-      lang="en"
+      lang={language}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-zinc-950 text-zinc-100">
-        <LanguageProvider>
+        <LanguageProvider initialLanguage={language} overrides={labelOverrides}>
           <AccessProvider access={access}>
           {/* flex-col on mobile: mobile top bar (from SiteNav) stacks above
               the page content. flex-row on desktop: sidebar sits beside it,

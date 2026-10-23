@@ -9,6 +9,7 @@ import EditSalesOrderForm from "./components/EditSalesOrderForm";
 import ShippedCell from "./components/ShippedCell";
 import type { ItemOption, Order } from "./components/types";
 import { formatTruckTime } from "./components/helpers";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 const OVERALL_STATUS_STYLES: Record<string, string> = {
   NOT_STARTED: "bg-zinc-800 text-zinc-400",
   PARTIAL: "bg-amber-950 text-amber-300",
@@ -46,7 +47,7 @@ export default function SalesOrdersClient({
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Order[] | null>(null);
   const [searching, setSearching] = useState(false);
-
+    const labels = usePageLabels("sales_page");
   useEffect(() => {
     if (!search.trim()) {
       setSearchResults(null);
@@ -94,6 +95,13 @@ export default function SalesOrdersClient({
 
   return (
     <div>
+       <header className="mb-8">
+              <h1 className="text-2xl font-semibold">{labels.sales_orders_header}</h1>
+              <p className="text-zinc-500 text-sm mt-1">
+                {labels.header_description}
+              </p>
+            </header>
+      
       {canCreate && (
         <div className="mb-8">
           <CreateSalesOrderForm allItems={allItems} />
@@ -104,7 +112,7 @@ export default function SalesOrdersClient({
         type="text"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search by SO number..."
+        placeholder={labels.search_placeholder}
         className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm mb-3 focus:outline-none focus:border-amber-500"
       />
 
@@ -113,7 +121,7 @@ export default function SalesOrdersClient({
           ? "Searching..."
           : searchResults !== null
           ? `${sortedOrders.length.toLocaleString()} result(s) for "${search.trim()}"`
-          : `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} sales orders total`}
+          : `Page ${page} of ${totalPages} · ${labels.total} ${totalCount.toLocaleString()} ${labels.sales_orders}`}
       </p>
 
       <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
@@ -126,14 +134,14 @@ export default function SalesOrdersClient({
                   onClick={toggleSort}
                   className="flex items-center gap-1 hover:text-zinc-300 transition-colors"
                 >
-                  SO Number
+                  {labels.th_so_number}
                   <span className="text-[10px]">{sortDirection === "asc" ? "▲" : "▼"}</span>
                 </button>
               </th>
-              <th className="px-4 py-3 font-medium">Date</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Picked By</th>
-              <th className="px-4 py-3 font-medium text-right">Items</th>
+              <th className="px-4 py-3 font-medium">{labels.th_date}</th>
+              <th className="px-4 py-3 font-medium">{labels.th_status}</th>
+              <th className="px-4 py-3 font-medium">{labels.th_picked_by}</th>
+              <th className="px-4 py-3 font-medium text-right">{labels.th_items}</th>
               <th className="px-4 py-3 font-medium w-16"></th>
             </tr>
           </thead>
@@ -189,7 +197,7 @@ export default function SalesOrdersClient({
                             }}
                             className="text-xs text-amber-500 hover:underline"
                           >
-                            {isEditing ? "Cancel" : "Edit"}
+                            {isEditing ? labels.cancel : labels.edit}
                           </button>
                         )}
                       </td>
@@ -222,14 +230,15 @@ export default function SalesOrdersClient({
                             <table className="w-full text-xs">
                               <thead>
                                 <tr className="text-zinc-500 text-left">
-                                  <th className="py-2 font-medium">SKU</th>
-                                  <th className="py-2 font-medium">Product</th>
-                                  <th className="py-2 font-medium text-right">Carton/Pallet</th>
-                                  <th className="py-2 font-medium text-right">Ordered</th>
-                                  <th className="py-2 font-medium text-right">Shipped</th>
-                                  <th className="py-2 font-medium">Status</th>
-                                  <th className="py-2 font-medium">Picked From / By</th>
-                                  <th className="py-2 font-medium">Shipped By</th>
+                                  <th className="py-2 font-medium">{labels.th_sku}</th>
+                                  <th className="py-2 font-medium">{labels.products}</th>
+                                  {/* <th className="py-2 font-medium text-right">Carton/Pallet</th> */}
+                                  {/* <th className="py-2 font-medium text-right">xxx</th> */}
+                                  <th className="py-2 font-medium">{labels.th_ordered}</th>
+                                  <th className="py-2 font-medium">{labels.th_shipped}</th>
+                                  <th className="py-2 font-medium">{labels.th_status}</th>
+                                  <th className="py-2 font-medium">{labels.th_picked_from}</th>
+                                  <th className="py-2 font-medium">{labels.th_shipped_by}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -237,13 +246,13 @@ export default function SalesOrdersClient({
                                   <tr key={i} className="border-t border-zinc-800/60">
                                     <td className="py-1.5 font-mono text-zinc-300">{line.itemSku}</td>
                                     <td className="py-1.5 text-zinc-500">{line.itemName}</td>
-                                    <td className="py-1.5 text-right font-mono text-zinc-400">
+                                    {/* <td className="py-1.5 text-right font-mono text-zinc-400">
                                       {line.palletCartonQty.toLocaleString()}
-                                    </td>
-                                    <td className="py-1.5 text-right font-mono">
+                                    </td> */}
+                                    <td className="py-1.5 font-mono">
                                       {line.quantity.toLocaleString()}
                                     </td>
-                                    <td className="py-1.5 text-right font-mono">
+                                    <td className="py-1.5 font-mono">
                                       <ShippedCell order={order} line={line} isAdmin={isAdmin} />
                                     </td>
                                     <td className="py-1.5">

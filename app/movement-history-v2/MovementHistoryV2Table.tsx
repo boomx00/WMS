@@ -4,7 +4,7 @@ import { formatDateTime } from "@/lib/formatDateTime";
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
-
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 type Row = {
   id: number;
   type: string;
@@ -31,16 +31,7 @@ const TYPE_STYLES: Record<string, string> = {
   ADJUSTMENT: "bg-teal-950 text-teal-300",
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  INBOUND: "INBOUND",
-  DEFAULT_INBOUND: "DEFAULT INBOUND",
-  PICKING: "PICKING",
-  DEFAULT_PICKING: "DEFAULT PICKING",
-  MOVE: "MOVE",
-  DEFAULT_MOVE: "DEFAULT MOVE",
-  SHIP: "SHIP",
-  ADJUSTMENT: "ADJUSTMENT",
-};
+
 
 export default function MovementHistoryV2Table({
   rows,
@@ -73,7 +64,18 @@ export default function MovementHistoryV2Table({
 
   // Tracks the in-flight quick search so older responses can't overwrite newer ones
   const quickSearchAbortRef = useRef<AbortController | null>(null);
+  const labels = usePageLabels("movement_history_page")
 
+  const TYPE_LABELS: Record<string, string> = {
+  INBOUND: labels.inbound,
+  DEFAULT_INBOUND: labels.default_inbound,
+  PICKING:  labels.picking,
+  DEFAULT_PICKING:  labels.default_picking,
+  MOVE:  labels.move,
+  DEFAULT_MOVE:  labels.default_move,
+  SHIP: labels.ship,
+  ADJUSTMENT:  labels.adjustment,
+};
   // Quick search stays debounced-as-you-type, only active in simple mode.
   useEffect(() => {
     if (advancedMode) return;
@@ -183,20 +185,27 @@ export default function MovementHistoryV2Table({
 
   return (
     <div>
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold">{labels.page_header}</h1>
+        <p className="text-zinc-500 text-sm mt-1">
+          {labels.header_description}
+        </p>
+      </header>
+
       {!advancedMode ? (
         <div className="flex items-center gap-3 mb-4">
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by SKU, product, location, SO number, or user..."
+            placeholder={labels.search_placeholder}
             className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
           />
           <button
             onClick={toggleAdvanced}
             className="px-3 py-2 rounded-md border border-zinc-800 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors whitespace-nowrap"
           >
-            Advanced Search
+            {labels.advanced_search}
           </button>
           <RefreshButton onClick={handleRefresh} loading={searching} />
         </div>
@@ -204,19 +213,19 @@ export default function MovementHistoryV2Table({
         <div className="border border-zinc-800 rounded-lg bg-zinc-900/30 p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
             <span className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
-              Advanced Search
+              {labels.advanced_search}
             </span>
             <button
               onClick={toggleAdvanced}
               className="text-xs text-zinc-500 hover:text-zinc-300"
             >
-              Back to quick search
+{labels.back_to_quick_search}
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1">SKU / Product</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.sku_product}</label>
               <input
                 type="text"
                 value={skuFilter}
@@ -227,7 +236,7 @@ export default function MovementHistoryV2Table({
               />
             </div>
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1">Location</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.location}</label>
               <input
                 type="text"
                 value={locationFilter}
@@ -238,7 +247,7 @@ export default function MovementHistoryV2Table({
               />
             </div>
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1">User</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.user}</label>
               <input
                 type="text"
                 value={userFilter}
@@ -249,7 +258,7 @@ export default function MovementHistoryV2Table({
               />
             </div>
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1">SO Number</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.so_number}</label>
               <input
                 type="text"
                 value={soFilter}
@@ -260,21 +269,21 @@ export default function MovementHistoryV2Table({
               />
             </div>
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1">Type</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.type}</label>
               <select
                 value={typeFilter}
                 onChange={(e) => setTypeFilter(e.target.value)}
                 className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
               >
-                <option value="ALL">All types</option>
-                <option value="INBOUND">Inbound</option>
-                <option value="DEFAULT_INBOUND">Default Inbound</option>
-                <option value="PICKING">Picking</option>
-                <option value="DEFAULT_PICKING">Default Picking</option>
-                <option value="MOVE">Move</option>
-                <option value="DEFAULT_MOVE">Default Move</option>
-                <option value="SHIP">Ship</option>
-                <option value="ADJUSTMENT">Adjustment</option>
+                <option className="text-sm" value="ALL">{labels.all_types}</option>
+                <option className="text-sm" value="INBOUND">{labels.inbound}</option>
+                <option className="text-sm" value="DEFAULT_INBOUND">{labels.default_inbound}</option>
+                <option className="text-sm" value="PICKING">{labels.picking}</option>
+                <option className="text-sm" value="DEFAULT_PICKING">{labels.default_picking}g</option>
+                <option className="text-sm" value="MOVE">{labels.move}</option>
+                <option className="text-sm" value="DEFAULT_MOVE">{labels.default_move}</option>
+                <option className="text-sm" value="SHIP">{labels.ship}</option>
+                <option className="text-sm" value="ADJUSTMENT">{labels.adjustment}</option>
               </select>
             </div>
           </div>
@@ -284,13 +293,13 @@ export default function MovementHistoryV2Table({
               onClick={runAdvancedSearch}
               className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 transition-colors"
             >
-              Search
+              {labels.search}
             </button>
             <button
               onClick={clearAdvancedFilters}
               className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors"
             >
-              Clear
+              {labels.clear}
             </button>
             <RefreshButton onClick={handleRefresh} loading={searching} />
           </div>
@@ -302,29 +311,29 @@ export default function MovementHistoryV2Table({
           ? "Searching..."
           : isSearchActive
             ? `${(searchResults ?? []).length.toLocaleString()} result(s) for ${activeSearchLabel}`
-            : `Page ${page} of ${totalPages} · ${totalCount.toLocaleString()} events total`}
+            : `Page ${page} of ${totalPages} · ${labels.total }${totalCount.toLocaleString()} ${labels.events}`}
       </p>
 
       <div className="border border-zinc-800 rounded-lg overflow-x-auto mb-4">
         <table className="w-full text-sm min-w-[900px]">
           <thead>
             <tr className="bg-zinc-900 text-zinc-500 text-left">
-              <th className="px-4 py-3 font-medium">Type</th>
-              <th className="px-4 py-3 font-medium">Product</th>
-              <th className="px-4 py-3 font-medium">From</th>
-              <th className="px-4 py-3 font-medium">To</th>
-              <th className="px-4 py-3 font-medium">SO</th>
-              <th className="px-4 py-3 font-medium text-right">Qty</th>
-              <th className="px-4 py-3 font-medium text-right">Final Stock (To)</th>
-              <th className="px-4 py-3 font-medium">User</th>
-              <th className="px-4 py-3 font-medium text-right">When</th>
+              <th className="px-4 py-3 font-medium">{labels.type}</th>
+              <th className="px-4 py-3 font-medium">{labels.product}</th>
+              <th className="px-4 py-3 font-medium">{labels.from}</th>
+              <th className="px-4 py-3 font-medium">{labels.to}</th>
+              <th className="px-4 py-3 font-medium">{labels.so}</th>
+              <th className="px-4 py-3 font-medium text-right">{labels.qty}</th>
+              <th className="px-4 py-3 font-medium text-right">{labels.final_stock_to}</th>
+              <th className="px-4 py-3 font-medium">{labels.user}</th>
+              <th className="px-4 py-3 font-medium text-right">{labels.when}</th>
             </tr>
           </thead>
           <tbody>
             {(isSearchActive ? searchResults ?? [] : rows).length === 0 ? (
               <tr>
                 <td colSpan={9} className="px-4 py-8 text-center text-zinc-600">
-                  No matching events.
+                  {labels.no_matching_events}
                 </td>
               </tr>
             ) : (
@@ -332,7 +341,7 @@ export default function MovementHistoryV2Table({
                 <tr key={row.id} className="border-t border-zinc-800 hover:bg-zinc-900/50">
                   <td className="px-4 py-3">
                     <span
-                      className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                      className={`text-xs uppercase tracking-wide px-1.5 py-0.5 rounded ${
                         TYPE_STYLES[row.type] ?? "bg-zinc-800 text-zinc-400"
                       }`}
                     >
@@ -340,7 +349,7 @@ export default function MovementHistoryV2Table({
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="font-mono text-zinc-300">{row.itemSku}</span>{" "}
+                    <span className="font-mono text-zinc-300">{row.itemSku}</span><br></br>
                     <span className="text-zinc-500 text-xs">{row.itemName}</span>
                   </td>
                   <td className="px-4 py-3 font-mono text-amber-500">{row.sourceCode ?? "—"}</td>
@@ -372,7 +381,7 @@ export default function MovementHistoryV2Table({
             disabled={page <= 1}
             className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            ← Previous
+            ← {labels.previous}
           </button>
           <span className="text-xs text-zinc-500">
             Page {page} of {totalPages}
@@ -382,7 +391,7 @@ export default function MovementHistoryV2Table({
             disabled={page >= totalPages}
             className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:bg-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
-            Next →
+            {labels.next} →
           </button>
         </div>
       )}
