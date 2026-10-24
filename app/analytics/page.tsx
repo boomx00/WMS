@@ -1,21 +1,22 @@
+"use client";
+
 import InboundByPersonChart from "./InboundByPersonChart";
 import DriverActivityPanel from "./DriverActivityPanel";
 import ShippedProductsPanel from "./ShippedProductsPanel";
 import SalesOrdersShippedPanel from "./SalesOrdersShippedPanel";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 export default function AnalyticsPage() {
+  const labels = usePageLabels("analytics");
   return (
     <div className="p-8">
       <header className="mb-8 max-w-4xl">
-        <h1 className="text-2xl font-semibold">Analytics</h1>
-        <p className="text-zinc-500 text-sm mt-1">
-          Warehouse activity breakdowns.
-        </p>
+        <h1 className="text-2xl font-semibold">{labels.page_header}</h1>
+        <p className="text-zinc-500 text-sm mt-1">{labels.header_description}</p>
       </header>
 
       <div className="space-y-8">
-        {/* Not wrapped in max-w-4xl — their expanded detail views use the
-            full width of the main content area (up to the sidebar). */}
+      
         <DriverActivityPanel />
         <SalesOrdersShippedPanel />
 

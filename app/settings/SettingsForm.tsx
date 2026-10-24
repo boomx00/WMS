@@ -3,7 +3,7 @@
 import { useState } from "react";
 import PageLabelsSettings from "./PageLabelsSettings";
 import { useCan } from "@/lib/AccessContext";
-
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 export default function SettingsForm({
   initial,
 }: {
@@ -32,7 +32,7 @@ export default function SettingsForm({
   const [allowNegativeFloorStock, setAllowNegativeFloorStock] = useState(initial.allowNegativeFloorStock);
   const [allowNegativeRackStock, setAllowNegativeRackStock] = useState(initial.allowNegativeRackStock);
   const [saving, setSaving] = useState(false);
-
+  const labels = usePageLabels("settings_page")
   async function updateSetting(key: string, value: boolean) {
     setSaving(true);
     await fetch("/api/settings", {
@@ -45,10 +45,16 @@ export default function SettingsForm({
 
   return (
     <div className="max-w-2xl">
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold">{labels.page_header}</h1>
+        <p className="text-zinc-500 text-sm mt-1">
+          {labels.header_description}
+        </p>
+      </header>
       <div className="flex gap-1 mb-6 border-b border-zinc-800">
-        <TabButton label="General" active={activeTab === "general"} onClick={() => setActiveTab("general")} />
+        <TabButton label={labels.general} active={activeTab === "general"} onClick={() => setActiveTab("general")} />
         <TabButton
-          label="Translations"
+          label={labels.translations}
           active={activeTab === "translations"}
           onClick={() => setActiveTab("translations")}
         />
@@ -60,7 +66,7 @@ export default function SettingsForm({
         <div className="space-y-4">
           {!canEdit && (
             <p className="text-xs text-zinc-500 border border-zinc-800 rounded-md px-3 py-2">
-              Read-only — your role can view settings but not change them.
+              {labels.access_information}
             </p>
           )}
           <LedgerStartSetting
@@ -72,11 +78,9 @@ export default function SettingsForm({
           <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Allow default-code transactions</div>
+                <div className="text-sm font-medium">{labels.allow_default}</div>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                  Enables scanning a SKU&apos;s <code>*default</code> barcode for
-                  bulk-entering pre-existing stock without individual pallet
-                  labels.
+                  {labels.allow_default_description}
                 </p>
               </div>
               <button
@@ -102,11 +106,9 @@ export default function SettingsForm({
           <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Automatic Inbound (from Floor)</div>
+                <div className="text-sm font-medium">{labels.automatic_inbound}</div>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                  Lets Move auto-create a missing INBOUND record when moving an
-                  untracked pallet off the Floor — for migrating pre-existing
-                  stock. Turn off once existing floor stock is migrated.
+                  {labels.automatic_inbound_description}
                 </p>
               </div>
               <button
@@ -128,11 +130,11 @@ export default function SettingsForm({
               </button>
             </div>
           </div>
-
+{/* 
           <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Automatic Inbound (from Rack)</div>
+                <div className="text-sm font-medium">{labels.automatic_inbound}</div>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm">
                   Same as above, but for pallets already sitting on a rack that
                   were never scanned in. Applies when moving Rack → Floor or
@@ -157,9 +159,9 @@ export default function SettingsForm({
                 />
               </button>
             </div>
-          </div>
+          </div> */}
 
-          <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+          {/* <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">Allow untracked outbound</div>
@@ -187,19 +189,14 @@ export default function SettingsForm({
                 />
               </button>
             </div>
-          </div>
+          </div> */}
 
           <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Default Picking (Picking v2)</div>
+                <div className="text-sm font-medium">{labels.default_picking}</div>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                  Lets Picking (v2) proceed when a scanned rack cell has no
-                  recorded stock, or not enough of the expected SKU — the
-                  source is clamped to 0 rather than blocking or going
-                  negative, and the destination still receives the full
-                  amount. A different product occupying the cell always
-                  blocks regardless of this setting.
+                  {labels.default_picking_description}
                 </p>
               </div>
               <button
@@ -225,12 +222,9 @@ export default function SettingsForm({
           <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Allow negative floor stock</div>
+                <div className="text-sm font-medium">{labels.allow_negative_floor}</div>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                  Lets Move In (v2) reduce Floor&apos;s recorded total below
-                  zero, instead of blocking when the requested quantity
-                  exceeds what&apos;s currently tracked there. Floor is
-                  clamped to exactly 0 rather than going negative.
+                  {labels.allow_negative_floor_description}
                 </p>
               </div>
               <button
@@ -256,14 +250,9 @@ export default function SettingsForm({
           <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-medium">Default Move (Perpindahan Lokasi v2)</div>
+                <div className="text-sm font-medium">{labels.default_move}</div>
                 <p className="text-xs text-zinc-500 mt-1 max-w-sm">
-                  Lets Rack → Rack (v2) proceed even when the source cell
-                  doesn&apos;t have enough tracked stock — the destination
-                  still receives the full counted amount, and the source is
-                  clamped to 0 rather than blocking or going negative. Also
-                  governs Picking (v2) the same way, since they share this
-                  one setting.
+                  {labels.default_move_description}
                 </p>
               </div>
               <button
@@ -320,7 +309,7 @@ function LedgerStartSetting({
   const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
   const dirty = value !== isoToWibInput(savedIso);
-
+const labels = usePageLabels("settings_page")
   async function save(ledgerStartAt: string | null) {
     setSaving(true);
     setMessage(null);
@@ -355,7 +344,7 @@ function LedgerStartSetting({
 
   return (
     <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-      <div className="text-sm font-medium">Ledger start</div>
+      <div className="text-sm font-medium">{labels.ledger_start}</div>
       <p className="text-xs text-zinc-500 mt-1 max-w-sm">
         Total Stock ledgers (per SKU and per location) begin at this moment,
         with an opening balance computed back from live stock. Events before
@@ -380,7 +369,7 @@ function LedgerStartSetting({
           disabled={saving || !dirty || !value}
           className="px-3 py-1.5 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium disabled:opacity-40"
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : labels.save}
         </button>
         )}
         {!readOnly && !isDefault && (
@@ -389,7 +378,7 @@ function LedgerStartSetting({
             disabled={saving}
             className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-400 hover:text-zinc-100 disabled:opacity-40"
           >
-            Reset to default
+            {labels.reset}
           </button>
         )}
         {message && (

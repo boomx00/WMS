@@ -43,6 +43,12 @@ export default function ScanForms() {
 
   return (
     <div>
+        <header className="mb-8">
+        <h1 className="text-2xl font-semibold">{labels.page_header}</h1>
+        <p className="text-zinc-500 text-sm mt-1">
+          {labels.header_description}
+        </p>
+      </header>
       <div className="flex gap-1 mb-6 border border-zinc-800 rounded-lg p-1 w-fit">
 {tabs.map((t) => (
   <button
@@ -993,6 +999,7 @@ function CorrectQtyForm() {
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const labels = usePageLabels("scan")
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -1028,13 +1035,11 @@ function CorrectQtyForm() {
   return (
     <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
       <p className="text-xs text-zinc-500">
-        Correct a specific pallet&apos;s recorded quantity — for fixing a
-        mistaken entry made during Inbound (label, MO, and qty are tracked
-        together). Keeps Location Stock in sync automatically.
+        {labels.adjust_pallet_qty_description}
       </p>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Scan pallet label</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.scan_product_label}</label>
         <input
           type="text"
           value={label}
@@ -1045,7 +1050,7 @@ function CorrectQtyForm() {
       </div>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Corrected quantity</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.corrected_quantity}</label>
         <input
           type="number"
           min={0}
@@ -1056,7 +1061,7 @@ function CorrectQtyForm() {
       </div>
 
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Reason (optional)</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.reason}</label>
         <input
           type="text"
           value={reason}
@@ -1071,7 +1076,7 @@ function CorrectQtyForm() {
         disabled={loading || !label || newQuantity === ""}
         className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
       >
-        {loading ? "Correcting..." : "Correct Quantity"}
+        {loading ? "Correcting..." : labels.apply_adjustment}
       </button>
 
       <FeedbackBox error={error} success={success} />

@@ -3,6 +3,7 @@
 import { formatDateTime } from "@/lib/formatDateTime";
 import DateTime24Input from "@/components/DateTime24Input";
 import { Fragment, useState } from "react";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 type DriverSummary = {
   userId: number;
@@ -90,7 +91,7 @@ export default function DriverActivityPanel() {
 
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [expandedRoutes, setExpandedRoutes] = useState<Set<string>>(new Set());
-
+const labels = usePageLabels("analytics")
   const rangeIso = () => ({
     startIso: new Date(start).toISOString(),
     endIso: new Date(end).toISOString(),
@@ -171,20 +172,18 @@ export default function DriverActivityPanel() {
 
   return (
     <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-      <h2 className="text-sm font-medium mb-1">Driver Activity (v2)</h2>
+      <h2 className="text-sm font-medium mb-1">{labels.driver_activity}</h2>
       <p className="text-xs text-zinc-500 mb-4">
-        Forklift Driver activity sourced from Location Stock events, classified purely by
-        location type: Inbound is Floor → Rack, Outbound is Rack or Floor → Outbound WH, Other
-        covers everything else (rack-to-rack moves / perpindahan lokasi).
+        {labels.driver_activity_description}
       </p>
 
       <div className="flex items-end gap-3 mb-6 flex-wrap">
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">From</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.from}</label>
           <DateTime24Input value={start} onChange={setStart} />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">To</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.to}</label>
           <DateTime24Input value={end} onChange={setEnd} />
         </div>
         <button
@@ -192,7 +191,7 @@ export default function DriverActivityPanel() {
           disabled={loading}
           className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
         >
-          {loading ? "Loading..." : "Get Data"}
+          {loading ? "Loading..." : labels.search}
         </button>
       </div>
 
@@ -200,18 +199,18 @@ export default function DriverActivityPanel() {
 
       {rows &&
         (rows.length === 0 ? (
-          <p className="text-sm text-zinc-600">No Forklift Driver users found.</p>
+          <p className="text-sm text-zinc-600">{labels.no_forklift_found}</p>
         ) : (
           <div className="border border-zinc-800 rounded-lg">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-zinc-900 text-zinc-500 text-left">
-                  <th className="px-4 py-3 font-medium rounded-tl-lg">Driver</th>
-                  <th className="px-4 py-3 font-medium text-right">Inbound</th>
-                  <th className="px-4 py-3 font-medium text-right">Outbound</th>
-                  <th className="px-4 py-3 font-medium text-right">Other</th>
-                  <th className="px-4 py-3 font-medium text-right">Total</th>
-                  <th className="px-4 py-3 font-medium text-right">Last Activity</th>
+                  <th className="px-4 py-3 font-medium rounded-tl-lg">{labels.driver}</th>
+                  <th className="px-4 py-3 font-medium text-right">{labels.inbound}</th>
+                  <th className="px-4 py-3 font-medium text-right">{labels.outbound}</th>
+                  <th className="px-4 py-3 font-medium text-right">{labels.other}</th>
+                  <th className="px-4 py-3 font-medium text-right">{labels.total}</th>
+                  <th className="px-4 py-3 font-medium text-right">{labels.last_activity} Activity</th>
                   <th className="px-4 py-3 font-medium rounded-tr-lg"></th>
                 </tr>
               </thead>
@@ -246,7 +245,7 @@ export default function DriverActivityPanel() {
                             onClick={() => toggleDriver(row.userId)}
                             className="text-xs text-amber-500 hover:text-amber-400"
                           >
-                            {isOpen ? "Hide" : "Details"}
+                            {isOpen ? labels.hide : labels.details}
                           </button>
                         </td>
                       </tr>
@@ -306,7 +305,7 @@ function CategoryCard({
 }) {
   const categoryKey = `${userId}:${cat.category}`;
   const isOpen = expandedCategories.has(categoryKey);
-
+ const labels = usePageLabels("analytics")
   return (
     <div className="border border-zinc-800 rounded-lg bg-zinc-950/40 flex flex-col">
       <button
@@ -322,7 +321,7 @@ function CategoryCard({
           <p className="text-[10px] text-zinc-600 mt-1">{CATEGORY_HINTS[cat.category]}</p>
         </div>
         <div className="text-right">
-          <div className="text-sm font-mono text-zinc-300">{cat.totalQty.toLocaleString()}u</div>
+          <div className="text-sm font-mono text-zinc-300">{cat.totalQty.toLocaleString()} {labels.ctn}</div>
           <div className="text-[10px] text-zinc-600">{cat.count.toLocaleString()} txn</div>
         </div>
       </button>
@@ -330,16 +329,16 @@ function CategoryCard({
       {isOpen && (
         <div className="border-t border-zinc-800 p-2 overflow-x-auto">
           {cat.routes.length === 0 ? (
-            <p className="text-xs text-zinc-600 p-2">No activity in this range.</p>
+            <p className="text-xs text-zinc-600 p-2">{labels.no_activity}</p>
           ) : (
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-zinc-600 text-left">
-                  <th className="px-2 py-1.5 font-medium">From</th>
-                  <th className="px-2 py-1.5 font-medium">To</th>
-                  <th className="px-2 py-1.5 font-medium">Item</th>
-                  <th className="px-2 py-1.5 font-medium text-right">Qty</th>
-                  <th className="px-2 py-1.5 font-medium text-right">Txns</th>
+                  <th className="px-2 py-1.5 font-medium">{labels.from}</th>
+                  <th className="px-2 py-1.5 font-medium">{labels.to}</th>
+                  <th className="px-2 py-1.5 font-medium">{labels.product}</th>
+                  <th className="px-2 py-1.5 font-medium text-right">{labels.qty}</th>
+                  <th className="px-2 py-1.5 font-medium text-right">{labels.tx}</th>
                   <th className="px-2 py-1.5 font-medium"></th>
                 </tr>
               </thead>
@@ -356,7 +355,7 @@ function CategoryCard({
                         <td className="px-2 py-1.5 font-mono text-amber-500">{route.to}</td>
                         <td className="px-2 py-1.5">
                           {isCombined ? (
-                            <span className="text-zinc-600">multiple</span>
+                            <span className="text-zinc-600">{labels.multiple}</span>
                           ) : (
                             <>
                               <span className="font-mono text-zinc-300">{route.events[0].itemSku}</span>{" "}
@@ -384,9 +383,9 @@ function CategoryCard({
                             <table className="w-full text-[11px]">
                               <thead>
                                 <tr className="text-zinc-600 text-left">
-                                  <th className="px-2 py-1 font-medium">Item</th>
-                                  <th className="px-2 py-1 font-medium text-right">Qty</th>
-                                  <th className="px-2 py-1 font-medium text-right">When</th>
+                                  <th className="px-2 py-1 font-medium">{labels.product}</th>
+                                  <th className="px-2 py-1 font-medium text-right">{labels.qty}</th>
+                                  <th className="px-2 py-1 font-medium text-right">{labels.when}</th>
                                 </tr>
                               </thead>
                               <tbody>

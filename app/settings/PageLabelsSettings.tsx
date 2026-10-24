@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { PAGE_OPTIONS, PageKey } from "@/lib/pageLabels";
 import { useRouter } from "next/navigation";
-
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 type RawLabel = { en: string; id: string; zh: string };
 
 export default function PageLabelsSettings({ readOnly = false }: { readOnly?: boolean }) {
@@ -12,6 +12,7 @@ export default function PageLabelsSettings({ readOnly = false }: { readOnly?: bo
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const labels = usePageLabels("settings_page")
   const router = useRouter();
   useEffect(() => {
     loadLabels();
@@ -51,14 +52,13 @@ export default function PageLabelsSettings({ readOnly = false }: { readOnly?: bo
 
   return (
     <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-      <h2 className="text-sm font-medium mb-1">Translations</h2>
+      <h2 className="text-sm font-medium mb-1">{labels.translations}</h2>
       <p className="text-xs text-zinc-500 mb-4">
-        Users pick their language from the selector in the navbar. Anything left blank in Indonesian or
-        Chinese falls back to the Default Lang text.
+        {labels.translations_description}
       </p>
 
       <div className="mb-4">
-        <label className="block text-xs text-zinc-500 mb-1">Page</label>
+        <label className="block text-xs text-zinc-500 mb-1">{labels.page}</label>
         <select
           value={page}
           onChange={(e) => setPage(e.target.value as PageKey)}
@@ -81,10 +81,10 @@ export default function PageLabelsSettings({ readOnly = false }: { readOnly?: bo
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-zinc-900 text-zinc-500 text-left">
-                <th className="px-3 py-2 font-medium">Default Lang</th>
-                <th className="px-3 py-2 font-medium">Indonesian</th>
-                <th className="px-3 py-2 font-medium">Chinese</th>
-                <th className="px-3 py-2 font-medium">Functions</th>
+                <th className="px-3 py-2 font-medium">{labels.default_lang}</th>
+                <th className="px-3 py-2 font-medium">{labels.Indonesian}</th>
+                <th className="px-3 py-2 font-medium">{labels.Chinese}</th>
+                <th className="px-3 py-2 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -99,7 +99,7 @@ export default function PageLabelsSettings({ readOnly = false }: { readOnly?: bo
                         onClick={() => setEditingKey(key)}
                         className="text-xs text-amber-500 hover:text-amber-400"
                       >
-                        Edit
+                        {labels.Edit}
                       </button>
                     )}
                   </td>
@@ -143,7 +143,7 @@ function TranslationModal({
   const [zhText, setZhText] = useState(initialZh);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+  const labels = usePageLabels("settings_page")
   async function handleSave() {
     setSaving(true);
     setError(null);
@@ -166,14 +166,14 @@ function TranslationModal({
         className="bg-zinc-900 border border-zinc-800 rounded-lg p-5 w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-sm font-medium mb-1">Edit Translation</h3>
+        <h3 className="text-sm font-medium mb-1">{labels.edit_translation}</h3>
         <p className="text-xs text-zinc-500 mb-4">
-          Default Lang: <span className="text-zinc-300">{english}</span>
+          {labels.default_lang}: <span className="text-zinc-300">{english}</span>
         </p>
 
         <div className="space-y-3 mb-4">
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Indonesian</label>
+            <label className="block text-xs text-zinc-500 mb-1">{labels.Indonesian}</label>
             <input
               type="text"
               value={idText}
@@ -184,7 +184,7 @@ function TranslationModal({
             />
           </div>
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">Chinese</label>
+            <label className="block text-xs text-zinc-500 mb-1">{labels.Chinese}</label>
             <input
               type="text"
               value={zhText}
@@ -203,14 +203,14 @@ function TranslationModal({
             disabled={saving}
             className="px-4 py-2 rounded-md border border-zinc-800 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 transition-colors disabled:opacity-50"
           >
-            Cancel
+            {labels.cancel}
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
             className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "Saving..." : labels.save}
           </button>
         </div>
       </div>

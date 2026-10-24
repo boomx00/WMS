@@ -1,6 +1,7 @@
 "use client";
 
 import DateTime24Input from "@/components/DateTime24Input";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { useState } from "react";
 
 type Row = {
@@ -35,7 +36,7 @@ export default function InboundByPersonChart() {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
+const labels = usePageLabels("analytics")
   async function handleFetch() {
     setLoading(true);
     setError(null);
@@ -46,7 +47,7 @@ export default function InboundByPersonChart() {
     // regardless of what timezone the server itself runs in.
     const startIso = new Date(start).toISOString();
     const endIso = new Date(end).toISOString();
-
+    
     const res = await fetch(
       `/api/analytics/inbound-by-person?start=${encodeURIComponent(startIso)}&end=${encodeURIComponent(endIso)}`
     );
@@ -66,15 +67,15 @@ export default function InboundByPersonChart() {
 
   return (
     <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
-      <h2 className="text-sm font-medium mb-4">Pallets Inbounded per Person</h2>
+      <h2 className="text-sm font-medium mb-4">{labels.pallet_per_person}</h2>
 
       <div className="flex items-end gap-3 mb-6 flex-wrap">
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">From</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.from}</label>
           <DateTime24Input value={start} onChange={setStart} />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">To</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.to}</label>
           <DateTime24Input value={end} onChange={setEnd} />
         </div>
         <button
@@ -82,7 +83,7 @@ export default function InboundByPersonChart() {
           disabled={loading}
           className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
         >
-          {loading ? "Loading..." : "Get Data"}
+          {loading ? "Loading..." : labels.get_data}
         </button>
       </div>
 
@@ -90,7 +91,7 @@ export default function InboundByPersonChart() {
 
       {rows && (
         rows.length === 0 ? (
-          <p className="text-sm text-zinc-600">No inbound activity in this range.</p>
+          <p className="text-sm text-zinc-600">{labels.no_inbound_activity}</p>
         ) : (
           <div className="space-y-3">
             {rows.map((row) => (
@@ -98,7 +99,7 @@ export default function InboundByPersonChart() {
                 <div className="flex items-baseline justify-between mb-1">
                   <span className="text-sm text-zinc-300">{row.username}</span>
                   <span className="text-xs text-zinc-500 font-mono">
-                    {row.palletCount.toLocaleString()} pallet(s) · {row.totalUnits.toLocaleString()} units
+                    {row.palletCount.toLocaleString()} {labels.pallet} · {row.totalUnits.toLocaleString()} {labels.carton}
                   </span>
                 </div>
                 <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
