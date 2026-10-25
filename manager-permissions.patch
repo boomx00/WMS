@@ -1,0 +1,2095 @@
+diff --git a/app/api/analytics/driver-activity/route.ts b/app/api/analytics/driver-activity/route.ts
+index cc1f8d8..ca66ce8 100644
+--- a/app/api/analytics/driver-activity/route.ts
++++ b/app/api/analytics/driver-activity/route.ts
+@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
+ import { db } from "@/lib/db";
+ import { locationStockEvents, users, roles, locations } from "@/db/schema";
+ import { eq, and, gte, lte, inArray } from "drizzle-orm";
++import { SUPER_ROLE_NAME } from "@/lib/roles";
+ import { alias } from "drizzle-orm/pg-core";
+ 
+ const sourceLoc = alias(locations, "source_loc");
+@@ -26,7 +27,7 @@ export function classifyDriverEvent(
+ 
+ // GET /api/analytics/driver-activity?start=...&end=...
+ //
+-// Per-driver (role = "Forklift Driver" or "Admin") summary of
++// Per-driver (role = "Forklift Driver" or Manager) summary of
+ // location_stock_events activity in a date range, using location_stock as
+ // the source of truth for movement data (v2). Every matching user is
+ // included even with zero activity in range, so gaps are visible rather
+@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
+     .select({ id: users.id, username: users.username })
+     .from(users)
+     .innerJoin(roles, eq(users.roleId, roles.id))
+-    .where(inArray(roles.name, ["Forklift Driver", "Admin"]));
++    .where(inArray(roles.name, ["Forklift Driver", SUPER_ROLE_NAME]));
+ 
+   if (drivers.length === 0) {
+     return NextResponse.json([]);
+diff --git a/app/api/auth/login/route.ts b/app/api/auth/login/route.ts
+index d5789f7..ac1d11e 100644
+--- a/app/api/auth/login/route.ts
++++ b/app/api/auth/login/route.ts
+@@ -9,7 +9,7 @@ import { firstAllowedPath } from "@/lib/pages";
+ 
+ // POST /api/auth/login
+ // body: { username, password, client? }
+-// client: "web" → Admin, or a role with at least one page granted on
++// client: "web" → Manager, or a role with at least one page granted on
+ // /permissions. Anything else (e.g. the PDA app) keeps the existing behaviour.
+ export async function POST(req: NextRequest) {
+   const body = await req.json();
+@@ -59,6 +59,8 @@ export async function POST(req: NextRequest) {
+     username: user.username,
+     roleId: user.roleId,
+     roleName,
++    // Marks web sessions so web-only action permissions apply to them.
++    ...(client === "web" ? { client: "web" as const } : {}),
+   });
+ 
+   const response = NextResponse.json({
+diff --git a/app/api/bulk-adjustments/route.ts b/app/api/bulk-adjustments/route.ts
+index 2b730f4..aeb4803 100644
+--- a/app/api/bulk-adjustments/route.ts
++++ b/app/api/bulk-adjustments/route.ts
+@@ -11,6 +11,7 @@ import {
+ } from "@/db/schema";
+ import { eq, and, ne, gt, desc, inArray } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ 
+ function sanitize(input: string): string {
+   return input.replace(/\0/g, "").trim();
+@@ -70,6 +71,9 @@ export async function POST(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "scan.adjustBulk");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const description = sanitize(body.description ?? "");
+   const rawLines: IncomingLine[] = Array.isArray(body.lines) ? body.lines : [];
+diff --git a/app/api/items/[id]/route.ts b/app/api/items/[id]/route.ts
+index e8df369..6187121 100644
+--- a/app/api/items/[id]/route.ts
++++ b/app/api/items/[id]/route.ts
+@@ -1,19 +1,10 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { db } from "@/lib/db";
+-import { items, users, roles } from "@/db/schema";
++import { items } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+-import { getSession } from "@/lib/auth";
+-
+-async function requireAdmin(userId: number): Promise<boolean> {
+-  const [row] = await db
+-    .select({ roleName: roles.name })
+-    .from(users)
+-    .innerJoin(roles, eq(users.roleId, roles.id))
+-    .where(eq(users.id, userId));
+-  return row?.roleName?.toLowerCase() === "admin";
+-}
+-
+-// PATCH /api/items/:id — admin only. Any subset of fields can be updated.
++import { getSession, isSuperUser } from "@/lib/auth";
++
++// PATCH /api/items/:id — Manager only. Any subset of fields can be updated.
+ export async function PATCH(
+   req: NextRequest,
+   { params }: { params: Promise<{ id: string }> }
+@@ -23,9 +14,9 @@ export async function PATCH(
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const isAdmin = await requireAdmin(session.userId);
++  const isAdmin = await isSuperUser(session.userId);
+   if (!isAdmin) {
+-    return NextResponse.json({ error: "Only admins can edit items" }, { status: 403 });
++    return NextResponse.json({ error: "Only Manager can edit items" }, { status: 403 });
+   }
+ 
+   const { id } = await params;
+diff --git a/app/api/items/route.ts b/app/api/items/route.ts
+index 6ca8b03..e359bd7 100644
+--- a/app/api/items/route.ts
++++ b/app/api/items/route.ts
+@@ -1,17 +1,7 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { db } from "@/lib/db";
+-import { items, users, roles } from "@/db/schema";
+-import { eq } from "drizzle-orm";
+-import { getSession } from "@/lib/auth";
+-
+-async function requireAdmin(userId: number): Promise<boolean> {
+-  const [row] = await db
+-    .select({ roleName: roles.name })
+-    .from(users)
+-    .innerJoin(roles, eq(users.roleId, roles.id))
+-    .where(eq(users.id, userId));
+-  return row?.roleName?.toLowerCase() === "admin";
+-}
++import { items } from "@/db/schema";
++import { getSession, isSuperUser } from "@/lib/auth";
+ 
+ export async function GET() {
+   const rows = await db.select().from(items).orderBy(items.sku);
+@@ -24,9 +14,9 @@ export async function POST(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const isAdmin = await requireAdmin(session.userId);
++  const isAdmin = await isSuperUser(session.userId);
+   if (!isAdmin) {
+-    return NextResponse.json({ error: "Only admins can create items" }, { status: 403 });
++    return NextResponse.json({ error: "Only Manager can create items" }, { status: 403 });
+   }
+ 
+   const body = await req.json();
+diff --git a/app/api/location-stock/additional-ship/route.ts b/app/api/location-stock/additional-ship/route.ts
+index 94b2b7f..f701370 100644
+--- a/app/api/location-stock/additional-ship/route.ts
++++ b/app/api/location-stock/additional-ship/route.ts
+@@ -12,6 +12,7 @@ import {
+ import { db } from "@/lib/db";
+ import { eq, and, or } from "drizzle-orm";
+ import { getSession, hasRole } from "@/lib/auth";
++import { SUPER_ROLE_NAME } from "@/lib/roles";
+ import { normalizeLabel } from "@/lib/labelNormalize";
+ import { adjustLocationStock } from "@/lib/locationStock";
+ import { getPickedForTambahanQuantity } from "@/lib/pickedForTambahan";
+@@ -34,7 +35,7 @@ export async function PATCH(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
++  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker"]);
+   if (!authorized) {
+     return NextResponse.json(
+       { error: "Only Checker and Admin roles can perform shipping" },
+diff --git a/app/api/location-stock/adjust/route.ts b/app/api/location-stock/adjust/route.ts
+index cfe59fa..5d5b042 100644
+--- a/app/api/location-stock/adjust/route.ts
++++ b/app/api/location-stock/adjust/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { locations, items, locationStock, locationStockEvents, salesOrders, salesOrderItems } from "@/db/schema";
+ import { eq, and, ne, inArray, isNotNull } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
+ import { getPickedForSoQuantity } from "@/lib/pickedForSo";
+ import { getShippedQuantity } from "@/lib/shippedQuantity";
+@@ -36,6 +37,9 @@ export async function PATCH(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "scan.adjustLocation");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const locationCode = sanitize(body.locationCode ?? "");
+   const itemSku = sanitize(body.itemSku ?? "");
+diff --git a/app/api/location-stock/outbound-breakdown/correct-tambahan/route.ts b/app/api/location-stock/outbound-breakdown/correct-tambahan/route.ts
+index 062e112..9a4838e 100644
+--- a/app/api/location-stock/outbound-breakdown/correct-tambahan/route.ts
++++ b/app/api/location-stock/outbound-breakdown/correct-tambahan/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { items, tambahanOrders, locationStockEvents } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { getPickedForTambahanQuantity } from "@/lib/pickedForTambahan";
+ 
+ function sanitize(input: string): string {
+@@ -24,6 +25,9 @@ export async function PATCH(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "locationStock.editOutboundWh");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const itemSku = sanitize(body.itemSku ?? "");
+   const tambahanNumber = sanitize(body.tambahanNumber ?? "");
+diff --git a/app/api/location-stock/outbound-breakdown/correct/route.ts b/app/api/location-stock/outbound-breakdown/correct/route.ts
+index 36c2f78..231e06e 100644
+--- a/app/api/location-stock/outbound-breakdown/correct/route.ts
++++ b/app/api/location-stock/outbound-breakdown/correct/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { items, salesOrders, locationStockEvents } from "@/db/schema";
+ import { eq, and, sql } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { getPickedForSoQuantity } from "@/lib/pickedForSo";
+ 
+ function sanitize(input: string): string {
+@@ -24,6 +25,9 @@ export async function PATCH(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "locationStock.editOutboundWh");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const itemSku = sanitize(body.itemSku ?? "");
+   const soNumber = sanitize(body.soNumber ?? "");
+diff --git a/app/api/location-stock/outbound-breakdown/return-tambahan/route.ts b/app/api/location-stock/outbound-breakdown/return-tambahan/route.ts
+index 973dcde..665d96a 100644
+--- a/app/api/location-stock/outbound-breakdown/return-tambahan/route.ts
++++ b/app/api/location-stock/outbound-breakdown/return-tambahan/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { items, locations, tambahanOrders, locationStockEvents } from "@/db/schema";
+ import { eq, and, inArray, desc, sql } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { adjustLocationStock } from "@/lib/locationStock";
+ import { getPickedForTambahanQuantity } from "@/lib/pickedForTambahan";
+ 
+@@ -40,6 +41,9 @@ export async function PATCH(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "so.tambahan");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const itemSku = sanitize(body.itemSku ?? "");
+   const tambahanNumber = sanitize(body.tambahanNumber ?? "");
+diff --git a/app/api/location-stock/ship/route.ts b/app/api/location-stock/ship/route.ts
+index 47829ac..47d1bee 100644
+--- a/app/api/location-stock/ship/route.ts
++++ b/app/api/location-stock/ship/route.ts
+@@ -12,6 +12,7 @@ import {
+ import { db } from "@/lib/db";
+ import { eq, and, or, sql } from "drizzle-orm";
+ import { getSession, hasRole } from "@/lib/auth";
++import { SUPER_ROLE_NAME } from "@/lib/roles";
+ import { normalizeLabel } from "@/lib/labelNormalize";
+ import { adjustLocationStock } from "@/lib/locationStock";
+ import { getShippedQuantity } from "@/lib/shippedQuantity";
+@@ -41,7 +42,7 @@ export async function PATCH(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
++  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker"]);
+   if (!authorized) {
+     return NextResponse.json(
+       { error: "Only Checker and Admin roles can perform shipping" },
+diff --git a/app/api/pallets/correct-quantity/route.ts b/app/api/pallets/correct-quantity/route.ts
+index e90aaba..7099a6b 100644
+--- a/app/api/pallets/correct-quantity/route.ts
++++ b/app/api/pallets/correct-quantity/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { pallets, palletEvents, locationStockEvents } from "@/db/schema";
+ import { eq, and } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { normalizeLabel } from "@/lib/labelNormalize";
+ import { adjustLocationStock } from "@/lib/locationStock";
+ 
+@@ -23,6 +24,9 @@ export async function PATCH(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "scan.correctQty");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const rawLabel = sanitize(body.label ?? "");
+   const reason = sanitize(body.reason ?? "");
+diff --git a/app/api/pallets/route.ts b/app/api/pallets/route.ts
+index 57ceb87..542e2c6 100644
+--- a/app/api/pallets/route.ts
++++ b/app/api/pallets/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { pallets, palletEvents, locations, items } from "@/db/schema";
+ import { eq, and, or } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { normalizeLabel } from "@/lib/labelNormalize";
+ import { adjustLocationStock } from "@/lib/locationStock";
+ import { locationStockEvents } from "@/db/schema";
+@@ -42,6 +43,9 @@ export async function POST(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "scan.inbound");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const rawLabel = sanitize(body.label ?? "");
+   const rawSku = sanitize(body.sku ?? "");
+diff --git a/app/api/pallets/ship/route.ts b/app/api/pallets/ship/route.ts
+index 911b35d..f54a465 100644
+--- a/app/api/pallets/ship/route.ts
++++ b/app/api/pallets/ship/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { pallets, palletEvents, locations, salesOrders, salesOrderItems } from "@/db/schema";
+ import { eq, and, sql } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { SUPER_ROLE_NAME } from "@/lib/roles";
+ import { normalizeLabel } from "@/lib/labelNormalize";
+ import { hasRole } from "@/lib/auth";
+ function sanitize(input: string): string {
+@@ -16,7 +17,7 @@ export async function PATCH(req: NextRequest) {
+   if (!session) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+-  const authorized = await hasRole(session.userId, ["Admin", "Checker"]);
++  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME, "Checker"]);
+ if (!authorized) {
+   return NextResponse.json(
+     { error: "ANDA BUKAN CHECKER!" },
+diff --git a/app/api/permissions/route.ts b/app/api/permissions/route.ts
+index c93fe58..3ea3f4a 100644
+--- a/app/api/permissions/route.ts
++++ b/app/api/permissions/route.ts
+@@ -1,64 +1,88 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { db } from "@/lib/db";
+-import { roles, rolePagePermissions } from "@/db/schema";
++import { roles, rolePagePermissions, roleActionPermissions } from "@/db/schema";
+ import { and, eq } from "drizzle-orm";
+ import { requireAdmin } from "@/lib/auth";
+-import { GRANTABLE_PAGES, isAdminRoleName, isGrantablePath } from "@/lib/pages";
++import { isSuperRoleName } from "@/lib/roles";
++import { APP_ACTIONS, GRANTABLE_PAGES, isActionKey, isGrantablePath } from "@/lib/pages";
+ 
+ export const dynamic = "force-dynamic";
+ 
+-// GET /api/permissions — roles, grantable pages, and current grants.
++// GET /api/permissions — roles, grantable pages/actions, and current grants.
+ export async function GET() {
+   const denied = await requireAdmin();
+   if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status });
+ 
+-  const [roleRows, grantRows] = await Promise.all([
++  const [roleRows, pageRows, actionRows] = await Promise.all([
+     db.select().from(roles).orderBy(roles.name),
+     db
+       .select({ roleId: rolePagePermissions.roleId, pagePath: rolePagePermissions.pagePath })
+       .from(rolePagePermissions),
++    db
++      .select({ roleId: roleActionPermissions.roleId, actionKey: roleActionPermissions.actionKey })
++      .from(roleActionPermissions),
+   ]);
+ 
+   return NextResponse.json({
+-    roles: roleRows.map((r) => ({ id: r.id, name: r.name, isAdmin: isAdminRoleName(r.name) })),
++    roles: roleRows.map((r) => ({ id: r.id, name: r.name, isSuper: isSuperRoleName(r.name) })),
+     pages: GRANTABLE_PAGES,
+-    grants: grantRows.filter((g) => isGrantablePath(g.pagePath)),
++    actions: APP_ACTIONS,
++    pageGrants: pageRows.filter((g) => isGrantablePath(g.pagePath)),
++    actionGrants: actionRows.filter((g) => isActionKey(g.actionKey)),
+   });
+ }
+ 
+ // PATCH /api/permissions
+-// body: { roleId: number, pagePath: string, allowed: boolean }
++// body: { roleId, pagePath, allowed }   — grant/revoke a page
++//    or { roleId, actionKey, allowed }  — grant/revoke an action
+ export async function PATCH(req: NextRequest) {
+   const denied = await requireAdmin();
+   if (denied) return NextResponse.json({ error: denied.error }, { status: denied.status });
+ 
+   const body = await req.json();
+   const roleId = Number(body.roleId);
+-  const pagePath = String(body.pagePath ?? "");
+   const allowed = body.allowed;
++  const pagePath = body.pagePath === undefined ? null : String(body.pagePath);
++  const actionKey = body.actionKey === undefined ? null : String(body.actionKey);
+ 
+   if (!Number.isInteger(roleId) || typeof allowed !== "boolean") {
+     return NextResponse.json({ error: "roleId and allowed are required" }, { status: 400 });
+   }
+-  if (!isGrantablePath(pagePath)) {
++  if ((pagePath === null) === (actionKey === null)) {
++    return NextResponse.json({ error: "Send exactly one of pagePath or actionKey" }, { status: 400 });
++  }
++  if (pagePath !== null && !isGrantablePath(pagePath)) {
+     return NextResponse.json({ error: "That page can't be granted" }, { status: 400 });
+   }
++  if (actionKey !== null && !isActionKey(actionKey)) {
++    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
++  }
+ 
+   const [role] = await db.select().from(roles).where(eq(roles.id, roleId));
+   if (!role) {
+     return NextResponse.json({ error: "Unknown role" }, { status: 404 });
+   }
+-  if (isAdminRoleName(role.name)) {
+-    return NextResponse.json({ error: "Admin always has access to every page" }, { status: 400 });
++  if (isSuperRoleName(role.name)) {
++    return NextResponse.json({ error: `${role.name} always has every permission` }, { status: 400 });
+   }
+ 
+-  if (allowed) {
+-    await db.insert(rolePagePermissions).values({ roleId, pagePath }).onConflictDoNothing();
+-  } else {
+-    await db
+-      .delete(rolePagePermissions)
+-      .where(and(eq(rolePagePermissions.roleId, roleId), eq(rolePagePermissions.pagePath, pagePath)));
++  if (pagePath !== null) {
++    if (allowed) {
++      await db.insert(rolePagePermissions).values({ roleId, pagePath }).onConflictDoNothing();
++    } else {
++      await db
++        .delete(rolePagePermissions)
++        .where(and(eq(rolePagePermissions.roleId, roleId), eq(rolePagePermissions.pagePath, pagePath)));
++    }
++  } else if (actionKey !== null) {
++    if (allowed) {
++      await db.insert(roleActionPermissions).values({ roleId, actionKey }).onConflictDoNothing();
++    } else {
++      await db
++        .delete(roleActionPermissions)
++        .where(and(eq(roleActionPermissions.roleId, roleId), eq(roleActionPermissions.actionKey, actionKey)));
++    }
+   }
+ 
+-  return NextResponse.json({ roleId, pagePath, allowed });
++  return NextResponse.json({ roleId, pagePath, actionKey, allowed });
+ }
+diff --git a/app/api/sales-orders/[soNumber]/correct-shipment/route.ts b/app/api/sales-orders/[soNumber]/correct-shipment/route.ts
+index 42db4f0..5ace384 100644
+--- a/app/api/sales-orders/[soNumber]/correct-shipment/route.ts
++++ b/app/api/sales-orders/[soNumber]/correct-shipment/route.ts
+@@ -11,6 +11,7 @@ import {
+ import { db } from "@/lib/db";
+ import { eq, and, or } from "drizzle-orm";
+ import { getSession, hasRole } from "@/lib/auth";
++import { SUPER_ROLE_NAME } from "@/lib/roles";
+ import { getShippedQuantity } from "@/lib/shippedQuantity";
+ import { adjustLocationStock } from "@/lib/locationStock";
+ 
+@@ -53,7 +54,7 @@ export async function PATCH(
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const authorized = await hasRole(session.userId, ["Admin"]);
++  const authorized = await hasRole(session.userId, [SUPER_ROLE_NAME]);
+   if (!authorized) {
+     return NextResponse.json(
+       { error: "Only Admin can correct a shipped quantity" },
+diff --git a/app/api/sales-orders/[soNumber]/route.ts b/app/api/sales-orders/[soNumber]/route.ts
+index 4000718..537b92d 100644
+--- a/app/api/sales-orders/[soNumber]/route.ts
++++ b/app/api/sales-orders/[soNumber]/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { salesOrders, salesOrderItems, items, palletEvents, pallets } from "@/db/schema";
+ import { eq, and, sql } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ 
+ // PATCH /api/sales-orders/:soNumber
+ // body: { soNumber, orderDate, items: [{ sku, quantity }], truckEnterTime?, truckLeaveTime? }
+@@ -19,6 +20,9 @@ export async function PATCH(
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "so.edit");
++  if (denied) return denied;
++
+   const { soNumber: currentSoNumber } = await params;
+ 
+   const [existingOrder] = await db
+diff --git a/app/api/sales-orders/[soNumber]/tambahan/confirm/route.ts b/app/api/sales-orders/[soNumber]/tambahan/confirm/route.ts
+index 988b3bf..0a395f3 100644
+--- a/app/api/sales-orders/[soNumber]/tambahan/confirm/route.ts
++++ b/app/api/sales-orders/[soNumber]/tambahan/confirm/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { salesOrders, tambahanOrders, locationStockEvents, items } from "@/db/schema";
+ import { eq, and, inArray, sql } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ 
+ // POST /api/sales-orders/:soNumber/tambahan/confirm
+ //
+@@ -22,6 +23,9 @@ export async function POST(
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "so.tambahan");
++  if (denied) return denied;
++
+   const { soNumber } = await params;
+ 
+   const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.soNumber, soNumber));
+diff --git a/app/api/sales-orders/[soNumber]/tambahan/convert/route.ts b/app/api/sales-orders/[soNumber]/tambahan/convert/route.ts
+index d42282f..f0998a2 100644
+--- a/app/api/sales-orders/[soNumber]/tambahan/convert/route.ts
++++ b/app/api/sales-orders/[soNumber]/tambahan/convert/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { salesOrders, tambahanOrders } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ 
+ function sanitize(input: string): string {
+   return input.replace(/\0/g, "").trim();
+@@ -27,6 +28,9 @@ export async function POST(
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "so.tambahan");
++  if (denied) return denied;
++
+   const { soNumber } = await params;
+   const body = await req.json();
+   const newSoNumber = sanitize(body.newSoNumber ?? "");
+diff --git a/app/api/sales-orders/[soNumber]/unfinish/route.ts b/app/api/sales-orders/[soNumber]/unfinish/route.ts
+index 01394c9..58fd143 100644
+--- a/app/api/sales-orders/[soNumber]/unfinish/route.ts
++++ b/app/api/sales-orders/[soNumber]/unfinish/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { salesOrders, locationStockEvents } from "@/db/schema";
+ import { eq, and } from "drizzle-orm";
+ import { getSession, hasRole } from "@/lib/auth";
++import { SUPER_ROLE_NAME } from "@/lib/roles";
+ 
+ // POST /api/sales-orders/:soNumber/unfinish
+ // Admin only. Reverses a Finish — deletes the RELEASE events that finish
+@@ -17,9 +18,9 @@ export async function POST(
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const isAdmin = await hasRole(session.userId, ["Admin"]);
++  const isAdmin = await hasRole(session.userId, [SUPER_ROLE_NAME]);
+   if (!isAdmin) {
+-    return NextResponse.json({ error: "Only admins can undo a finished sales order" }, { status: 403 });
++    return NextResponse.json({ error: "Only Manager can undo a finished sales order" }, { status: 403 });
+   }
+ 
+   const { soNumber } = await params;
+diff --git a/app/api/sales-orders/route.ts b/app/api/sales-orders/route.ts
+index 7662e9f..0166acf 100644
+--- a/app/api/sales-orders/route.ts
++++ b/app/api/sales-orders/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { salesOrders, salesOrderItems, items } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ 
+ function sanitize(input: string): string {
+   return input.replace(/\0/g, "").trim();
+@@ -45,6 +46,9 @@ export async function POST(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "so.create");
++  if (denied) return denied;
++
+   const body = await req.json();
+   const soNumber = sanitize(body.soNumber ?? "");
+   const orderDate = body.orderDate;
+diff --git a/app/api/settings/labels/route.ts b/app/api/settings/labels/route.ts
+index 045a343..e6a5b99 100644
+--- a/app/api/settings/labels/route.ts
++++ b/app/api/settings/labels/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { pageLabels } from "@/db/schema";
+ import { eq, and } from "drizzle-orm";
+ import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { DEFAULT_LABELS, PageKey } from "@/lib/pageLabels";
+ 
+ function sanitize(input: string): string {
+@@ -56,6 +57,9 @@ export async function PUT(req: NextRequest) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
++  const denied = await denyUnlessAllowed(session, "settings.edit", { webOnly: false });
++  if (denied) return denied;
++
+   const body = await req.json();
+   const page = sanitize(body.page ?? "");
+   const labels = body.labels;
+diff --git a/app/api/settings/route.ts b/app/api/settings/route.ts
+index bbdd555..918cdb8 100644
+--- a/app/api/settings/route.ts
++++ b/app/api/settings/route.ts
+@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
+ import { db } from "@/lib/db";
+ import { settings } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+-import { getSession, requireAdmin } from "@/lib/auth";
++import { getSession } from "@/lib/auth";
++import { denyUnlessAllowed } from "@/lib/pagePermissions";
+ import { DEFAULT_LEDGER_START_AT } from "@/lib/ledger";
+ 
+ const BOOLEAN_KEYS = [
+@@ -41,10 +42,9 @@ export async function PATCH(req: Request) {
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const denied = await requireAdmin();
+-  if (denied) {
+-    return NextResponse.json({ error: denied.error }, { status: denied.status });
+-  }
++  // Enforced for every client, not just web: settings were admin-only before.
++  const denied = await denyUnlessAllowed(session, "settings.edit", { webOnly: false });
++  if (denied) return denied;
+ 
+   const body = await req.json();
+ 
+diff --git a/app/api/users/[id]/role/route.ts b/app/api/users/[id]/role/route.ts
+index d8b1e87..3da08ba 100644
+--- a/app/api/users/[id]/role/route.ts
++++ b/app/api/users/[id]/role/route.ts
+@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
+ import { users, roles } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+ import { getSession, hasRole } from "@/lib/auth";
++import { SUPER_ROLE_NAME } from "@/lib/roles";
+ 
+ // PATCH /api/users/:id/role
+ // body: { roleId }
+@@ -15,9 +16,9 @@ export async function PATCH(
+     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+   }
+ 
+-  const isAdmin = await hasRole(session.userId, ["Admin"]);
++  const isAdmin = await hasRole(session.userId, [SUPER_ROLE_NAME]);
+   if (!isAdmin) {
+-    return NextResponse.json({ error: "Only admins can change roles" }, { status: 403 });
++    return NextResponse.json({ error: "Only Manager can change roles" }, { status: 403 });
+   }
+ 
+   const { id } = await params;
+diff --git a/app/items/page.tsx b/app/items/page.tsx
+index 4157d30..dd5e5cc 100644
+--- a/app/items/page.tsx
++++ b/app/items/page.tsx
+@@ -1,7 +1,6 @@
+ import { db } from "@/lib/db";
+-import { items, users, roles } from "@/db/schema";
+-import { eq } from "drizzle-orm";
+-import { getSession } from "@/lib/auth";
++import { items } from "@/db/schema";
++import { sessionIsSuper } from "@/lib/auth";
+ import ItemsClient from "./ItemsClient";
+ 
+ export const dynamic = "force-dynamic";
+@@ -10,21 +9,9 @@ async function getItems() {
+   return db.select().from(items).orderBy(items.sku);
+ }
+ 
+-async function getIsAdmin(): Promise<boolean> {
+-  const session = await getSession();
+-  if (!session) return false;
+-
+-  const [row] = await db
+-    .select({ roleName: roles.name })
+-    .from(users)
+-    .innerJoin(roles, eq(users.roleId, roles.id))
+-    .where(eq(users.id, session.userId));
+-
+-  return row?.roleName?.toLowerCase() === "admin";
+-}
+ 
+ export default async function ItemsPage() {
+-  const [itemRows, isAdmin] = await Promise.all([getItems(), getIsAdmin()]);
++  const [itemRows, isAdmin] = await Promise.all([getItems(), sessionIsSuper()]);
+ 
+   return (
+     <div className="p-8 max-w-5xl">
+@@ -32,7 +19,7 @@ export default async function ItemsPage() {
+         <h1 className="text-2xl font-semibold">Items</h1>
+         <p className="text-zinc-500 text-sm mt-1">
+           Product master data.{" "}
+-          {!isAdmin && <span className="text-zinc-600">Read-only — only admins can edit.</span>}
++          {!isAdmin && <span className="text-zinc-600">Read-only — only Manager can edit.</span>}
+         </p>
+       </header>
+ 
+diff --git a/app/layout.tsx b/app/layout.tsx
+index a3f9e4e..48fee62 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -5,6 +5,7 @@ import SiteNav from "@/components/SiteNav";
+ import { LanguageProvider } from "@/lib/LanguageContext";
+ import { getSession } from "@/lib/auth";
+ import { getPageAccess } from "@/lib/pagePermissions";
++import { AccessProvider } from "@/lib/AccessContext";
+ 
+ const geistSans = Geist({
+   variable: "--font-geist-sans",
+@@ -35,6 +36,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
+     >
+       <body className="min-h-full bg-zinc-950 text-zinc-100">
+         <LanguageProvider>
++          <AccessProvider access={access}>
+           {/* flex-col on mobile: mobile top bar (from SiteNav) stacks above
+               the page content. flex-row on desktop: sidebar sits beside it,
+               as before. */}
+@@ -42,6 +44,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
+             <SiteNav username={session?.username ?? null} access={access} />
+             <main className="flex-1 min-w-0">{children}</main>
+           </div>
++          </AccessProvider>
+         </LanguageProvider>
+       </body>
+     </html>
+diff --git a/app/location-stock/LocationStockTable.tsx b/app/location-stock/LocationStockTable.tsx
+index 3d7dc27..2003e5f 100644
+--- a/app/location-stock/LocationStockTable.tsx
++++ b/app/location-stock/LocationStockTable.tsx
+@@ -3,6 +3,7 @@
+ import { useEffect, useMemo, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import RefreshButton from "@/components/RefreshButton";
++import { useCan } from "@/lib/AccessContext";
+ import { usePageLabels } from "@/lib/hooks/usePageLabels";
+ 
+ type Row = {
+@@ -416,6 +417,7 @@ function CorrectableRow({
+   quantity: number;
+   onSaved: () => void;
+ }) {
++  const canEdit = useCan()("locationStock.editOutboundWh");
+   const [editing, setEditing] = useState(false);
+   const [value, setValue] = useState(quantity.toString());
+   const [saving, setSaving] = useState(false);
+@@ -466,11 +468,11 @@ function CorrectableRow({
+               Cancel
+             </button>
+           </div>
+-        ) : (
++        ) : canEdit ? (
+           <button onClick={() => setEditing(true)} className="text-amber-500 hover:underline">
+             Edit
+           </button>
+-        )}
++        ) : null}
+       </td>
+     </tr>
+   );
+@@ -487,6 +489,7 @@ function CorrectableTambahanRow({
+   quantity: number;
+   onSaved: () => void;
+ }) {
++  const canEdit = useCan()("locationStock.editOutboundWh");
+   const [editing, setEditing] = useState(false);
+   const [value, setValue] = useState(quantity.toString());
+   const [saving, setSaving] = useState(false);
+@@ -546,11 +549,11 @@ function CorrectableTambahanRow({
+               Cancel
+             </button>
+           </div>
+-        ) : (
++        ) : canEdit ? (
+           <button onClick={() => setEditing(true)} className="text-zinc-500 hover:text-zinc-300">
+             Edit
+           </button>
+-        )}
++        ) : null}
+         {error && <div className="text-red-400 mt-0.5">{error}</div>}
+       </td>
+     </tr>
+diff --git a/app/permissions/PermissionsClient.tsx b/app/permissions/PermissionsClient.tsx
+index ccba1d2..0e2e9f5 100644
+--- a/app/permissions/PermissionsClient.tsx
++++ b/app/permissions/PermissionsClient.tsx
+@@ -1,51 +1,65 @@
+ "use client";
+ 
+-import { useState } from "react";
++import { Fragment, useState } from "react";
+ 
+-type Role = { id: number; name: string; isAdmin: boolean };
++type Role = { id: number; name: string; isSuper: boolean };
+ type Page = { path: string; label: string };
+-type Grant = { roleId: number; pagePath: string };
++type Action = { key: string; page: string; label: string; hint: string | null };
+ 
+-const key = (roleId: number, pagePath: string) => `${roleId}:${pagePath}`;
++// One change = one checkbox: either a page or an action for a role.
++type Change = { roleId: number; pagePath?: string; actionKey?: string; allowed: boolean };
++
++const pageId = (roleId: number, path: string) => `${roleId}:p:${path}`;
++const actionId = (roleId: number, key: string) => `${roleId}:a:${key}`;
++const changeId = (c: Change) => (c.pagePath !== undefined ? pageId(c.roleId, c.pagePath) : actionId(c.roleId, c.actionKey!));
+ 
+ export default function PermissionsClient({
+   roles,
+   pages,
+-  initialGrants,
++  actions,
++  initialPageGrants,
++  initialActionGrants,
+ }: {
+   roles: Role[];
+   pages: Page[];
+-  initialGrants: Grant[];
++  actions: Action[];
++  initialPageGrants: { roleId: number; pagePath: string }[];
++  initialActionGrants: { roleId: number; actionKey: string }[];
+ }) {
+   const [granted, setGranted] = useState<Set<string>>(
+-    () => new Set(initialGrants.map((g) => key(g.roleId, g.pagePath)))
++    () =>
++      new Set([
++        ...initialPageGrants.map((g) => pageId(g.roleId, g.pagePath)),
++        ...initialActionGrants.map((g) => actionId(g.roleId, g.actionKey)),
++      ])
+   );
+   const [pending, setPending] = useState<Set<string>>(new Set());
+   const [error, setError] = useState<string | null>(null);
+ 
+-  const editableRoles = roles.filter((r) => !r.isAdmin);
+-  const adminRoles = roles.filter((r) => r.isAdmin);
++  const editableRoles = roles.filter((r) => !r.isSuper);
++  const superRoles = roles.filter((r) => r.isSuper);
+ 
+-  function setMany(next: Set<string>, keys: string[], on: boolean) {
+-    for (const k of keys) {
+-      if (on) next.add(k);
+-      else next.delete(k);
++  function withKeys(prev: Set<string>, ids: string[], on: boolean) {
++    const next = new Set(prev);
++    for (const id of ids) {
++      if (on) next.add(id);
++      else next.delete(id);
+     }
+     return next;
+   }
+ 
+-  async function apply(changes: { roleId: number; pagePath: string; allowed: boolean }[]) {
++  async function apply(changes: Change[]) {
+     if (changes.length === 0) return;
+     setError(null);
+-    const keys = changes.map((c) => key(c.roleId, c.pagePath));
++    const ids = changes.map(changeId);
+ 
+     // Optimistic: flip now, roll back any that fail.
+     setGranted((prev) => {
+-      const next = new Set(prev);
+-      for (const c of changes) setMany(next, [key(c.roleId, c.pagePath)], c.allowed);
++      let next = prev;
++      for (const c of changes) next = withKeys(next, [changeId(c)], c.allowed);
+       return next;
+     });
+-    setPending((prev) => setMany(new Set(prev), keys, true));
++    setPending((prev) => withKeys(prev, ids, true));
+ 
+     const results = await Promise.all(
+       changes.map(async (c) => {
+@@ -66,33 +80,33 @@ export default function PermissionsClient({
+     const failed = results.filter((r): r is NonNullable<typeof r> => r !== null);
+     if (failed.length > 0) {
+       setGranted((prev) => {
+-        const next = new Set(prev);
+-        for (const f of failed) setMany(next, [key(f.change.roleId, f.change.pagePath)], !f.change.allowed);
++        let next = prev;
++        for (const f of failed) next = withKeys(next, [changeId(f.change)], !f.change.allowed);
+         return next;
+       });
+       setError(failed[0].message);
+     }
+-    setPending((prev) => setMany(new Set(prev), keys, false));
+-  }
+-
+-  function toggle(roleId: number, pagePath: string) {
+-    apply([{ roleId, pagePath, allowed: !granted.has(key(roleId, pagePath)) }]);
++    setPending((prev) => withKeys(prev, ids, false));
+   }
+ 
+-  // Column header click: grant all pages if any are missing, else revoke all.
++  // Column header click: grant everything if anything is missing, else revoke everything.
+   function toggleRole(roleId: number) {
+-    const allOn = pages.every((p) => granted.has(key(roleId, p.path)));
++    const all: Change[] = [
++      ...pages.map((p) => ({ roleId, pagePath: p.path, allowed: true })),
++      ...actions.map((a) => ({ roleId, actionKey: a.key, allowed: true })),
++    ];
++    const allOn = all.every((c) => granted.has(changeId(c)));
+     apply(
+-      pages
+-        .filter((p) => granted.has(key(roleId, p.path)) === allOn)
+-        .map((p) => ({ roleId, pagePath: p.path, allowed: !allOn }))
++      all
++        .filter((c) => granted.has(changeId(c)) === allOn)
++        .map((c) => ({ ...c, allowed: !allOn }))
+     );
+   }
+ 
+   if (editableRoles.length === 0) {
+     return (
+       <div className="border border-zinc-800 rounded-lg p-8 text-center text-sm text-zinc-500">
+-        No non-admin roles yet. Create one on the Roles page.
++        No other roles yet. Create one on the Roles page.
+       </div>
+     );
+   }
+@@ -109,8 +123,8 @@ export default function PermissionsClient({
+         <table className="w-full text-sm">
+           <thead>
+             <tr className="bg-zinc-900 text-zinc-500 text-left">
+-              <th className="px-4 py-3 font-medium sticky left-0 bg-zinc-900">Page</th>
+-              {adminRoles.map((r) => (
++              <th className="px-4 py-3 font-medium sticky left-0 bg-zinc-900">Page / action</th>
++              {superRoles.map((r) => (
+                 <th key={r.id} className="px-4 py-3 font-medium text-center whitespace-nowrap">
+                   {r.name}
+                 </th>
+@@ -119,7 +133,7 @@ export default function PermissionsClient({
+                 <th key={r.id} className="px-4 py-3 font-medium text-center whitespace-nowrap">
+                   <button
+                     onClick={() => toggleRole(r.id)}
+-                    title="Toggle all pages for this role"
++                    title="Toggle everything for this role"
+                     className="hover:text-amber-500 transition-colors"
+                   >
+                     {r.name}
+@@ -129,39 +143,80 @@ export default function PermissionsClient({
+             </tr>
+           </thead>
+           <tbody>
+-            {pages.map((page) => (
+-              <tr key={page.path} className="border-t border-zinc-800 hover:bg-zinc-900/50">
+-                <td className="px-4 py-3 sticky left-0 bg-zinc-950">
+-                  <div>{page.label}</div>
+-                  <div className="text-xs text-zinc-600 font-mono">{page.path}</div>
+-                </td>
+-                {adminRoles.map((r) => (
+-                  <td key={r.id} className="px-4 py-3 text-center text-xs text-zinc-600">
+-                    always
+-                  </td>
+-                ))}
+-                {editableRoles.map((r) => {
+-                  const k = key(r.id, page.path);
+-                  return (
+-                    <td key={r.id} className="px-4 py-3 text-center">
+-                      <input
+-                        type="checkbox"
+-                        checked={granted.has(k)}
+-                        disabled={pending.has(k)}
+-                        onChange={() => toggle(r.id, page.path)}
+-                        aria-label={`${r.name} can open ${page.label}`}
+-                        className="w-4 h-4 accent-amber-500 cursor-pointer disabled:opacity-40"
+-                      />
++            {pages.map((page) => {
++              const pageActions = actions.filter((a) => a.page === page.path);
++              return (
++                <Fragment key={page.path}>
++                  <tr className="border-t border-zinc-800 hover:bg-zinc-900/50">
++                    <td className="px-4 py-3 sticky left-0 bg-zinc-950">
++                      <div>{page.label}</div>
++                      <div className="text-xs text-zinc-600 font-mono">{page.path}</div>
+                     </td>
+-                  );
+-                })}
+-              </tr>
+-            ))}
++                    {superRoles.map((r) => (
++                      <td key={r.id} className="px-4 py-3 text-center text-xs text-zinc-600">
++                        always
++                      </td>
++                    ))}
++                    {editableRoles.map((r) => {
++                      const id = pageId(r.id, page.path);
++                      return (
++                        <td key={r.id} className="px-4 py-3 text-center">
++                          <input
++                            type="checkbox"
++                            checked={granted.has(id)}
++                            disabled={pending.has(id)}
++                            onChange={() =>
++                              apply([{ roleId: r.id, pagePath: page.path, allowed: !granted.has(id) }])
++                            }
++                            aria-label={`${r.name} can open ${page.label}`}
++                            className="w-4 h-4 accent-amber-500 cursor-pointer disabled:opacity-40"
++                          />
++                        </td>
++                      );
++                    })}
++                  </tr>
++
++                  {pageActions.map((action) => (
++                    <tr key={action.key} className="border-t border-zinc-800/50 bg-zinc-900/20">
++                      <td className="pl-10 pr-4 py-2 sticky left-0 bg-zinc-950">
++                        <div className="text-zinc-300 text-xs">↳ {action.label}</div>
++                        {action.hint && <div className="text-[11px] text-zinc-600">{action.hint}</div>}
++                      </td>
++                      {superRoles.map((r) => (
++                        <td key={r.id} className="px-4 py-2 text-center text-xs text-zinc-600">
++                          always
++                        </td>
++                      ))}
++                      {editableRoles.map((r) => {
++                        const id = actionId(r.id, action.key);
++                        const pageOn = granted.has(pageId(r.id, page.path));
++                        return (
++                          <td key={r.id} className="px-4 py-2 text-center">
++                            <input
++                              type="checkbox"
++                              checked={granted.has(id)}
++                              disabled={pending.has(id) || !pageOn}
++                              onChange={() =>
++                                apply([{ roleId: r.id, actionKey: action.key, allowed: !granted.has(id) }])
++                              }
++                              title={pageOn ? undefined : "Grant the page first"}
++                              aria-label={`${r.name}: ${action.label}`}
++                              className="w-3.5 h-3.5 accent-amber-500 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
++                            />
++                          </td>
++                        );
++                      })}
++                    </tr>
++                  ))}
++                </Fragment>
++              );
++            })}
+           </tbody>
+         </table>
+       </div>
+       <p className="text-xs text-zinc-600 mt-3">
+-        Changes save as you click. Click a role name to toggle all its pages.
++        Changes save as you click. Actions (↳) only work when their page is also ticked. Click a role
++        name to toggle everything for that role.
+       </p>
+     </div>
+   );
+diff --git a/app/permissions/page.tsx b/app/permissions/page.tsx
+index 67566aa..0506058 100644
+--- a/app/permissions/page.tsx
++++ b/app/permissions/page.tsx
+@@ -1,16 +1,20 @@
+ import { db } from "@/lib/db";
+-import { roles, rolePagePermissions } from "@/db/schema";
+-import { GRANTABLE_PAGES, isAdminRoleName, isGrantablePath } from "@/lib/pages";
++import { roles, rolePagePermissions, roleActionPermissions } from "@/db/schema";
++import { isSuperRoleName, SUPER_ROLE_NAME } from "@/lib/roles";
++import { APP_ACTIONS, GRANTABLE_PAGES, isActionKey, isGrantablePath } from "@/lib/pages";
+ import PermissionsClient from "./PermissionsClient";
+ 
+ export const dynamic = "force-dynamic";
+ 
+ export default async function PermissionsPage() {
+-  const [roleRows, grantRows] = await Promise.all([
++  const [roleRows, pageRows, actionRows] = await Promise.all([
+     db.select().from(roles).orderBy(roles.name),
+     db
+       .select({ roleId: rolePagePermissions.roleId, pagePath: rolePagePermissions.pagePath })
+       .from(rolePagePermissions),
++    db
++      .select({ roleId: roleActionPermissions.roleId, actionKey: roleActionPermissions.actionKey })
++      .from(roleActionPermissions),
+   ]);
+ 
+   return (
+@@ -18,17 +22,21 @@ export default async function PermissionsPage() {
+       <header className="mb-8">
+         <h1 className="text-2xl font-semibold">Permissions</h1>
+         <p className="text-zinc-500 text-sm mt-1">
+-          Which web pages each role can open. Admin always has every page.
+-          Settings, Users, Roles and Permissions stay admin-only. Changes apply
+-          on the user&apos;s next page load. A role with no pages can&apos;t log in
+-          to the web app (PDA is unaffected).
++          Which web pages each role can open, and what it can do on them.{" "}
++          {SUPER_ROLE_NAME} always has everything, and is the only role that can
++          manage Users, Roles and Permissions. Changes apply on the user&apos;s next
++          page load. A role with no pages can&apos;t log in to the web app. Action
++          permissions apply to the web app only; the PDA is unaffected (except
++          Edit settings).
+         </p>
+       </header>
+ 
+       <PermissionsClient
+-        roles={roleRows.map((r) => ({ id: r.id, name: r.name, isAdmin: isAdminRoleName(r.name) }))}
++        roles={roleRows.map((r) => ({ id: r.id, name: r.name, isSuper: isSuperRoleName(r.name) }))}
+         pages={GRANTABLE_PAGES.map((p) => ({ path: p.path, label: p.label }))}
+-        initialGrants={grantRows.filter((g) => isGrantablePath(g.pagePath))}
++        actions={APP_ACTIONS.map((a) => ({ key: a.key, page: a.page, label: a.label, hint: a.hint ?? null }))}
++        initialPageGrants={pageRows.filter((g) => isGrantablePath(g.pagePath))}
++        initialActionGrants={actionRows.filter((g) => isActionKey(g.actionKey))}
+       />
+     </div>
+   );
+diff --git a/app/sales-orders/SalesOrdersClient.tsx b/app/sales-orders/SalesOrdersClient.tsx
+index 672d6b1..582e958 100644
+--- a/app/sales-orders/SalesOrdersClient.tsx
++++ b/app/sales-orders/SalesOrdersClient.tsx
+@@ -3,6 +3,7 @@
+ import { Fragment, useEffect, useMemo, useState } from "react";
+ import { useRouter } from "next/navigation";
+ import TambahanPanel from "./TambahanPanel";
++import { useCan } from "@/lib/AccessContext";
+ import CreateSalesOrderForm from "./components/CreateSalesOrderForm";
+ import EditSalesOrderForm from "./components/EditSalesOrderForm";
+ import ShippedCell from "./components/ShippedCell";
+@@ -36,6 +37,9 @@ export default function SalesOrdersClient({
+   isAdmin: boolean;
+ }) {
+   const router = useRouter();
++  const can = useCan();
++  const canCreate = can("so.create");
++  const canEdit = can("so.edit");
+   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+   const [editingId, setEditingId] = useState<number | null>(null);
+   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+@@ -90,9 +94,11 @@ export default function SalesOrdersClient({
+ 
+   return (
+     <div>
+-      <div className="mb-8">
+-        <CreateSalesOrderForm allItems={allItems} />
+-      </div>
++      {canCreate && (
++        <div className="mb-8">
++          <CreateSalesOrderForm allItems={allItems} />
++        </div>
++      )}
+ 
+       <input
+         type="text"
+@@ -174,22 +180,24 @@ export default function SalesOrdersClient({
+                       </td>
+                       <td className="px-4 py-3 text-right text-zinc-400">{order.items.length}</td>
+                       <td className="px-4 py-3 text-right">
+-                        <button
+-                          onClick={(e) => {
+-                            e.stopPropagation();
+-                            setEditingId(isEditing ? null : order.id);
+-                            if (!isOpen) toggle(order.id);
+-                          }}
+-                          className="text-xs text-amber-500 hover:underline"
+-                        >
+-                          {isEditing ? "Cancel" : "Edit"}
+-                        </button>
++                        {canEdit && (
++                          <button
++                            onClick={(e) => {
++                              e.stopPropagation();
++                              setEditingId(isEditing ? null : order.id);
++                              if (!isOpen) toggle(order.id);
++                            }}
++                            className="text-xs text-amber-500 hover:underline"
++                          >
++                            {isEditing ? "Cancel" : "Edit"}
++                          </button>
++                        )}
+                       </td>
+                     </tr>
+                     {isOpen && (
+                       <tr className="border-t border-zinc-800/60 bg-zinc-950/40">
+                         <td colSpan={7} className="px-4 py-4">
+-                          {isEditing ? (
++                          {isEditing && canEdit ? (
+                             <EditSalesOrderForm
+                               order={order}
+                               allItems={allItems}
+diff --git a/app/sales-orders/TambahanPanel.tsx b/app/sales-orders/TambahanPanel.tsx
+index 0b9b20a..9b79678 100644
+--- a/app/sales-orders/TambahanPanel.tsx
++++ b/app/sales-orders/TambahanPanel.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { useEffect, useState } from "react";
++import { useCan } from "@/lib/AccessContext";
+ 
+ type TambahanItem = {
+   itemId: number;
+@@ -23,6 +24,8 @@ type TambahanData = {
+ };
+ 
+ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
++  // Convert / confirm / return are the web Tambahan actions.
++  const canAct = useCan()("so.tambahan");
+   const [data, setData] = useState<TambahanData | null>(null);
+   const [loading, setLoading] = useState(true);
+   const [newSoNumber, setNewSoNumber] = useState("");
+@@ -111,13 +114,14 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
+                   key={it.itemId}
+                   tambahanNumber={tambahan.tambahanNumber}
+                   item={it}
++                  canAct={canAct}
+                   onSaved={refresh}
+                 />
+               ))}
+             </tbody>
+           </table>
+         )}
+-        {totalOutstanding > 0 && (
++        {canAct && totalOutstanding > 0 && (
+           <div className="mt-2">
+             <button
+               onClick={handleConfirmTambahan}
+@@ -134,6 +138,8 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
+               Converted to <span className="font-mono text-amber-400">{tambahan.convertedSoNumber}</span> on{" "}
+               {tambahan.convertedAt ? new Date(tambahan.convertedAt).toLocaleDateString() : ""}.
+             </p>
++          ) : !canAct ? (
++            <p className="text-xs text-zinc-600">Not converted to an SO yet.</p>
+           ) : (
+             <div className="flex flex-wrap items-end gap-2">
+               <div>
+@@ -174,10 +180,12 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
+ function TambahanItemRow({
+   tambahanNumber,
+   item,
++  canAct,
+   onSaved,
+ }: {
+   tambahanNumber: string;
+   item: TambahanItem;
++  canAct: boolean;
+   onSaved: () => void;
+ }) {
+   const outstanding = item.pickedQty - item.shippedQty;
+@@ -212,7 +220,7 @@ function TambahanItemRow({
+       <td className="py-1 text-right font-mono">{item.shippedQty}</td>
+       <td className="py-1 text-right font-mono">{outstanding}</td>
+       <td className="py-1 text-right relative">
+-        {outstanding > 0 && (
++        {canAct && outstanding > 0 && (
+           <button onClick={() => setShowPopup(true)} className="text-red-400 hover:underline">
+             Delete
+           </button>
+diff --git a/app/sales-orders/page.tsx b/app/sales-orders/page.tsx
+index 6bb0cb2..f390711 100644
+--- a/app/sales-orders/page.tsx
++++ b/app/sales-orders/page.tsx
+@@ -2,20 +2,9 @@ import { db } from "@/lib/db";
+ import { salesOrders, salesOrderItems, items } from "@/db/schema";
+ import { eq, inArray, desc, sql, and } from "drizzle-orm";
+ import SalesOrdersClient from "./SalesOrdersClient";
+-import { getSession } from "@/lib/auth";
+-import { users, roles } from "@/db/schema";
++import { sessionIsSuper } from "@/lib/auth";
+ import { getPickedForSoQuantities } from "@/lib/pickedForSo";
+ import { tambahanOrders } from "@/db/schema";
+-async function getIsAdmin(): Promise<boolean> {
+-  const session = await getSession();
+-  if (!session) return false;
+-  const [row] = await db
+-    .select({ roleName: roles.name })
+-    .from(users)
+-    .innerJoin(roles, eq(users.roleId, roles.id))
+-    .where(eq(users.id, session.userId));
+-  return row?.roleName?.toLowerCase() === "admin";
+-}
+ export const dynamic = "force-dynamic";
+ 
+ const PAGE_SIZE = 50;
+@@ -184,7 +173,7 @@ const [totalCount, orders, allItems, isAdmin] = await Promise.all([
+   getTotalOrderCount(),
+   getSalesOrdersForPage(page),
+   db.select({ sku: items.sku, name: items.name }).from(items).orderBy(items.sku),
+-  getIsAdmin(),
++  sessionIsSuper(),
+ ]);
+ 
+   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+diff --git a/app/scan/ScanForms.tsx b/app/scan/ScanForms.tsx
+index d709525..baab901 100644
+--- a/app/scan/ScanForms.tsx
++++ b/app/scan/ScanForms.tsx
+@@ -3,6 +3,8 @@
+ import { useState, useEffect } from "react";
+ import { useRouter } from "next/navigation";
+ import { usePageLabels } from "@/lib/hooks/usePageLabels";
++import { useCan } from "@/lib/AccessContext";
++import type { ActionKey } from "@/lib/pages";
+ 
+ function parseLabel(raw: string) {
+   const parts = raw.trim().split("*");
+@@ -14,16 +16,29 @@ function parseLabel(raw: string) {
+ }
+ type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST_LOCATION" | "ADJUST_BULK" | "ADJUST_PALLET_QTY" | "CHECK_SO";
+ export default function ScanForms() {
+-  const [tab, setTab] = useState<Tab>("INBOUND");
+   const labels = usePageLabels("scan")
+-  const tabs: { key: Tab; label: string }[] = [
+-    { key: "INBOUND", label: labels.th_inbound },
+-    { key: "ADJUST_LOCATION", label: labels.th_adjust},
+-      { key: "ADJUST_BULK", label: labels.th_adjust_bulk },
+-
+-    { key: "ADJUST_PALLET_QTY", label: labels.th_correct },
++  const can = useCan();
++  // Each tab is its own permission on /permissions (see lib/pages.ts).
++  const allTabs: { key: Tab; label: string; action: ActionKey }[] = [
++    { key: "INBOUND", label: labels.th_inbound, action: "scan.inbound" },
++    { key: "ADJUST_LOCATION", label: labels.th_adjust, action: "scan.adjustLocation" },
++    { key: "ADJUST_BULK", label: labels.th_adjust_bulk, action: "scan.adjustBulk" },
++    { key: "ADJUST_PALLET_QTY", label: labels.th_correct, action: "scan.correctQty" },
+     // { key: "CHECK_SO", label: labels.th_check_so },
+   ];
++  const tabs = allTabs.filter((t) => can(t.action));
++  const [selected, setTab] = useState<Tab | null>(null);
++  // Falls back to the first tab this role may use.
++  const tab: Tab | null = tabs.some((t) => t.key === selected) ? selected : tabs[0]?.key ?? null;
++
++  if (!tab) {
++    return (
++      <div className="border border-zinc-800 rounded-lg p-8 text-center text-sm text-zinc-500">
++        Your role doesn&apos;t have access to any System Control tabs.
++      </div>
++    );
++  }
++
+   return (
+     <div>
+       <div className="flex gap-1 mb-6 border border-zinc-800 rounded-lg p-1 w-fit">
+diff --git a/app/settings/PageLabelsSettings.tsx b/app/settings/PageLabelsSettings.tsx
+index e9c0ee4..750d071 100644
+--- a/app/settings/PageLabelsSettings.tsx
++++ b/app/settings/PageLabelsSettings.tsx
+@@ -5,7 +5,7 @@ import { PAGE_OPTIONS, PageKey } from "@/lib/pageLabels";
+ 
+ type RawLabel = { en: string; id: string; zh: string };
+ 
+-export default function PageLabelsSettings() {
++export default function PageLabelsSettings({ readOnly = false }: { readOnly?: boolean }) {
+   const [page, setPage] = useState<PageKey>(PAGE_OPTIONS[0].key);
+   const [values, setValues] = useState<Record<string, RawLabel>>({});
+   const [loading, setLoading] = useState(false);
+@@ -91,12 +91,14 @@ export default function PageLabelsSettings() {
+                   <td className="px-3 py-2 text-zinc-400">{langs.id || <span className="text-zinc-700">—</span>}</td>
+                   <td className="px-3 py-2 text-zinc-400">{langs.zh || <span className="text-zinc-700">—</span>}</td>
+                   <td className="px-3 py-2">
+-                    <button
+-                      onClick={() => setEditingKey(key)}
+-                      className="text-xs text-amber-500 hover:text-amber-400"
+-                    >
+-                      Edit
+-                    </button>
++                    {!readOnly && (
++                      <button
++                        onClick={() => setEditingKey(key)}
++                        className="text-xs text-amber-500 hover:text-amber-400"
++                      >
++                        Edit
++                      </button>
++                    )}
+                   </td>
+                 </tr>
+               ))}
+@@ -105,7 +107,7 @@ export default function PageLabelsSettings() {
+         </div>
+       )}
+ 
+-      {editingKey && (
++      {editingKey && !readOnly && (
+         <TranslationModal
+           labelKey={editingKey}
+           english={values[editingKey].en}
+diff --git a/app/settings/SettingsForm.tsx b/app/settings/SettingsForm.tsx
+index 3a11f07..566fb83 100644
+--- a/app/settings/SettingsForm.tsx
++++ b/app/settings/SettingsForm.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { useState } from "react";
+ import PageLabelsSettings from "./PageLabelsSettings";
++import { useCan } from "@/lib/AccessContext";
+ 
+ export default function SettingsForm({
+   initial,
+@@ -19,6 +20,7 @@ export default function SettingsForm({
+   };
+ }) {
+   const [activeTab, setActiveTab] = useState<"general" | "translations">("general");
++  const canEdit = useCan()("settings.edit");
+ 
+   const [allowDefaultCode, setAllowDefaultCode] = useState(initial.allowDefaultCodeTransactions);
+   const [automaticInbound, setAutomaticInbound] = useState(initial.automaticInbound);
+@@ -53,10 +55,16 @@ export default function SettingsForm({
+       </div>
+ 
+       {activeTab === "translations" ? (
+-        <PageLabelsSettings />
++        <PageLabelsSettings readOnly={!canEdit} />
+       ) : (
+         <div className="space-y-4">
++          {!canEdit && (
++            <p className="text-xs text-zinc-500 border border-zinc-800 rounded-md px-3 py-2">
++              Read-only — your role can view settings but not change them.
++            </p>
++          )}
+           <LedgerStartSetting
++            readOnly={!canEdit}
+             initialIso={initial.ledgerStartAt}
+             initialIsDefault={initial.ledgerStartIsDefault}
+           />
+@@ -77,8 +85,8 @@ export default function SettingsForm({
+                   setAllowDefaultCode(next);
+                   updateSetting("allowDefaultCodeTransactions", next);
+                 }}
+-                disabled={saving}
+-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
++                disabled={saving || !canEdit}
++                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
+                   allowDefaultCode ? "bg-amber-500" : "bg-zinc-700"
+                 }`}
+               >
+@@ -107,8 +115,8 @@ export default function SettingsForm({
+                   setAutomaticInbound(next);
+                   updateSetting("automaticInbound", next);
+                 }}
+-                disabled={saving}
+-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
++                disabled={saving || !canEdit}
++                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
+                   automaticInbound ? "bg-amber-500" : "bg-zinc-700"
+                 }`}
+               >
+@@ -137,8 +145,8 @@ export default function SettingsForm({
+                   setAutomaticInboundFromRack(next);
+                   updateSetting("automaticInboundFromRack", next);
+                 }}
+-                disabled={saving}
+-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
++                disabled={saving || !canEdit}
++                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
+                   automaticInboundFromRack ? "bg-amber-500" : "bg-zinc-700"
+                 }`}
+               >
+@@ -167,8 +175,8 @@ export default function SettingsForm({
+                   setAllowUntrackedOutbound(next);
+                   updateSetting("allowUntrackedOutbound", next);
+                 }}
+-                disabled={saving}
+-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
++                disabled={saving || !canEdit}
++                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
+                   allowUntrackedOutbound ? "bg-amber-500" : "bg-zinc-700"
+                 }`}
+               >
+@@ -200,8 +208,8 @@ export default function SettingsForm({
+                   setAllowDefaultPicking(next);
+                   updateSetting("allowDefaultPicking", next);
+                 }}
+-                disabled={saving}
+-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
++                disabled={saving || !canEdit}
++                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
+                   allowDefaultPicking ? "bg-amber-500" : "bg-zinc-700"
+                 }`}
+               >
+@@ -231,8 +239,8 @@ export default function SettingsForm({
+                   setAllowNegativeFloorStock(next);
+                   updateSetting("allowNegativeFloorStock", next);
+                 }}
+-                disabled={saving}
+-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
++                disabled={saving || !canEdit}
++                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
+                   allowNegativeFloorStock ? "bg-amber-500" : "bg-zinc-700"
+                 }`}
+               >
+@@ -264,8 +272,8 @@ export default function SettingsForm({
+                   setAllowNegativeRackStock(next);
+                   updateSetting("allowNegativeRackStock", next);
+                 }}
+-                disabled={saving}
+-                className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ml-4 ${
++                disabled={saving || !canEdit}
++                className={`relative w-12 h-7 disabled:cursor-not-allowed rounded-full transition-colors shrink-0 ml-4 ${
+                   allowNegativeRackStock ? "bg-amber-500" : "bg-zinc-700"
+                 }`}
+               >
+@@ -299,9 +307,11 @@ function wibInputToIso(value: string): string | null {
+ function LedgerStartSetting({
+   initialIso,
+   initialIsDefault,
++  readOnly,
+ }: {
+   initialIso: string;
+   initialIsDefault: boolean;
++  readOnly: boolean;
+ }) {
+   const [savedIso, setSavedIso] = useState(initialIso);
+   const [isDefault, setIsDefault] = useState(initialIsDefault);
+@@ -361,8 +371,10 @@ function LedgerStartSetting({
+             setValue(e.target.value);
+             setMessage(null);
+           }}
+-          className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 [color-scheme:dark]"
++          disabled={readOnly}
++          className="px-3 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 [color-scheme:dark] disabled:opacity-60"
+         />
++        {!readOnly && (
+         <button
+           onClick={handleSave}
+           disabled={saving || !dirty || !value}
+@@ -370,7 +382,8 @@ function LedgerStartSetting({
+         >
+           {saving ? "Saving…" : "Save"}
+         </button>
+-        {!isDefault && (
++        )}
++        {!readOnly && !isDefault && (
+           <button
+             onClick={() => save(null)}
+             disabled={saving}
+diff --git a/app/users/page.tsx b/app/users/page.tsx
+index 337df85..347d4ce 100644
+--- a/app/users/page.tsx
++++ b/app/users/page.tsx
+@@ -1,7 +1,7 @@
+ import { db } from "@/lib/db";
+ import { users, roles } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+-import { getSession } from "@/lib/auth";
++import { sessionIsSuper } from "@/lib/auth";
+ import CreateUserForm from "./CreateUserForm";
+ import UsersClient from "./UsersClient";
+ 
+@@ -24,24 +24,12 @@ async function getAllRoles() {
+   return db.select().from(roles).orderBy(roles.name);
+ }
+ 
+-async function getIsAdmin(): Promise<boolean> {
+-  const session = await getSession();
+-  if (!session) return false;
+-
+-  const [row] = await db
+-    .select({ roleName: roles.name })
+-    .from(users)
+-    .innerJoin(roles, eq(users.roleId, roles.id))
+-    .where(eq(users.id, session.userId));
+-
+-  return row?.roleName?.toLowerCase() === "admin";
+-}
+ 
+ export default async function UsersPage() {
+   const [userList, roleList, isAdmin] = await Promise.all([
+     getUsers(),
+     getAllRoles(),
+-    getIsAdmin(),
++    sessionIsSuper(),
+   ]);
+ 
+   return (
+@@ -49,7 +37,7 @@ export default async function UsersPage() {
+       <header className="mb-8">
+         <h1 className="text-2xl font-semibold">Users</h1>
+         <p className="text-zinc-500 text-sm mt-1">
+-          {isAdmin ? "Manage warehouse staff accounts and roles." : "Read-only — only admins can change roles."}
++          {isAdmin ? "Manage warehouse staff accounts and roles." : "Read-only — only Manager can change roles."}
+         </p>
+       </header>
+ 
+diff --git a/db/schema.ts b/db/schema.ts
+index d0d4e11..a98728d 100644
+--- a/db/schema.ts
++++ b/db/schema.ts
+@@ -54,7 +54,7 @@ export const roles = pgTable(
+   "roles",
+   {
+     id: serial("id").primaryKey(),
+-    name: text("name").notNull(), // e.g. "Inbound", "Forklift Driver", "Admin"
++    name: text("name").notNull(), // e.g. "Inbound", "Forklift Driver", "Manager"
+   },
+   (table) => [uniqueIndex("roles_name_idx").on(table.name)]
+ );
+@@ -62,10 +62,11 @@ export const roles = pgTable(
+ export const rolesRelations = relations(roles, ({ many }) => ({
+   users: many(users),
+   pagePermissions: many(rolePagePermissions),
++  actionPermissions: many(roleActionPermissions),
+ }));
+ 
+-// Which web pages a (non-admin) role may open. One row = one granted page.
+-// Admin always has every page and never needs rows here. `pagePath` must be
++// Which web pages a (non-Manager) role may open. One row = one granted page.
++// Manager always has every page and never needs rows here. `pagePath` must be
+ // a grantable path from APP_PAGES in lib/pages.ts.
+ export const rolePagePermissions = pgTable(
+   "role_page_permissions",
+@@ -87,6 +88,29 @@ export const rolePagePermissionsRelations = relations(rolePagePermissions, ({ on
+   }),
+ }));
+ 
++// Which in-page actions a (non-Manager) role may do, e.g. "so.create".
++// `actionKey` must be a key from APP_ACTIONS in lib/pages.ts. An action only
++// takes effect if the role can also open that action's page.
++export const roleActionPermissions = pgTable(
++  "role_action_permissions",
++  {
++    id: serial("id").primaryKey(),
++    roleId: integer("role_id")
++      .notNull()
++      .references(() => roles.id, { onDelete: "cascade" }),
++    actionKey: text("action_key").notNull(),
++    createdAt: timestamp("created_at").defaultNow().notNull(),
++  },
++  (table) => [uniqueIndex("role_action_permissions_role_action_idx").on(table.roleId, table.actionKey)]
++);
++
++export const roleActionPermissionsRelations = relations(roleActionPermissions, ({ one }) => ({
++  role: one(roles, {
++    fields: [roleActionPermissions.roleId],
++    references: [roles.id],
++  }),
++}));
++
+ export const users = pgTable(
+   "users",
+   {
+diff --git a/lib/AccessContext.tsx b/lib/AccessContext.tsx
+new file mode 100644
+index 0000000..857b76e
+--- /dev/null
++++ b/lib/AccessContext.tsx
+@@ -0,0 +1,23 @@
++"use client";
++
++// Makes the logged-in user's page/action access available to any client
++// component: `const can = useCan(); if (can("so.create")) ...`.
++// UI only — the API routes enforce the same rules on their own.
++
++import { createContext, useCallback, useContext } from "react";
++import { canDo, type ActionKey, type PageAccess } from "@/lib/pages";
++
++const AccessContext = createContext<PageAccess | null>(null);
++
++export function AccessProvider({ access, children }: { access: PageAccess | null; children: React.ReactNode }) {
++  return <AccessContext.Provider value={access}>{children}</AccessContext.Provider>;
++}
++
++export function useAccess(): PageAccess | null {
++  return useContext(AccessContext);
++}
++
++export function useCan(): (key: ActionKey) => boolean {
++  const access = useContext(AccessContext);
++  return useCallback((key: ActionKey) => canDo(access, key), [access]);
++}
+diff --git a/lib/auth.ts b/lib/auth.ts
+index 5be0dc1..2d286d3 100644
+--- a/lib/auth.ts
++++ b/lib/auth.ts
+@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
+ import { db } from "@/lib/db";
+ import { users, roles } from "@/db/schema";
+ import { eq } from "drizzle-orm";
++import { isSuperRoleName } from "@/lib/roles";
+ 
+ const secret = new TextEncoder().encode(process.env.JWT_SECRET!);
+ 
+@@ -13,6 +14,9 @@ export type SessionPayload = {
+   // Added so middleware (which can't query the DB) can gate web pages.
+   // Optional so older tokens / other callers of signSession still type-check.
+   roleName?: string;
++  // "web" for web-app logins. Absent for the PDA. Action permissions are
++  // only enforced for web sessions, so the PDA keeps working unchanged.
++  client?: "web";
+ };
+ 
+ export async function signSession(payload: SessionPayload) {
+@@ -41,7 +45,7 @@ export async function getSession(): Promise<SessionPayload | null> {
+   return verifySession(token);
+ }
+ 
+-// Returns the current session's role name (e.g. "Admin"), or null if not
++// Returns the current session's role name (e.g. "Manager"), or null if not
+ // logged in / role can't be resolved.
+ export async function getSessionRole(): Promise<string | null> {
+   const session = await getSession();
+@@ -56,14 +60,33 @@ export async function getSessionRole(): Promise<string | null> {
+   return row?.roleName ?? null;
+ }
+ 
++// Whether this user has the super role (Manager).
++export async function isSuperUser(userId: number): Promise<boolean> {
++  const [row] = await db
++    .select({ roleName: roles.name })
++    .from(users)
++    .innerJoin(roles, eq(users.roleId, roles.id))
++    .where(eq(users.id, userId));
++
++  return isSuperRoleName(row?.roleName);
++}
++
++// Whether the current request's user has the super role.
++export async function sessionIsSuper(): Promise<boolean> {
++  const session = await getSession();
++  return session ? isSuperUser(session.userId) : false;
++}
++
++// Name kept for existing callers: requires the super role (Manager).
+ export async function requireAdmin() {
+   const role = await getSessionRole();
+-  if (role?.toLowerCase() !== "admin") {
+-    return { error: "Admin access required", status: 403 as const };
++  if (!isSuperRoleName(role)) {
++    return { error: "Manager access required", status: 403 as const };
+   }
+   return null;
+ }
+ 
++// Pass SUPER_ROLE_NAME in `allowedRoleNames` to allow Manager.
+ export async function hasRole(userId: number, allowedRoleNames: string[]): Promise<boolean> {
+   const [row] = await db
+     .select({ roleName: roles.name })
+@@ -73,6 +96,8 @@ export async function hasRole(userId: number, allowedRoleNames: string[]): Promi
+ 
+   if (!row?.roleName) return false;
+ 
++  if (isSuperRoleName(row.roleName) && allowedRoleNames.some(isSuperRoleName)) return true;
++
+   const normalized = row.roleName.toLowerCase();
+   return allowedRoleNames.some((allowed) => allowed.toLowerCase() === normalized);
+-}
+\ No newline at end of file
++}
+diff --git a/lib/pagePermissions.ts b/lib/pagePermissions.ts
+index 0275bba..884a22a 100644
+--- a/lib/pagePermissions.ts
++++ b/lib/pagePermissions.ts
+@@ -1,13 +1,23 @@
+-// Server-only: looks up which web pages a user may open. Used by proxy.ts,
+-// the root layout (to filter the nav) and web login.
++// Server-only: looks up which web pages and actions a user may use. Used by
++// proxy.ts, the root layout, web login, and API routes behind an action.
+ 
++import { NextResponse } from "next/server";
+ import { db } from "@/lib/db";
+-import { users, roles, rolePagePermissions } from "@/db/schema";
++import { users, roles, rolePagePermissions, roleActionPermissions } from "@/db/schema";
+ import { eq } from "drizzle-orm";
+-import { isAdminRoleName, isGrantablePath, type PageAccess } from "@/lib/pages";
++import { isSuperRoleName } from "@/lib/roles";
++import {
++  canDo,
++  getAction,
++  isActionKey,
++  isGrantablePath,
++  type ActionKey,
++  type PageAccess,
++} from "@/lib/pages";
++import type { SessionPayload } from "@/lib/auth";
+ 
+ // Reads the role fresh from the DB (not from the session token), so role
+-// changes and permission changes apply on the next page load.
++// changes and permission changes apply on the next request.
+ // Returns null if the user no longer exists.
+ export async function getPageAccess(userId: number): Promise<PageAccess | null> {
+   const [row] = await db
+@@ -18,19 +28,50 @@ export async function getPageAccess(userId: number): Promise<PageAccess | null>
+ 
+   if (!row) return null;
+ 
+-  if (isAdminRoleName(row.roleName)) {
+-    return { roleName: row.roleName, isAdmin: true, allowedPages: [] };
++  if (isSuperRoleName(row.roleName)) {
++    return { roleName: row.roleName, isAdmin: true, allowedPages: [], allowedActions: [] };
+   }
+ 
+-  const grants = await db
+-    .select({ pagePath: rolePagePermissions.pagePath })
+-    .from(rolePagePermissions)
+-    .where(eq(rolePagePermissions.roleId, row.roleId));
+-
+-  return {
+-    roleName: row.roleName,
+-    isAdmin: false,
+-    // Ignore stale rows for pages that were removed or made admin-only.
+-    allowedPages: grants.map((g) => g.pagePath).filter(isGrantablePath),
+-  };
++  const [pageGrants, actionGrants] = await Promise.all([
++    db
++      .select({ pagePath: rolePagePermissions.pagePath })
++      .from(rolePagePermissions)
++      .where(eq(rolePagePermissions.roleId, row.roleId)),
++    db
++      .select({ actionKey: roleActionPermissions.actionKey })
++      .from(roleActionPermissions)
++      .where(eq(roleActionPermissions.roleId, row.roleId)),
++  ]);
++
++  // Ignore stale rows for pages/actions that were removed or made super-only.
++  const allowedPages = pageGrants.map((g) => g.pagePath).filter(isGrantablePath);
++  const allowedActions = actionGrants
++    .map((g) => g.actionKey)
++    .filter(isActionKey)
++    // An action is useless without its page, so it doesn't count alone.
++    .filter((key) => allowedPages.includes(getAction(key).page));
++
++  return { roleName: row.roleName, isAdmin: false, allowedPages, allowedActions };
++}
++
++// For API routes behind an action. Returns a 403 response to send back, or
++// null if the request may go ahead.
++//
++// webOnly (default true): only web sessions are checked, so the PDA keeps
++// working exactly as before for every role. Pass false for things that were
++// already restricted everywhere (e.g. settings).
++export async function denyUnlessAllowed(
++  session: SessionPayload,
++  key: ActionKey,
++  { webOnly = true }: { webOnly?: boolean } = {}
++): Promise<NextResponse | null> {
++  if (webOnly && session.client !== "web") return null;
++
++  const access = await getPageAccess(session.userId);
++  if (canDo(access, key)) return null;
++
++  return NextResponse.json(
++    { error: `Your role doesn't have permission for: ${getAction(key).label}` },
++    { status: 403 }
++  );
+ }
+diff --git a/lib/pages.ts b/lib/pages.ts
+index 7e1d12b..2662270 100644
+--- a/lib/pages.ts
++++ b/lib/pages.ts
+@@ -1,16 +1,19 @@
+-// The web pages that page permissions apply to. Safe to import from client
+-// components (no DB access here).
++// Web pages and in-page actions that permissions apply to. Safe to import
++// from client components (no DB access here).
+ //
+-// - Admin can open every page, always.
+-// - Other roles can open a page only if it's granted on /permissions.
+-// - `adminOnly` pages can never be granted (they control access itself).
+-// - Any path NOT listed here is admin-only by default, so a new page stays
++// - Manager (the super role) can open every page and do every action.
++// - Other roles can open a page only if it's granted on /permissions, and
++//   can do an action only if it's granted AND its page is granted.
++// - `superOnly` pages can never be granted (they control access itself).
++// - Any path NOT listed here is Manager-only by default, so a new page stays
+ //   locked until it's added below.
+ 
++import { isSuperRoleName } from "@/lib/roles";
++
+ export type AppPage = {
+   path: string;
+   label: string;
+-  adminOnly?: boolean;
++  superOnly?: boolean;
+ };
+ 
+ export const APP_PAGES: AppPage[] = [
+@@ -26,24 +29,79 @@ export const APP_PAGES: AppPage[] = [
+   { path: "/other-transactions", label: "Other Transactions" },
+   { path: "/items", label: "Items" },
+   { path: "/locations", label: "Locations" },
+-  { path: "/settings", label: "Settings", adminOnly: true },
+-  { path: "/users", label: "Users", adminOnly: true },
+-  { path: "/roles", label: "Roles", adminOnly: true },
+-  { path: "/permissions", label: "Permissions", adminOnly: true },
++  { path: "/settings", label: "Settings" },
++  { path: "/users", label: "Users", superOnly: true },
++  { path: "/roles", label: "Roles", superOnly: true },
++  { path: "/permissions", label: "Permissions", superOnly: true },
++];
++
++// Actions within a page. On the web these are enforced in the UI and in the
++// API routes they call. The PDA is not affected by them, except
++// `settings.edit` which applies everywhere (settings used to be admin-only).
++export type ActionKey =
++  | "so.create"
++  | "so.edit"
++  | "so.tambahan"
++  | "locationStock.editOutboundWh"
++  | "scan.inbound"
++  | "scan.adjustLocation"
++  | "scan.adjustBulk"
++  | "scan.correctQty"
++  | "settings.edit";
++
++export type AppAction = {
++  key: ActionKey;
++  page: string;
++  label: string;
++  hint?: string;
++};
++
++export const APP_ACTIONS: AppAction[] = [
++  { key: "so.create", page: "/sales-orders", label: "Create sales orders" },
++  { key: "so.edit", page: "/sales-orders", label: "Edit sales orders" },
++  {
++    key: "so.tambahan",
++    page: "/sales-orders",
++    label: "Tambahan actions",
++    hint: "Convert to SO, confirm leftover, return stock",
++  },
++  {
++    key: "locationStock.editOutboundWh",
++    page: "/location-stock",
++    label: "Edit Outbound WH",
++    hint: "Correct marked SO / Tambahan quantities",
++  },
++  { key: "scan.inbound", page: "/scan", label: "Inbound tab" },
++  { key: "scan.adjustLocation", page: "/scan", label: "Adjust tab" },
++  { key: "scan.adjustBulk", page: "/scan", label: "Bulk Adjust tab" },
++  { key: "scan.correctQty", page: "/scan", label: "Correct Qty tab" },
++  { key: "settings.edit", page: "/settings", label: "Edit settings", hint: "Including ledger start and translations" },
+ ];
+ 
+-export const GRANTABLE_PAGES = APP_PAGES.filter((p) => !p.adminOnly);
++export const GRANTABLE_PAGES = APP_PAGES.filter((p) => !p.superOnly);
+ 
+ const GRANTABLE_PATHS = new Set(GRANTABLE_PAGES.map((p) => p.path));
++const ACTIONS_BY_KEY = new Map(APP_ACTIONS.map((a) => [a.key, a]));
+ 
+ export function isGrantablePath(path: string): boolean {
+   return GRANTABLE_PATHS.has(path);
+ }
+ 
+-export function isAdminRoleName(roleName: string | null | undefined): boolean {
+-  return roleName?.toLowerCase() === "admin";
++export function isActionKey(key: string): key is ActionKey {
++  return ACTIONS_BY_KEY.has(key as ActionKey);
+ }
+ 
++export function getAction(key: ActionKey): AppAction {
++  return ACTIONS_BY_KEY.get(key)!;
++}
++
++export function actionsForPage(path: string): AppAction[] {
++  return APP_ACTIONS.filter((a) => a.page === path);
++}
++
++// Kept for existing imports; true only for the super role (Manager).
++export const isAdminRoleName = isSuperRoleName;
++
+ // Finds the registered page a URL belongs to: "/" matches only itself,
+ // anything else matches itself and its sub-paths (e.g. /work-orders/123).
+ // Longest match wins.
+@@ -61,17 +119,24 @@ export function matchPage(pathname: string): AppPage | undefined {
+ 
+ export type PageAccess = {
+   roleName: string;
+-  isAdmin: boolean;
+-  allowedPages: string[]; // grantable paths only; empty for admin (has all)
++  isAdmin: boolean; // true for the super role (Manager)
++  allowedPages: string[]; // grantable paths only; empty for super (has all)
++  allowedActions: ActionKey[]; // only actions whose page is also allowed; empty for super
+ };
+ 
+ export function canAccessPath(pathname: string, access: PageAccess): boolean {
+   if (access.isAdmin) return true;
+   const page = matchPage(pathname);
+-  if (!page || page.adminOnly) return false;
++  if (!page || page.superOnly) return false;
+   return access.allowedPages.includes(page.path);
+ }
+ 
++export function canDo(access: PageAccess | null, key: ActionKey): boolean {
++  if (!access) return false;
++  if (access.isAdmin) return true;
++  return access.allowedActions.includes(key);
++}
++
+ // Where to send someone after login, or when they open a page they can't use.
+ export function firstAllowedPath(access: PageAccess): string | null {
+   if (access.isAdmin) return "/";
+diff --git a/lib/roles.ts b/lib/roles.ts
+new file mode 100644
+index 0000000..a6cc1dd
+--- /dev/null
++++ b/lib/roles.ts
+@@ -0,0 +1,12 @@
++// Role names with special meaning. Safe to import anywhere (no DB access).
++
++// The top role. Always has every page and every action, can't be edited on
++// /permissions, and is the only role that can manage users, roles and
++// permissions. (The old "Admin" role is renamed to this by the migration.)
++// Every other role — including any role named "Admin" — is a normal role
++// configured on /permissions.
++export const SUPER_ROLE_NAME = "Manager";
++
++export function isSuperRoleName(roleName: string | null | undefined): boolean {
++  return roleName?.toLowerCase() === SUPER_ROLE_NAME.toLowerCase();
++}
+diff --git a/migration-manager-actions.sql b/migration-manager-actions.sql
+new file mode 100644
+index 0000000..d6eb407
+--- /dev/null
++++ b/migration-manager-actions.sql
+@@ -0,0 +1,45 @@
++-- Manager role + action permissions
++-- Run with: docker exec -it wms-db psql -U postgres -d wms_v2
++-- Run this BEFORE deploying the new code: the new code only treats
++-- "Manager" as the top role, so Admin users need to be Manager already.
++-- Check first:  SELECT id, name FROM roles ORDER BY id;
++
++BEGIN;
++
++-- 1. Rename Admin -> Manager (the top role).
++--    If a "Manager" role already exists, its users stay, Admin's users move
++--    into it, and the old Admin role is removed. Either way every former
++--    Admin user ends up on Manager.
++DO $$
++DECLARE
++  admin_id   int;
++  manager_id int;
++BEGIN
++  SELECT id INTO admin_id   FROM roles WHERE lower(name) = 'admin';
++  SELECT id INTO manager_id FROM roles WHERE lower(name) = 'manager';
++
++  IF admin_id IS NOT NULL AND manager_id IS NULL THEN
++    UPDATE roles SET name = 'Manager' WHERE id = admin_id;
++  ELSIF admin_id IS NOT NULL AND manager_id IS NOT NULL THEN
++    UPDATE users SET role_id = manager_id WHERE role_id = admin_id;
++    DELETE FROM roles WHERE id = admin_id;  -- its permission rows cascade
++  END IF;
++
++  -- Manager always has everything; any page grants it had are meaningless.
++  DELETE FROM role_page_permissions
++   WHERE role_id = (SELECT id FROM roles WHERE lower(name) = 'manager');
++END $$;
++
++-- 2. Per-role action permissions (e.g. 'so.create', 'scan.inbound').
++CREATE TABLE IF NOT EXISTS role_action_permissions (
++  id serial PRIMARY KEY,
++  role_id integer NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
++  action_key text NOT NULL,
++  created_at timestamp NOT NULL DEFAULT now()
++);
++CREATE UNIQUE INDEX IF NOT EXISTS role_action_permissions_role_action_idx
++  ON role_action_permissions (role_id, action_key);
++
++COMMIT;
++
++-- Verify:  SELECT r.name, count(u.id) FROM roles r LEFT JOIN users u ON u.role_id = r.id GROUP BY r.name;
+diff --git a/proxy.ts b/proxy.ts
+index 0246607..b994b17 100644
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -34,6 +34,13 @@ export async function proxy(req: NextRequest) {
+     return toLogin(req, false);
+   }
+ 
++  // Web pages need a web-login session (one that carries client: "web"),
++  // so action permissions can be enforced on it. Older web tokens issued
++  // before this flag existed just log in again once.
++  if (session.client !== "web") {
++    return toLogin(req, true);
++  }
++
+   const access = await getPageAccess(session.userId);
+ 
+   // User deleted, or role has no web pages at all → sign them out of web.
+diff --git a/scripts/seed-users.ts b/scripts/seed-users.ts
+index 1685139..a4858f4 100644
+--- a/scripts/seed-users.ts
++++ b/scripts/seed-users.ts
+@@ -10,7 +10,7 @@ async function main() {
+   console.log("Seeding roles...");
+ 
+   const roleData = [
+-    { name: "Admin" },
++    { name: "Manager" },
+     { name: "Inbound" },
+     { name: "Forklift Driver" },
+   ];
+@@ -28,7 +28,7 @@ async function main() {
+ 
+   // Edit this list with your real staff — username/password/role.
+   const userData = [
+-    { username: "kev", password: "1", roleName: "Admin" },
++    { username: "kev", password: "1", roleName: "Manager" },
+     { username: "qin", password: "1", roleName: "Inbound" },
+     { username: "tes", password: "1", roleName: "Forklift Driver" },
+   ];

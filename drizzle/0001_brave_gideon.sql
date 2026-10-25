@@ -1,0 +1,1 @@
+ALTER TABLE "stock_opname" ADD COLUMN "assigned_to" integer;

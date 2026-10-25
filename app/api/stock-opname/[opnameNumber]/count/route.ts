@@ -1,0 +1,288 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { stockOpnameSkus, stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
+import { eq, and, or, inArray, isNull } from "drizzle-orm";
+import { getSession } from "@/lib/auth";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
+import { getLocationByCode, isSingleSku } from "@/lib/locationRules";
+import { normalizeLabel } from "@/lib/labelNormalize";
+import { isSkuOpname } from "@/lib/skuOpname";
+
+function sanitize(input: string): string {
+  return input.replace(/\0/g, "").trim();
+}
+
+function extractSku(label: string): string | null {
+  const cleaned = label.replace(/^\*+/, "");
+  const parts = cleaned.split("*");
+  return parts[0]?.trim() || null;
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ opnameNumber: string }> }
+) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+  }
+
+  const denied = await denyUnlessPdaAllowed(session, "pda.stockOpname");
+  if (denied) return denied;
+
+  const { opnameNumber } = await params;
+  const body = await req.json();
+  const locationCode = sanitize(body.locationCode ?? "");
+  const rawScanned = sanitize(body.scanned ?? "");
+  const originalLocationCode = sanitize(body.originalLocationCode ?? "");
+  const originalRawScanned = sanitize(body.originalSku ?? "");
+  // Blank scanned + blank/zero countedQty means "confirmed empty" — a
+  // deliberate statement that nothing is here, not a malformed request.
+  const isEmptyConfirmation = !rawScanned;
+  const countedQty = isEmptyConfirmation ? 0 : Number(body.countedQty);
+
+  if (!locationCode) {
+    return NextResponse.json({ error: "locationCode is required" }, { status: 400 });
+  }
+  if (!isEmptyConfirmation && (body.countedQty === undefined || isNaN(countedQty) || countedQty < 0)) {
+    return NextResponse.json(
+      { error: "scanned and a non-negative countedQty are required (or leave both blank to mark the location empty)" },
+      { status: 400 }
+    );
+  }
+
+  // A per-SKU session (SOSKU-...) only counts the SKUs that were added to it,
+  // and can't take an empty-location confirmation (there's no "location"
+  // scope to confirm empty).
+  const isSkuSession = isSkuOpname(opnameNumber);
+
+  if (isSkuSession && isEmptyConfirmation) {
+    return NextResponse.json(
+      { error: "This is a per-SKU opname — enter the SKU's quantity for the location (0 if none)." },
+      { status: 400 }
+    );
+  }
+
+  const [location] = await db.select().from(locations).where(eq(locations.code, locationCode));
+  if (!location) {
+    return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
+  }
+
+  let item: typeof items.$inferSelect | null = null;
+  if (!isEmptyConfirmation) {
+    const label = await normalizeLabel(db, rawScanned);
+    const sku = extractSku(label);
+    if (!sku) {
+      return NextResponse.json({ error: "Couldn't parse a SKU" }, { status: 400 });
+    }
+
+    [item] = await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)));
+    if (!item) {
+      return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+    }
+
+    if (isSkuSession) {
+      const [skuRow] = await db
+        .select({ id: stockOpnameSkus.id })
+        .from(stockOpnameSkus)
+        .where(and(eq(stockOpnameSkus.opnameNumber, opnameNumber), eq(stockOpnameSkus.itemId, item.id)));
+      if (!skuRow) {
+        return NextResponse.json(
+          { error: `SKU ${item.sku} belum ditambahkan ke opname ini` },
+          { status: 409 }
+        );
+      }
+    }
+  }
+
+  // Register this location into the session if it isn't already part of
+  // it — this is what makes a custom/real-time session grow as the PIC
+  // physically visits places, rather than needing a pre-planned list.
+  const [existingLocationLink] = await db
+    .select()
+    .from(stockOpnameLocations)
+    .where(
+      and(
+        eq(stockOpnameLocations.opnameNumber, opnameNumber),
+        eq(stockOpnameLocations.locationId, location.id)
+      )
+    );
+
+  if (!existingLocationLink) {
+    await db.insert(stockOpnameLocations).values({ opnameNumber, locationId: location.id });
+  }
+
+  // Snapshot the live system quantity to check the count against. For a
+  // normal count that's just this exact location+item. For an empty
+  // confirmation there's no single item to compare, so it's the SYSTEM'S
+  // TOTAL quantity across every item at the location — if that's nonzero,
+  // the resulting difference correctly flags "system expected stock here,
+  // PIC found none".
+  let systemQty: number;
+  if (item) {
+    const [stockRow] = await db
+      .select()
+      .from(locationStock)
+      .where(and(eq(locationStock.locationId, location.id), eq(locationStock.itemId, item.id)));
+    systemQty = stockRow?.quantity ?? 0;
+  } else {
+    const allStockRows = await db
+      .select({ quantity: locationStock.quantity })
+      .from(locationStock)
+      .where(eq(locationStock.locationId, location.id));
+    systemQty = allStockRows.reduce((sum, r) => sum + r.quantity, 0);
+  }
+
+  const difference = countedQty - systemQty;
+
+  // Snapshot what the system expected here at this exact moment — the
+  // meaning depends on whether a SKU was actually counted:
+  //   - Normal count (item present): only THIS item's own snapshot
+  //     matters — not every other SKU that happens to share the same
+  //     FLOOR cell. If the system had nothing recorded for this exact
+  //     item here, systemSku stays null even if other SKUs are present.
+  //   - Empty confirmation (item is null — PIC found nothing here):
+  //     there's no single item to check against, so this snapshots
+  //     EVERY SKU the system had recorded at the location, so the report
+  //     can correctly flag "system expected something here, PIC found
+  //     nothing" as a mismatch.
+  let systemSku: string | null = null;
+  if (item) {
+    systemSku = systemQty !== 0 ? item.sku : null;
+  } else {
+    const allStockAtLocation = await db
+      .select({ itemId: locationStock.itemId, quantity: locationStock.quantity })
+      .from(locationStock)
+      .where(eq(locationStock.locationId, location.id));
+
+    const nonZeroItemIds = allStockAtLocation.filter((r) => r.quantity !== 0).map((r) => r.itemId);
+    if (nonZeroItemIds.length > 0) {
+      const systemItems = await db.select({ sku: items.sku }).from(items).where(inArray(items.id, nonZeroItemIds));
+      systemSku = systemItems.map((i) => i.sku).join(", ") || null;
+    }
+  }
+
+  const [existingLine] = await db
+    .select()
+    .from(stockOpnameItems)
+    .where(
+      and(
+        eq(stockOpnameItems.opnameNumber, opnameNumber),
+        eq(stockOpnameItems.locationId, location.id),
+        item ? eq(stockOpnameItems.itemId, item.id) : isNull(stockOpnameItems.itemId)
+      )
+    );
+
+  // If this is an edit of an already-saved line, find that original row
+  // (by the rack/floor rule above) and, if it isn't the same row we
+  // already resolved for the (possibly new) location+item, remove it so
+  // the edit doesn't leave a stale duplicate behind.
+  if (originalLocationCode) {
+    const originalLocation = await getLocationByCode(db, originalLocationCode);
+
+    if (originalLocation) {
+      let originalLine;
+
+      if (isSingleSku(originalLocation.rules)) {
+        [originalLine] = await db
+          .select()
+          .from(stockOpnameItems)
+          .where(
+            and(
+              eq(stockOpnameItems.opnameNumber, opnameNumber),
+              eq(stockOpnameItems.locationId, originalLocation.id)
+            )
+          );
+      } else if (!originalRawScanned) {
+        // Mixed-SKU locations (Floor and other types allowing more than
+        // 1 SKU) can hold several SKUs, but
+        // an empty confirmation is still unique per location — so if the
+        // line being edited WAS an empty confirmation (no original SKU
+        // sent), find it the same way regardless of location type.
+        [originalLine] = await db
+          .select()
+          .from(stockOpnameItems)
+          .where(
+            and(
+              eq(stockOpnameItems.opnameNumber, opnameNumber),
+              eq(stockOpnameItems.locationId, originalLocation.id),
+              isNull(stockOpnameItems.itemId)
+            )
+          );
+      } else if (originalRawScanned) {
+        const originalLabel = await normalizeLabel(db, originalRawScanned);
+        const originalSku = extractSku(originalLabel);
+        if (originalSku) {
+          const [originalItem] = await db
+            .select()
+            .from(items)
+            .where(or(eq(items.sku, originalSku), eq(items.legacySku, originalSku)));
+          if (originalItem) {
+            [originalLine] = await db
+              .select()
+              .from(stockOpnameItems)
+              .where(
+                and(
+                  eq(stockOpnameItems.opnameNumber, opnameNumber),
+                  eq(stockOpnameItems.locationId, originalLocation.id),
+                  eq(stockOpnameItems.itemId, originalItem.id)
+                )
+              );
+          }
+        }
+      }
+
+      if (originalLine && (!existingLine || originalLine.id !== existingLine.id)) {
+        await db.delete(stockOpnameItems).where(eq(stockOpnameItems.id, originalLine.id));
+      }
+    }
+  }
+
+  let result;
+  const previousQty = existingLine?.countedQty ?? 0;
+  if (existingLine) {
+    [result] = await db
+      .update(stockOpnameItems)
+      .set({ systemQty, systemSku, countedQty, difference, countedAt: new Date(), countedBy: session.userId })
+      .where(eq(stockOpnameItems.id, existingLine.id))
+      .returning();
+  } else {
+    [result] = await db
+      .insert(stockOpnameItems)
+      .values({
+        opnameNumber,
+        locationId: location.id,
+        itemId: item?.id ?? null,
+        systemQty,
+        systemSku,
+        countedQty,
+        difference,
+        countedAt: new Date(),
+        countedBy: session.userId,
+      })
+      .returning();
+  }
+
+  // Log this commit as a history event — but only when it actually changed
+  // the total. Re-saving an unchanged value (e.g. tapping into a line and
+  // out again without editing) isn't something worth showing in the
+  // "what was typed in" history.
+  const delta = countedQty - previousQty;
+  if (delta !== 0) {
+    await db.insert(stockOpnameCountEvents).values({
+      opnameNumber,
+      locationId: location.id,
+      itemId: item?.id ?? null,
+      delta,
+      resultingTotal: countedQty,
+      userId: session.userId,
+    });
+  }
+
+  return NextResponse.json({
+    ...result,
+    itemSku: item?.sku ?? null,
+    itemName: item?.name ?? null,
+    locationCode: location.code,
+  });
+}

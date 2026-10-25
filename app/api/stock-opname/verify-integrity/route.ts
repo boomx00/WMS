@@ -1,0 +1,260 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { locations, items, locationStock } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
+import * as XLSX from "xlsx";
+
+// Expected columns (header text, whitespace/case-insensitive):
+//   LOC | Kode Material | SKU AWAL | PALET | BOX/PALET | TOTAL BOX
+//
+// Matching rule: LOC -> locations.code, Kode Material -> items.sku.
+// SKU AWAL is informational only, never used for matching.
+// TOTAL BOX (from the file) is compared against the live location_stock
+// quantity for that location+item. Read-only report — nothing is written.
+
+function normalizeHeader(h: string): string {
+  return h.toString().trim().toUpperCase().replace(/\s+/g, "");
+}
+
+const HEADER_MAP: Record<string, string> = {
+  LOC: "loc",
+  KODEMATERIAL: "kodeMaterial",
+  SKUAWAL: "skuAwal",
+  PALET: "palet",
+  "BOX/PALET": "boxPerPalet",
+  TOTALBOX: "totalBox",
+};
+
+function toNumber(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(String(value).replace(/,/g, "").trim());
+  return isNaN(n) ? null : n;
+}
+
+// Source files mark a blank cell with sentinel text rather than leaving it
+// empty — "N/A" in Kode Material, "KOSONG" ("empty" in Indonesian) in SKU
+// AWAL. Either marker, in either column, is normalized to "" so these rows
+// are treated as genuinely missing data (INVALID_ROW) rather than as a
+// real material code that just doesn't match anything (UNKNOWN_SKU).
+const EMPTY_MARKERS = new Set(["N/A", "NA", "KOSONG", "-", ""]);
+
+function cleanValue(raw: unknown): string {
+  const v = String(raw ?? "").trim();
+  return EMPTY_MARKERS.has(v.toUpperCase()) ? "" : v;
+}
+
+type ReportRow = {
+  rowNumber: number;
+  loc: string;
+  kodeMaterial: string;
+  skuAwal: string;
+  systemSkuAtLocation: string | null;
+  skuMatch: "MATCH" | "MISMATCH" | null;
+  totalSystemInventory: number | null;
+  palet: number | null;
+  boxPerPalet: number | null;
+  totalBox: number | null;
+  systemQty: number | null;
+  difference: number | null;
+  status: "MATCH" | "MISMATCH" | "UNKNOWN_LOCATION" | "UNKNOWN_SKU" | "INVALID_ROW";
+};
+
+export async function POST(req: NextRequest) {
+  const formData = await req.formData();
+  const file = formData.get("file");
+
+  if (!file || !(file instanceof File)) {
+    return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+  }
+
+  let rawRows: Record<string, unknown>[];
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+    const firstSheetName = workbook.SheetNames[0];
+    if (!firstSheetName) {
+      return NextResponse.json({ error: "The file has no sheets" }, { status: 400 });
+    }
+    const sheet = workbook.Sheets[firstSheetName];
+    rawRows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  } catch {
+    return NextResponse.json({ error: "Couldn't read this file — is it a valid .xlsx/.xls?" }, { status: 400 });
+  }
+
+  if (rawRows.length === 0) {
+    return NextResponse.json({ error: "The file has no data rows" }, { status: 400 });
+  }
+
+  // Normalize each row's headers to our internal keys.
+  const normalizedRows = rawRows.map((raw) => {
+    const row: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      const mapped = HEADER_MAP[normalizeHeader(key)];
+      if (mapped) row[mapped] = value;
+    }
+    return row;
+  });
+
+  const missingHeaders = ["loc", "kodeMaterial", "totalBox"].filter(
+    (required) => !normalizedRows.some((r) => r[required] !== undefined)
+  );
+  if (missingHeaders.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Couldn't find expected column(s) in the file: ${missingHeaders
+          .map((k) => (k === "loc" ? "LOC" : k === "kodeMaterial" ? "Kode Material" : "TOTAL BOX"))
+          .join(", ")}`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // Preload all locations and items once instead of querying per row.
+  const allLocations = await db.select().from(locations);
+  const locationByCode = new Map(allLocations.map((l) => [l.code.trim().toUpperCase(), l]));
+
+  const allItems = await db.select().from(items);
+  const itemBySku = new Map(allItems.map((i) => [i.sku.trim().toUpperCase(), i]));
+  const itemById = new Map(allItems.map((i) => [i.id, i]));
+
+  const stockRows = await db.select().from(locationStock);
+  const stockByLocationAndItem = new Map(stockRows.map((s) => [`${s.locationId}:${s.itemId}`, s.quantity]));
+
+  const stockTotalByLocation = new Map<number, number>();
+  // What the system actually thinks is at each location — independent of
+  // whatever the file's Kode Material claims. This is the "ground truth"
+  // to compare the file against, not just a lookup keyed by Kode Material.
+  const systemSkusByLocation = new Map<number, string[]>();
+  // Total system inventory per item, across every location — separate
+  // from systemQty (which is scoped to just the one location on this row).
+  const totalInventoryByItemId = new Map<number, number>();
+  for (const s of stockRows) {
+    stockTotalByLocation.set(s.locationId, (stockTotalByLocation.get(s.locationId) ?? 0) + s.quantity);
+    totalInventoryByItemId.set(s.itemId, (totalInventoryByItemId.get(s.itemId) ?? 0) + s.quantity);
+    if (s.quantity === 0) continue;
+    const item = itemById.get(s.itemId);
+    if (!item) continue;
+    if (!systemSkusByLocation.has(s.locationId)) systemSkusByLocation.set(s.locationId, []);
+    systemSkusByLocation.get(s.locationId)!.push(item.sku);
+  }
+
+  const report: ReportRow[] = normalizedRows.map((row, idx) => {
+    const loc = cleanValue(row.loc);
+    const kodeMaterial = cleanValue(row.kodeMaterial);
+    const skuAwal = cleanValue(row.skuAwal);
+    const palet = toNumber(row.palet);
+    const boxPerPalet = toNumber(row.boxPerPalet);
+    const totalBox = toNumber(row.totalBox);
+
+    const base = { rowNumber: idx + 2, loc, kodeMaterial, skuAwal, palet, boxPerPalet, totalBox };
+
+    if (!loc) {
+      return {
+        ...base,
+        systemSkuAtLocation: null,
+        skuMatch: null,
+        totalSystemInventory: null,
+        systemQty: null,
+        difference: null,
+        status: "INVALID_ROW" as const,
+      };
+    }
+
+    const location = locationByCode.get(loc.toUpperCase());
+    if (!location) {
+      return {
+        ...base,
+        systemSkuAtLocation: null,
+        skuMatch: null,
+        totalSystemInventory: null,
+        systemQty: null,
+        difference: null,
+        status: "UNKNOWN_LOCATION" as const,
+      };
+    }
+
+    // Ground truth: whatever the system's location_stock actually has
+    // recorded at this location, regardless of what Kode Material claims.
+    // This is what the file is really being checked against.
+    const skusHere = systemSkusByLocation.get(location.id) ?? [];
+    const systemSkuAtLocation = skusHere.length > 0 ? skusHere.join(", ") : "—";
+    const skuMatch: "MATCH" | "MISMATCH" = !kodeMaterial
+      ? skusHere.length === 0
+        ? "MATCH"
+        : "MISMATCH"
+      : skusHere.some((s) => s.toUpperCase() === kodeMaterial.toUpperCase())
+        ? "MATCH"
+        : "MISMATCH";
+
+    // Kode Material is empty ("N/A" in the source file) — this means the
+    // slot is genuinely empty in real life, not that a row is malformed.
+    // The useful check here is different: does the system also think
+    // nothing is stored at this location? If the system still has stock
+    // recorded here, that's a real discrepancy (physical count says empty,
+    // system disagrees) — not something to silently skip.
+    if (!kodeMaterial) {
+      const systemQty = stockTotalByLocation.get(location.id) ?? 0;
+      const fileQty = totalBox ?? 0;
+      const difference = fileQty - systemQty;
+      return {
+        ...base,
+        systemSkuAtLocation,
+        skuMatch,
+        totalSystemInventory: null,
+        systemQty,
+        difference,
+        status: difference === 0 ? ("MATCH" as const) : ("MISMATCH" as const),
+      };
+    }
+
+    if (totalBox === null) {
+      return {
+        ...base,
+        systemSkuAtLocation,
+        skuMatch,
+        totalSystemInventory: null,
+        systemQty: null,
+        difference: null,
+        status: "INVALID_ROW" as const,
+      };
+    }
+
+    const item = itemBySku.get(kodeMaterial.toUpperCase());
+    if (!item) {
+      return {
+        ...base,
+        systemSkuAtLocation,
+        skuMatch,
+        totalSystemInventory: null,
+        systemQty: null,
+        difference: null,
+        status: "UNKNOWN_SKU" as const,
+      };
+    }
+
+    const systemQty = stockByLocationAndItem.get(`${location.id}:${item.id}`) ?? 0;
+    const difference = totalBox - systemQty;
+    const totalSystemInventory = totalInventoryByItemId.get(item.id) ?? 0;
+
+    return {
+      ...base,
+      systemSkuAtLocation,
+      skuMatch,
+      totalSystemInventory,
+      systemQty,
+      difference,
+      status: difference === 0 ? ("MATCH" as const) : ("MISMATCH" as const),
+    };
+  });
+
+  const summary = {
+    totalRows: report.length,
+    matches: report.filter((r) => r.status === "MATCH").length,
+    mismatches: report.filter((r) => r.status === "MISMATCH").length,
+    unknownLocations: report.filter((r) => r.status === "UNKNOWN_LOCATION").length,
+    unknownSkus: report.filter((r) => r.status === "UNKNOWN_SKU").length,
+    invalidRows: report.filter((r) => r.status === "INVALID_ROW").length,
+  };
+
+  return NextResponse.json({ summary, report });
+}

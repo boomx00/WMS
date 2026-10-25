@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Chinese characters read small at Latin sizes; bump every Tailwind text
+   size by one multiplier. Only font sizes change — spacing stays the same. */
+html[lang="zh"] {
+  --zh-scale: 1.15;
+
+  --text-xs: calc(0.65rem * var(--zh-scale));
+  --text-sm: calc(0.75rem * var(--zh-scale));
+  --text-base: calc(1rem * var(--zh-scale));
+  --text-lg: calc(1.125rem * var(--zh-scale));
+  --text-xl: calc(1.25rem * var(--zh-scale));
+  --text-2xl: calc(1.5rem * var(--zh-scale));
+  --text-3xl: calc(1.875rem * var(--zh-scale));
+}
+
+/* Text with no text-* class (plain body text) */
+html[lang="zh"] body {
+  font-size: calc(1rem * var(--zh-scale));
+}

@@ -1,0 +1,788 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import VerifyStockIntegrityPanel from "./VerifyStockIntegrityPanel";
+import { formatDateTime } from "@/lib/formatDateTime";
+import SkuOpnameDetail, { type SkuDetailResponse } from "./SkuOpnameDetail";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
+
+type Session = {
+  opnameNumber: string;
+  notes: string | null;
+  createdAt: string | Date;
+  commencedAt: string | Date | null;
+  completedAt: string | Date | null;           // ADD
+  totalLines: number;
+  countedLines: number;
+  discrepancies: number;
+  status: string;
+  assignedToUsername: string | null;
+  confirmedAt: string | Date | null;
+  confirmDescription: string | null;
+  confirmedAdjustmentCode: string | null;
+  // Per-SKU (SOSKU-) sessions only — summed across every SKU in the session.
+  isSkuSession: boolean;
+  skuCount: number;
+  skuLockedQty: number;
+  skuCountedQty: number;
+};
+
+const STATUS_STYLES: Record<string, string> = {
+  PENDING: "bg-zinc-800 text-zinc-400",
+  IN_PROGRESS: "bg-amber-950 text-amber-300",
+  DONE: "bg-emerald-950 text-emerald-300",
+  CONFIRMED: "bg-blue-950 text-blue-300",
+};
+
+export default function StockOpnameClient({
+  sessions,
+  users,
+}: {
+  sessions: Session[];
+  users: { username: string }[];
+}) {
+  const [activeTab, setActiveTab] = useState<"opname" | "verify">("opname");
+  const router = useRouter();
+  const labels = usePageLabels("stock_opname");
+  const [opnameNumber, setOpnameNumber] = useState("");
+  const [locationCodes, setLocationCodes] = useState("");
+  const [assignedToUsername, setAssignedToUsername] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    setLoading(true);
+
+    const codes = locationCodes
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+    const res = await fetch("/api/stock-opname", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        opnameNumber: opnameNumber.trim(),
+        notes: notes.trim(),
+        locationCodes: codes,
+        assignedToUsername: assignedToUsername || undefined,
+      }),
+    });
+    setLoading(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to create opname session");
+      return;
+    }
+
+    const data = await res.json();
+    setSuccess(`Created ${opnameNumber.trim()} with ${data.locationCount} location(s) to count.`);
+    setOpnameNumber("");
+    setLocationCodes("");
+    setAssignedToUsername("");
+    setNotes("");
+    router.refresh();
+  }
+
+  return (
+    <div>
+      <div className="flex gap-1 mb-6 border-b border-zinc-800">
+        <TabButton label="Stock Opname" active={activeTab === "opname"} onClick={() => setActiveTab("opname")} />
+        <TabButton
+          label="Verify Stock Integrity"
+          active={activeTab === "verify"}
+          onClick={() => setActiveTab("verify")}
+        />
+      </div>
+
+      {activeTab === "verify" ? (
+        <VerifyStockIntegrityPanel />
+      ) : (
+        <div>
+          <form onSubmit={handleCreate} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4 mb-8">
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Opname Number</label>
+          <input
+            type="text"
+            value={opnameNumber}
+            onChange={(e) => setOpnameNumber(e.target.value)}
+            placeholder="OPNAME-202608-01"
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">
+            Locations (comma-separated: exact codes, or "Rack A" / "Rack B" for a whole area — leave blank for
+            everywhere)
+          </label>
+          <input
+            type="text"
+            value={locationCodes}
+            onChange={(e) => setLocationCodes(e.target.value)}
+            placeholder="Rack A, Rack B, FLOOR"
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Assign to (PIC)</label>
+          <select
+            value={assignedToUsername}
+            onChange={(e) => setAssignedToUsername(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+          >
+            <option value="">Unassigned</option>
+            {users.map((u) => (
+              <option key={u.username} value={u.username}>
+                {u.username}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Notes (optional)</label>
+          <input
+            type="text"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+          />
+        </div>
+
+        <button
+          type="submit"
+          disabled={loading || !opnameNumber}
+          className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+        >
+          {loading ? "Creating..." : "Create Opname Session"}
+        </button>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        {success && <p className="text-xs text-emerald-400">{success}</p>}
+      </form>
+
+      <div className="space-y-3">
+        {sessions.length === 0 ? (
+          <div className="border border-dashed border-zinc-800 rounded-lg px-8 py-12 text-center text-zinc-600 text-sm">
+            No opname sessions yet.
+          </div>
+        ) : (
+          sessions.map((s) => <OpnameSessionRow key={s.opnameNumber} session={s} labels={labels} />)
+        )}
+      </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-4 py-2 text-sm border-b-2 -mb-px transition-colors ${
+        active
+          ? "border-amber-500 text-amber-500"
+          : "border-transparent text-zinc-500 hover:text-zinc-300"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+type ReportItem = {
+  itemId: number | null;
+  itemSku: string | null;
+  itemName: string;
+  systemQty: number;
+  systemSku: string;
+  countedQty: number;
+  difference: number;
+  countedAt: string | null;
+  countedByUsername: string | null;
+  currentItemQty: number | null; // ADD
+  skuMatch: "MATCH" | "MISMATCH";
+};
+type ReportLocation = {
+  locationCode: string;
+  counted: boolean;
+  currentSystemStock: { sku: string; name: string; quantity: number }[];
+  currentSystemQty: number;
+  items: ReportItem[];
+};
+type ReportResponse = {
+  opnameNumber: string;
+  notes: string | null;
+  assignedToUsername: string | null;
+  totalLocations: number;
+  countedLocations: number;
+  report: ReportLocation[];
+};
+
+function CurrentSystemCell({ entries }: { entries: { sku: string; name: string; quantity: number }[] }) {
+  if (entries.length === 0) {
+    return <span className="text-zinc-700">—</span>;
+  }
+  return (
+    <div className="space-y-0.5">
+      {entries.map((e, i) => (
+        <div key={i}>
+          <span className="font-mono text-zinc-300">{e.sku}</span>{" "}
+          <span className="text-zinc-500">{e.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DifferenceBadge({ difference }: { difference: number }) {
+  if (difference === 0) {
+    return <span className="text-emerald-400 font-mono">Match</span>;
+  }
+  const sign = difference > 0 ? "+" : "";
+  return (
+    <span className={`font-mono ${difference > 0 ? "text-amber-400" : "text-red-400"}`}>
+      {sign}
+      {difference.toLocaleString()}
+    </span>
+  );
+}
+
+function OpnameSessionRow({ session, labels }: { session: Session; labels: Record<string, string> }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [report, setReport] = useState<ReportResponse | null>(null);
+  const [skuDetail, setSkuDetail] = useState<SkuDetailResponse | null>(null);
+  const isSku = session.isSkuSession;
+  const [loading, setLoading] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustResult, setAdjustResult] = useState<string | null>(null);
+  const [adjustError, setAdjustError] = useState<string | null>(null);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  async function toggle() {
+    if (!open && !(isSku ? skuDetail : report)) {
+      await refetchReport();
+    }
+    setOpen((prev) => !prev);
+  }
+
+  async function refetchReport() {
+    setLoading(true);
+    if (isSku) {
+      const res = await fetch(`/api/stock-opname/sku/${session.opnameNumber}`);
+      if (res.ok) setSkuDetail(await res.json());
+    } else {
+      const res = await fetch(`/api/stock-opname/${session.opnameNumber}/report`);
+      if (res.ok) setReport(await res.json());
+    }
+    setLoading(false);
+  }
+
+  async function handleAdjust() {
+    setAdjusting(true);
+    setAdjustError(null);
+    setAdjustResult(null);
+
+    const res = await fetch(`/api/stock-opname/${session.opnameNumber}/adjust`, {
+      method: "POST",
+    });
+    setAdjusting(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setAdjustError(data.error ?? "Failed to adjust inventory");
+      return;
+    }
+
+    const data = await res.json();
+    setAdjustResult(
+      `Applied ${data.applied} adjustment(s), ${data.skipped} already matched${
+        data.failed > 0 ? `, ${data.failed} failed (see console)` : ""
+      }.`
+    );
+    if (data.failed > 0) {
+      console.warn("Stock opname adjust failures:", data.failures);
+    }
+    await refetchReport();
+    router.refresh();
+  }
+
+  return (
+    <div className="border border-zinc-800 rounded-lg bg-zinc-900/30 overflow-hidden">
+      <button
+        onClick={toggle}
+        className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-900/60 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <span className={`text-zinc-500 text-xs transition-transform ${open ? "rotate-90" : ""}`}>▶</span>
+          <span className="font-mono text-amber-500 text-sm">{session.opnameNumber}</span>
+          {session.assignedToUsername && (
+            <span className="text-xs text-zinc-500">· PIC: {session.assignedToUsername}</span>
+          )}
+                    <span className="text-xs text-zinc-600" suppressHydrationWarning>
+            · Commenced: {session.commencedAt ? formatDateTime(session.commencedAt) : "Not started"}
+          </span>
+          {session.completedAt && (
+            <span className="text-xs text-zinc-600" suppressHydrationWarning>
+              · Finished (PDA): {formatDateTime(session.completedAt)}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-4">
+          {isSku ? (
+            <span className="flex items-center gap-3 text-xs text-zinc-500">
+              <span>{session.skuCount} SKU</span>
+              <span>
+                Locked qty: <span className="font-mono text-zinc-300">{session.skuLockedQty.toLocaleString()}</span>
+              </span>
+              <span>
+                Stock opname qty:{" "}
+                <span className="font-mono text-zinc-300">{session.skuCountedQty.toLocaleString()}</span>
+              </span>
+              <DifferenceBadge difference={session.skuCountedQty - session.skuLockedQty} />
+            </span>
+          ) : (
+            <span className="text-xs text-zinc-500">
+              {session.countedLines}/{session.totalLines} counted
+            </span>
+          )}
+          <span
+            className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${STATUS_STYLES[session.status]}`}
+          >
+            {session.status.replace("_", " ")}
+          </span>
+        </div>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4">
+          {/* {(session.status === "DONE" || session.status === "CONFIRMED") && (
+            <div className="mb-4 flex items-center gap-3">
+              <button
+                onClick={handleAdjust}
+                disabled={adjusting}
+                className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
+              >
+                {adjusting ? "Adjusting..." : "Adjust"}
+              </button>
+              {adjustResult && <span className="text-xs text-emerald-400">{adjustResult}</span>}
+              {adjustError && <span className="text-xs text-red-400">{adjustError}</span>}
+            </div>
+          )} */}
+
+                    {session.status !== "CONFIRMED" && (
+            <div className="mb-4">
+              <button
+                onClick={() => setConfirmModalOpen(true)}
+                className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          )}
+
+          {session.status === "CONFIRMED" && (
+            <div className="mb-4 border border-blue-900 bg-blue-950/30 rounded-md px-3 py-2 text-xs text-blue-300 space-y-1">
+              <div>Confirmed {session.confirmedAt ? formatDateTime(session.confirmedAt) : ""}</div>
+              {session.confirmDescription && <div className="text-blue-200">{session.confirmDescription}</div>}
+              {session.confirmedAdjustmentCode && (
+                <div className="font-mono">Adjustment: {session.confirmedAdjustmentCode}</div>
+              )}
+            </div>
+          )}
+
+          {confirmModalOpen && (
+            <ConfirmModal
+              opnameNumber={session.opnameNumber}
+              onClose={() => setConfirmModalOpen(false)}
+              onConfirmed={() => {
+                setConfirmModalOpen(false);
+                refetchReport();
+                router.refresh();
+              }}
+            />
+          )}
+
+          {loading ? (
+            <p className="text-xs text-zinc-600">Loading...</p>
+          ) : isSku ? (
+            skuDetail ? (
+              <SkuOpnameDetail detail={skuDetail} />
+            ) : (
+              <p className="text-xs text-red-400">Failed to load report</p>
+            )
+          ) : !report ? (
+            <p className="text-xs text-red-400">Failed to load report</p>
+          ) : (
+            <table className="w-full text-xs border-separate border-spacing-0">
+              <thead>
+                <tr className="text-zinc-500 text-left border-t border-zinc-800">
+                  <th className="py-2 px-3 font-medium">{labels.th_location}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_counted_sku}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_system_sku_at_count}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_sku_match}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_counted_qty}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_system_qty_at_count}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_difference}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_current_system_sku}</th>
+                  <th className="py-2 px-3 font-medium text-right">{labels.th_current_system_qty}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_by}</th>
+                  <th className="py-2 px-3 font-medium">{labels.th_counted_at}</th>
+                  <th className="py-2 px-3 font-medium"></th>
+                </tr>
+              </thead>
+                            <tbody>
+                {report.report.flatMap((loc) =>
+                  loc.items.length === 0 ? (
+                    <tr key={loc.locationCode} className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors">
+                      <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
+                      <td className="py-1.5 px-3 text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 px-3 text-right text-zinc-700">—</td>
+                      <td className="py-1.5 px-3">
+                        <CurrentSystemCell entries={loc.currentSystemStock} />
+                      </td>
+                      <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
+                        {loc.currentSystemQty.toLocaleString()}
+                      </td>
+                     <td colSpan={3} className="py-1.5 px-3 text-zinc-700">
+                        Not counted yet
+                      </td>
+                    </tr>
+                  ) : (
+                    loc.items.map((item, i) => (
+                      <tr key={`${loc.locationCode}-${i}`} className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors">
+                        <td className="py-1.5 px-3 font-mono text-amber-500">{loc.locationCode}</td>
+                        <td className="py-1.5 px-3">
+                          {item.itemSku ? (
+                            <>
+                              <span className="font-mono text-zinc-300">{item.itemSku}</span>{" "}
+                              <span className="text-zinc-500">{item.itemName}</span>
+                            </>
+                          ) : (
+                            <span className="text-zinc-500 italic">{item.itemName}</span>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-3 font-mono text-zinc-400">{item.systemSku}</td>
+                        <td className="py-1.5 px-3">
+                          {item.skuMatch === "MATCH" ? (
+                            <span className="text-emerald-400">Match</span>
+                          ) : (
+                            <span className="text-red-400">Mismatch</span>
+                          )}
+                        </td>
+                        <td className="py-1.5 px-3 text-right font-mono">
+                          {item.countedQty.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
+                          {item.systemQty.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 px-3 text-right">
+                          <DifferenceBadge difference={item.difference} />
+                        </td>
+                        <td className="py-1.5 px-3">
+                          {item.itemId !== null ? (
+                            item.currentItemQty && item.currentItemQty > 0 ? (
+                              <div>
+                                <span className="font-mono text-zinc-300">{item.itemSku}</span>{" "}
+                                <span className="text-zinc-500">{item.itemName}</span>
+                              </div>
+                            ) : (
+                              <span className="text-zinc-700">—</span>
+                            )
+                          ) : (
+                            <CurrentSystemCell entries={loc.currentSystemStock} />
+                          )}
+                        </td>
+                        <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
+                          {item.itemId !== null
+                            ? (item.currentItemQty ?? 0).toLocaleString()
+                            : loc.currentSystemQty.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 px-3 text-zinc-500">{item.countedByUsername ?? "—"}</td>
+                        <td className="py-1.5 px-3 text-zinc-500">
+                          {formatDateTime(item.countedAt)}
+                        </td>
+                        <td className="py-1.5 px-3 text-right">
+                          {item.itemId === null ? (
+                            item.difference === 0 ? (
+                              <span className="text-[10px] text-zinc-700">Matched</span>
+                            ) : (
+                              <span className="text-[10px] text-zinc-600">Manual review</span>
+                            )
+                          ) : (
+                            <span className="text-[10px] text-zinc-600">Manual review</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfirmPanel({
+  opnameNumber,
+  alreadyFinished,
+  onConfirmed,
+}: {
+  opnameNumber: string;
+  alreadyFinished: boolean;
+  onConfirmed: () => void;
+}) {
+  const [description, setDescription] = useState("");
+  const [attachBulkAdjustment, setAttachBulkAdjustment] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+
+  async function handleConfirm() {
+    if (!window.confirm("Confirm this stock opname session? This cannot be undone.")) return;
+
+    setConfirming(true);
+    setError(null);
+    setResult(null);
+
+    const res = await fetch(`/api/stock-opname/${opnameNumber}/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: description.trim(), attachBulkAdjustment }),
+    });
+    setConfirming(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to confirm");
+      return;
+    }
+
+    const data = await res.json();
+    setResult(
+      data.bulkAdjustment
+        ? `Confirmed — adjustment ${data.bulkAdjustment.adjustmentCode} applied (${data.bulkAdjustment.applied} line(s)).`
+        : "Confirmed."
+    );
+    onConfirmed();
+  }
+
+  return (
+    <div className="mb-4 border border-zinc-800 rounded-lg p-4 bg-zinc-900/50 space-y-3">
+      {!alreadyFinished && (
+        <p className="text-xs text-amber-400">
+          This session hasn&apos;t been marked Finished on the PDA yet — confirming here will finish and confirm it in one step.
+        </p>
+      )}
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">Confirmation description (optional)</label>
+        <input
+          type="text"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+        />
+      </div>
+
+      <label className="flex items-center gap-2 text-xs text-zinc-400">
+        <input
+          type="checkbox"
+          checked={attachBulkAdjustment}
+          onChange={(e) => setAttachBulkAdjustment(e.target.checked)}
+        />
+        Attach bulk adjustment (apply every counted discrepancy to system stock, tracked under one Adjustment ID)
+      </label>
+
+      <button
+        onClick={handleConfirm}
+        disabled={confirming}
+        className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition-colors"
+      >
+        {confirming ? "Confirming..." : "Confirm Opname"}
+      </button>
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+      {result && <p className="text-xs text-emerald-400">{result}</p>}
+    </div>
+  );
+}
+
+function AdjustLineButton({
+  opnameNumber,
+  locationCode,
+  itemId,
+  countedQty,
+  difference,
+  onAdjusted,
+}: {
+  opnameNumber: string;
+  locationCode: string;
+  itemId: number;
+  countedQty: number;
+  difference: number;
+  onAdjusted: () => void;
+}) {
+  const [adjusting, setAdjusting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  if (difference === 0) {
+    return <span className="text-[10px] text-zinc-700">Matched</span>;
+  }
+
+  async function handleClick() {
+    if (
+      !window.confirm(
+        `Set system quantity for this SKU at ${locationCode} to the counted amount (${countedQty.toLocaleString()})?`
+      )
+    ) {
+      return;
+    }
+
+    setAdjusting(true);
+    setError(null);
+
+    const res = await fetch(`/api/stock-opname/${opnameNumber}/adjust-line`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ locationCode, itemId, countedQty }),
+    });
+    setAdjusting(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to adjust");
+      return;
+    }
+
+    onAdjusted();
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        onClick={handleClick}
+        disabled={adjusting}
+        className="text-[10px] text-amber-500 hover:text-amber-400 disabled:opacity-50"
+      >
+        {adjusting ? "Adjusting..." : "Adjust"}
+      </button>
+      {error && <span className="text-[10px] text-red-400">{error}</span>}
+    </div>
+  );
+}
+
+
+function ConfirmModal({
+  opnameNumber,
+  onClose,
+  onConfirmed,
+}: {
+  opnameNumber: string;
+  onClose: () => void;
+  onConfirmed: () => void;
+}) {
+  const [adjustments, setAdjustments] = useState<{ id: number; adjustmentCode: string; description: string | null }[]>([]);
+  const [bulkAdjustmentCode, setBulkAdjustmentCode] = useState("");
+  const [description, setDescription] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/api/bulk-adjustments")
+      .then((res) => (res.ok ? res.json() : []))
+      .then(setAdjustments)
+      .catch(() => setAdjustments([]));
+  }, []);
+
+  async function handleConfirm() {
+    setConfirming(true);
+    setError(null);
+
+    const res = await fetch(`/api/stock-opname/${opnameNumber}/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ description: description.trim(), bulkAdjustmentCode: bulkAdjustmentCode.trim() }),
+    });
+    setConfirming(false);
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error ?? "Failed to confirm");
+      return;
+    }
+
+    onConfirmed();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 w-full max-w-md space-y-4">
+        <h3 className="text-sm font-semibold text-zinc-200">Confirm Stock Opname</h3>
+
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Bulk Adjustment ID (optional)</label>
+          <select
+            value={bulkAdjustmentCode}
+            onChange={(e) => setBulkAdjustmentCode(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-zinc-950 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+          >
+            <option value="">None</option>
+            {adjustments.map((a) => (
+              <option key={a.id} value={a.adjustmentCode}>
+                {a.adjustmentCode}
+                {a.description ? ` — ${a.description}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">Description (optional)</label>
+          <input
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full px-3 py-2 rounded-md bg-zinc-950 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+          />
+        </div>
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            disabled={confirming}
+            className="px-4 py-2 rounded-md border border-zinc-700 text-zinc-300 text-sm hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={confirming}
+            className="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-500 disabled:opacity-50 transition-colors"
+          >
+            {confirming ? "Confirming..." : "Finalize Confirm"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

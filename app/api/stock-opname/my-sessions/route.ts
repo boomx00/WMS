@@ -1,0 +1,53 @@
+import { NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { stockOpname, stockOpnameItems } from "@/db/schema";
+import { eq, and, notLike, desc, sql, inArray } from "drizzle-orm";
+import { getSession } from "@/lib/auth";
+import { SKU_OPNAME_PREFIX } from "@/lib/skuOpname";
+
+// GET /api/stock-opname/my-sessions
+// By-location sessions only — per-SKU sessions (SOSKU-...) have their own
+// list at GET /api/stock-opname/sku, so they don't show up under
+// "By Location" on the PDA.
+export async function GET() {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+  }
+
+  const sessions = await db
+    .select()
+    .from(stockOpname)
+    .where(and(eq(stockOpname.assignedTo, session.userId), notLike(stockOpname.opnameNumber, `${SKU_OPNAME_PREFIX}%`)))
+    .orderBy(desc(stockOpname.createdAt));
+
+  if (sessions.length === 0) return NextResponse.json([]);
+
+  const opnameNumbers = sessions.map((s) => s.opnameNumber);
+
+  const progressRows = await db
+    .select({
+      opnameNumber: stockOpnameItems.opnameNumber,
+      total: sql<number>`count(*)::int`,
+      counted: sql<number>`count(${stockOpnameItems.countedQty})::int`,
+    })
+    .from(stockOpnameItems)
+    .where(inArray(stockOpnameItems.opnameNumber, opnameNumbers))
+    .groupBy(stockOpnameItems.opnameNumber);
+
+  const progressMap = new Map(progressRows.map((r) => [r.opnameNumber, r]));
+
+const result = sessions.map((s) => {
+  const progress = progressMap.get(s.opnameNumber);
+  const total = progress?.total ?? 0;
+  const counted = progress?.counted ?? 0;
+  const status = s.completedAt
+    ? "DONE"
+    : total === 0 || counted === 0
+    ? "PENDING"
+    : "IN_PROGRESS";
+  return { opnameNumber: s.opnameNumber, notes: s.notes, totalLines: total, countedLines: counted, status };
+});
+
+  return NextResponse.json(result);
+}

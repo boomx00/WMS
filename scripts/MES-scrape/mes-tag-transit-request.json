@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "url": "https://mes.makuku.com/api/QueryOfTagTransitRecords/getTagTransitRecordData?timestamp=1788487501362&global_request_source=ort3vg",
+  "headers": {
+    "token": "[REDACTED]",
+    "orgid": "13ENF4134414F00005CQ00TLL5BX1F04",
+    "enterpriseid": "*",
+    "culture": "zh-CN",
+    "referer": "https://mes.makuku.com/h5/pages/REPORT/QueryOfTagTransitRecords/index.html?vct=20260904100452&moduleId=13EX6HLD72QF8002B4D8BTR6RDQ53ZF9",
+    "modulepage": "/h5/pages/REPORT/QueryOfTagTransitRecords/index.html",
+    "moduleid": "13EX6HLD72QF8002B4D8BTR6RDQ53ZF9",
+    "content-type": "application/json; charset=utf-8"
+  },
+  "postData": "{\"moCode\":\"\",\"status\":\"\",\"stockinBillNo\":\"\",\"workcenterCode\":\"\",\"stationCode\":\"\",\"labelNo\":\"\",\"mitemCode\":\"\",\"beginTime\":\"\",\"endTime\":\"\",\"start\":0,\"length\":20}"
+}
