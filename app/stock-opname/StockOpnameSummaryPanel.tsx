@@ -44,7 +44,14 @@ type SummaryResponse = {
   buckets: Bucket[];
   dates: string[];
   // cells[date] = every SOSKU session of that product that day, oldest first.
-  items: { itemId: number; sku: string; name: string; currentStock: number; cells: Record<string, Cell[]> }[];
+  items: {
+    itemId: number;
+    sku: string;
+    name: string;
+    currentStock: number;
+    currentStockByBucket: Record<string, number>; // "col:<id>" / "other" / "total"
+    cells: Record<string, Cell[]>;
+  }[];
 };
 
 type DetailLine = {
@@ -317,6 +324,20 @@ export default function StockOpnameSummaryPanel() {
     .filter((b) => excludedKeys.includes(b.key))
     .map((b) => (b.key === "other" ? labels.summary_other : b.name));
 
+  // Total stock beside each SKU: the full live total minus every unticked
+  // column (untick Export → each product's Export stock is taken off), the
+  // same rule as each date's Total.
+  const shownStock = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const item of data?.items ?? []) {
+      const byBucket = item.currentStockByBucket ?? { total: item.currentStock };
+      const excluded = excludedKeys.reduce((sum, key) => sum + (byBucket[key] ?? 0), 0);
+      map.set(item.itemId, (byBucket.total ?? item.currentStock) - excluded);
+    }
+    return map;
+  }, [data, excludedKeys]);
+  const stockOf = (itemId: number) => shownStock.get(itemId) ?? 0;
+
   const rows = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
@@ -340,10 +361,10 @@ export default function StockOpnameSummaryPanel() {
     const factor = sort.dir === "asc" ? 1 : -1;
     return [...filtered].sort((a, b) =>
       sort.key === "stock"
-        ? (a.currentStock - b.currentStock) * factor || a.sku.localeCompare(b.sku)
+        ? ((shownStock.get(a.itemId) ?? 0) - (shownStock.get(b.itemId) ?? 0)) * factor || a.sku.localeCompare(b.sku)
         : a.sku.localeCompare(b.sku, undefined, { numeric: true }) * factor
     );
-  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet, sort, excludedKeys]);
+  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet, sort, excludedKeys, shownStock]);
 
   function toggleBucket(key: string) {
     if (!data || !selected) return;
@@ -423,7 +444,7 @@ export default function StockOpnameSummaryPanel() {
     const body = rows.flatMap((item) => {
       const height = Math.max(1, ...data.dates.map((date) => item.cells[date]?.length ?? 0));
       return Array.from({ length: height }, (_, k) => {
-        const row: (string | number)[] = [item.sku, item.name, item.currentStock];
+        const row: (string | number)[] = [item.sku, item.name, stockOf(item.itemId)];
         for (const date of data.dates) {
           const cell = item.cells[date]?.[k];
           for (const b of buckets) {
@@ -611,6 +632,11 @@ export default function StockOpnameSummaryPanel() {
                         onSort={(k) => setSort((c) => nextSort(c, k))}
                         align="right"
                       />
+                      {excludedNames.length > 0 && (
+                        <div className="font-normal text-[8px] text-amber-500/80" title={excludedNames.join(", ")}>
+                          − {excludedNames.join(", ")}
+                        </div>
+                      )}
                     </div>
                     <span aria-hidden="true" />
                   </div>
@@ -712,10 +738,14 @@ export default function StockOpnameSummaryPanel() {
                                   <div className="text-zinc-400 whitespace-normal break-words">{item.name}</div>
                                 </div>
                                 <div
-                                  title={stockLabel}
-                                  className={`text-right font-mono ${item.currentStock === 0 ? "text-zinc-600" : "text-zinc-200"}`}
+                                  title={
+                                    excludedNames.length > 0
+                                      ? `${stockLabel} ${item.currentStock.toLocaleString()} − ${excludedNames.join(", ")}`
+                                      : stockLabel
+                                  }
+                                  className={`text-right font-mono ${stockOf(item.itemId) === 0 ? "text-zinc-600" : "text-zinc-200"}`}
                                 >
-                                  {item.currentStock.toLocaleString()}
+                                  {stockOf(item.itemId).toLocaleString()}
                                 </div>
                                 <button
                                   type="button"

@@ -22,12 +22,15 @@ export const dynamic = "force-dynamic";
 // one entry per SOSKU session, oldest first (the tab shows one sub-row each).
 // currentStock is the product's live Total Stock in the warehouse right now
 // (same rule as the Total Stock page: locations ticked "Counts in Total
-// Stock"), independent of the date filter.
+// Stock"), independent of the date filter. currentStockByBucket splits it
+// with the same keys as `buckets` — "col:<id>" for locations shown under
+// that column, "other" for counted locations with no column, and "total"
+// (= currentStock) — so the tab can leave unticked columns out of it.
 //   {
 //     warehouse: { id, name }, warehouses: [{ id, name, isActive }],
 //     buckets: [{ key, name }],      // "col:<id>" per column, "other", "total"
 //     dates: ["2026-10-20", ...],    // oldest first
-//     items: [{ itemId, sku, name, currentStock, cells: { [date]: [{ opnameNumber,
+//     items: [{ itemId, sku, name, currentStock, currentStockByBucket, cells: { [date]: [{ opnameNumber,
 //               lockedAt, status, by, buckets: { [key]: { system, counted } },
 //               unaccounted, adjustment }, ...] } }]
 //   }
@@ -54,15 +57,24 @@ export async function GET(req: NextRequest) {
     db
       .select({
         itemId: locationStock.itemId,
+        stockColumnId: locations.stockColumnId,
         quantity: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::int`,
       })
       .from(locationStock)
       .innerJoin(locations, eq(locationStock.locationId, locations.id))
       .where(and(eq(locations.countsInTotalStock, true), eq(locations.warehouseId, warehouse.id)))
-      .groupBy(locationStock.itemId),
+      .groupBy(locationStock.itemId, locations.stockColumnId),
   ]);
 
-  const stockByItem = new Map(stockRows.map((r) => [r.itemId, r.quantity]));
+  // Per product: { "col:<id>": qty, other: qty, total: qty }.
+  const stockByItem = new Map<number, Record<string, number>>();
+  for (const row of stockRows) {
+    const byBucket = stockByItem.get(row.itemId) ?? { total: 0 };
+    const key = row.stockColumnId === null ? "other" : `col:${row.stockColumnId}`;
+    byBucket[key] = (byBucket[key] ?? 0) + row.quantity;
+    byBucket.total += row.quantity;
+    stockByItem.set(row.itemId, byBucket);
+  }
 
   // Every opname per product per day (entries come oldest first, so each
   // day's list is oldest first too).
@@ -82,7 +94,8 @@ export async function GET(req: NextRequest) {
     dates,
     items: products.map((p) => ({
       ...p,
-      currentStock: stockByItem.get(p.itemId) ?? 0,
+      currentStock: stockByItem.get(p.itemId)?.total ?? 0,
+      currentStockByBucket: stockByItem.get(p.itemId) ?? { total: 0 },
       cells: cells.get(p.itemId) ?? {},
     })),
   });
