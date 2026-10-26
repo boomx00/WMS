@@ -54,7 +54,16 @@ export type SummaryEntry = {
   // Locked total minus what the ledger rebuild found across every location
   // (0 when every stock change since was logged).
   unaccounted: number;
+  // What was typed in the summary's "Adj" field for this SKU's opname, or
+  // null when it's empty.
+  adjustment: SummaryAdjustment | null;
   lines?: SummaryLine[];
+};
+
+export type SummaryAdjustment = {
+  note: string; // stock_opname_skus.adjustment_note (free text)
+  at: string | null; // YYYY-MM-DD HH:MM, Asia/Jakarta — when it was saved
+  by: string | null; // who saved it
 };
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -94,6 +103,7 @@ export async function getSkuOpnameEntries(
   }: { warehouseId: number; from?: string | null; to?: string | null; itemId?: number | null; withLines?: boolean }
 ): Promise<SummaryEntry[]> {
   const counter = alias(users, "counter");
+  const adjuster = alias(users, "adjuster");
   const lockedDate = localDate(stockOpnameSkus.addedAt);
 
   const conditions = [like(stockOpnameSkus.opnameNumber, `${SKU_OPNAME_PREFIX}%`)];
@@ -111,6 +121,9 @@ export async function getSkuOpnameEntries(
     completedAt: Date | null;
     confirmedAt: Date | null;
     by: string | null;
+    adjustmentNote: string | null;
+    adjustedAt: string | null;
+    adjustedBy: string | null;
   }[] = await db
     .select({
       opnameNumber: stockOpnameSkus.opnameNumber,
@@ -122,10 +135,14 @@ export async function getSkuOpnameEntries(
       completedAt: stockOpname.completedAt,
       confirmedAt: stockOpname.confirmedAt,
       by: users.username,
+      adjustmentNote: stockOpnameSkus.adjustmentNote,
+      adjustedAt: localDateTime(stockOpnameSkus.adjustedAt),
+      adjustedBy: adjuster.username,
     })
     .from(stockOpnameSkus)
     .innerJoin(stockOpname, eq(stockOpname.opnameNumber, stockOpnameSkus.opnameNumber))
     .leftJoin(users, eq(users.id, sql`coalesce(${stockOpname.assignedTo}, ${stockOpname.createdBy})`))
+    .leftJoin(adjuster, eq(adjuster.id, stockOpnameSkus.adjustedBy))
     .where(and(...conditions))
     .orderBy(asc(stockOpnameSkus.addedAt), asc(stockOpnameSkus.id));
 
@@ -268,6 +285,9 @@ export async function getSkuOpnameEntries(
       status: row.confirmedAt ? "CONFIRMED" : row.completedAt ? "DONE" : "IN_PROGRESS",
       buckets,
       unaccounted: row.systemQty - rebuiltTotal,
+      adjustment: row.adjustmentNote
+        ? { note: row.adjustmentNote, at: row.adjustedAt, by: row.adjustedBy }
+        : null,
       ...(withLines
         ? { lines: lines.sort((a, b) => a.locationCode.localeCompare(b.locationCode, undefined, { numeric: true })) }
         : {}),

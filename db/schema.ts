@@ -11,6 +11,7 @@ import {
   varchar,
   unique,
   check,
+  jsonb,
   type AnyPgColumn
 } from "drizzle-orm/pg-core";
 import { relations, desc, sql } from "drizzle-orm";
@@ -213,6 +214,14 @@ export const roleActionPermissions = pgTable(
   },
   (table) => [uniqueIndex("role_action_permissions_role_action_idx").on(table.roleId, table.actionKey)]
 );
+
+// Which permission keys (APP_ACTIONS in lib/pages.ts) have already been
+// granted to the roles that had the permission they were split from — see
+// scripts/migration-location-types.sql. Not used by the app itself.
+export const permissionSeeds = pgTable("permission_seeds", {
+  actionKey: text("action_key").primaryKey(),
+  seededAt: timestamp("seeded_at").defaultNow().notNull(),
+});
 
 export const roleActionPermissionsRelations = relations(roleActionPermissions, ({ one }) => ({
   role: one(roles, {
@@ -594,6 +603,14 @@ index("location_stock_events_sales_order_idx").on(table.salesOrderId, table.item
   
 
 
+export type OpnameColumnSnapshotRow = {
+  locationId: number;
+  warehouseId: number;
+  stockColumnId: number | null;
+  countsInTotalStock: boolean;
+  qty: number;
+};
+
 export const stockOpname = pgTable("stock_opname", {
   opnameNumber: varchar("opname_number", { length: 50 }).primaryKey(),
   assignedTo: integer("assigned_to").references(() => users.id),
@@ -618,6 +635,15 @@ export const stockOpnameSkus = pgTable(
     systemQty: integer("system_qty").notNull(),
     addedBy: integer("added_by").references(() => users.id),
     addedAt: timestamp("added_at").defaultNow().notNull(),
+    adjustmentNote: text("adjustment_note"),
+    adjustedAt: timestamp("adjusted_at"),
+    adjustedBy: integer("adjusted_by").references(() => users.id),
+    // Where the locked system stock was, location by location, with each
+    // location's warehouse / Total Stock column AS THEY WERE at lock time —
+    // so the Stock Opname Summary keeps showing past opnames the same way
+    // after a location's settings change. Null for opnames from before this
+    // was recorded (the summary then rebuilds it from the ledger).
+    columnSnapshot: jsonb("column_snapshot").$type<OpnameColumnSnapshotRow[]>(),
   },
   (table) => [uniqueIndex("stock_opname_skus_unique_idx").on(table.opnameNumber, table.itemId)]
 );
@@ -655,6 +681,12 @@ export const stockOpnameItems = pgTable("stock_opname_items", {
   difference: integer("difference"),
   countedAt: timestamp("counted_at"),
   countedBy: integer("counted_by").references(() => users.id),
+  // The location's warehouse / Total Stock settings when it was first
+  // counted (see stock_opname_skus.column_snapshot). No foreign keys: a
+  // column deleted later shouldn't block anything. Null on older lines.
+  snapshotWarehouseId: integer("snapshot_warehouse_id"),
+  snapshotStockColumnId: integer("snapshot_stock_column_id"),
+  snapshotCountsInTotal: boolean("snapshot_counts_in_total"),
 });
 
 export const stockOpnameLocations = pgTable(

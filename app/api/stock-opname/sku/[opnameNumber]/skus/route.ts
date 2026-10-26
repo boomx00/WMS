@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameSkus, items, locationStock } from "@/db/schema";
-import { eq, and, or, sql } from "drizzle-orm";
+import { stockOpname, stockOpnameSkus, items, locationStock, locations } from "@/db/schema";
+import { eq, and, or, ne } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { isSkuOpname } from "@/lib/skuOpname";
@@ -65,18 +65,28 @@ export async function POST(
     return NextResponse.json({ error: `SKU ${item.sku} sudah ada di sesi ini` }, { status: 409 });
   }
 
-  // Lock the system total at this exact moment.
-  const [stockRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::int` })
+  // Lock the system total at this exact moment — and where it is, with
+  // each location's warehouse / Total Stock column as they are now (the
+  // Stock Opname Summary splits it by column from this).
+  const stockRows = await db
+    .select({
+      locationId: locationStock.locationId,
+      qty: locationStock.quantity,
+      warehouseId: locations.warehouseId,
+      stockColumnId: locations.stockColumnId,
+      countsInTotalStock: locations.countsInTotalStock,
+    })
     .from(locationStock)
-    .where(eq(locationStock.itemId, item.id));
-  const systemQty = stockRow?.total ?? 0;
+    .innerJoin(locations, eq(locations.id, locationStock.locationId))
+    .where(and(eq(locationStock.itemId, item.id), ne(locationStock.quantity, 0)));
+  const systemQty = stockRows.reduce((sum, r) => sum + r.qty, 0);
 
   await db.insert(stockOpnameSkus).values({
     opnameNumber,
     itemId: item.id,
     systemQty,
     addedBy: session.userId,
+    columnSnapshot: stockRows,
   });
 
   return NextResponse.json(

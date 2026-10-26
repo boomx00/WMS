@@ -238,12 +238,29 @@ export async function PATCH(
     }
   }
 
+  // The location's warehouse / Total Stock column as they are now, kept on
+  // the line (first count only) so later settings changes don't rewrite
+  // history on the Stock Opname Summary.
+  const snapshot = {
+    snapshotWarehouseId: location.warehouseId,
+    snapshotStockColumnId: location.stockColumnId,
+    snapshotCountsInTotal: location.countsInTotalStock,
+  };
+
   let result;
   const previousQty = existingLine?.countedQty ?? 0;
   if (existingLine) {
     [result] = await db
       .update(stockOpnameItems)
-      .set({ systemQty, systemSku, countedQty, difference, countedAt: new Date(), countedBy: session.userId })
+      .set({
+        systemQty,
+        systemSku,
+        countedQty,
+        difference,
+        countedAt: new Date(),
+        countedBy: session.userId,
+        ...(existingLine.snapshotWarehouseId === null ? snapshot : {}),
+      })
       .where(eq(stockOpnameItems.id, existingLine.id))
       .returning();
   } else {
@@ -259,6 +276,7 @@ export async function PATCH(
         difference,
         countedAt: new Date(),
         countedBy: session.userId,
+        ...snapshot,
       })
       .returning();
   }

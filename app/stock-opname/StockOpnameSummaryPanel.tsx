@@ -21,7 +21,21 @@ type Cell = {
   by: string | null;
   buckets: Record<string, Figures>;
   unaccounted: number;
-  sessionsThatDay: number;
+  // Set with the "Adj" checkbox: the bulk adjustment made for this opname.
+  adjustment: Adjustment | null;
+};
+
+// Free text typed in the Adj field (not linked to a bulk adjustment).
+type Adjustment = { note: string; at: string | null; by: string | null };
+
+// The opname line (one SOSKU session of one SKU) the Adj popup is editing.
+type AdjustTarget = {
+  itemId: number;
+  sku: string;
+  name: string;
+  date: string;
+  opnameNumber: string;
+  current: Adjustment | null;
 };
 
 type SummaryResponse = {
@@ -29,7 +43,8 @@ type SummaryResponse = {
   warehouses: { id: number; name: string; isActive: boolean }[];
   buckets: Bucket[];
   dates: string[];
-  items: { itemId: number; sku: string; name: string; currentStock: number; cells: Record<string, Cell> }[];
+  // cells[date] = every SOSKU session of that product that day, oldest first.
+  items: { itemId: number; sku: string; name: string; currentStock: number; cells: Record<string, Cell[]> }[];
 };
 
 type DetailLine = {
@@ -41,7 +56,7 @@ type DetailLine = {
   countedBy: string | null;
 };
 
-type DetailEntry = Omit<Cell, "sessionsThatDay"> & { date: string; lines: DetailLine[] };
+type DetailEntry = Cell & { date: string; lines: DetailLine[] };
 
 type DetailResponse = {
   item: { itemId: number; sku: string; name: string };
@@ -52,6 +67,30 @@ type DetailResponse = {
 const EMPTY: Figures = { system: 0, counted: 0 };
 const figures = (cell: { buckets: Record<string, Figures> } | undefined, key: string): Figures =>
   cell?.buckets[key] ?? EMPTY;
+
+// A bucket's figures as shown: for Total, the locked total (System) and all
+// counted lines (SO), minus every column whose checkbox is unticked —
+// untick Export and each date's Total System / SO drop by that date's
+// Export System / SO. Other buckets are shown as they are.
+function shownFigures(
+  cell: { buckets: Record<string, Figures> } | undefined,
+  key: string,
+  excludedKeys: string[]
+): Figures {
+  const f = figures(cell, key);
+  if (key !== "total" || excludedKeys.length === 0) return f;
+  let { system, counted } = f;
+  for (const k of excludedKeys) {
+    const x = figures(cell, k);
+    system -= x.system;
+    counted -= x.counted;
+  }
+  return { system, counted };
+}
+
+// The columns (not Total) that aren't in `selectedKeys`.
+const excludedFrom = (all: Bucket[], selectedKeys: string[]): string[] =>
+  all.filter((b) => b.key !== "total" && !selectedKeys.includes(b.key)).map((b) => b.key);
 
 const storageKey = (warehouseId: number) => `stockOpnameSummary.columns.${warehouseId}`;
 function readStored(warehouseId: number): string[] | null {
@@ -140,11 +179,12 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onSort(sortKey)}
-      className={`inline-flex items-center gap-0.5 hover:text-zinc-200 transition-colors ${active ? "text-amber-400" : ""} ${
-        align === "right" ? "flex-row-reverse" : ""
+      className={`hover:text-zinc-200 transition-colors ${active ? "text-amber-400" : ""} ${
+        align === "right" ? "text-right" : "inline-flex items-center gap-0.5"
       }`}
     >
       {label}
+      {align === "right" ? " " : null}
       <span className={active ? "" : "text-zinc-700"}>{active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
     </button>
   );
@@ -155,12 +195,17 @@ function SortHeader({
 function defaultBucketKeys(data: SummaryResponse): string[] {
   const keys = data.buckets.filter((b) => b.key !== "total").map((b) => b.key);
   const any = (field: keyof Figures) =>
-    keys.filter((k) => data.items.some((i) => Object.values(i.cells).some((c) => figures(c, k)[field] !== 0)));
+    keys.filter((k) => data.items.some((i) => Object.values(i.cells).flat().some((c) => figures(c, k)[field] !== 0)));
   const counted = any("counted");
   if (counted.length > 0) return counted;
   const system = any("system");
   return system.length > 0 ? system : keys.slice(0, 1);
 }
+
+// "SOSKU-ANDI-4" -> "ANDI-4" for the narrow SOSKU column (the full number
+// is in the tooltip and the Detail popup).
+const shortOpname = (opnameNumber: string) =>
+  opnameNumber.startsWith("SOSKU-") ? opnameNumber.slice("SOSKU-".length) : opnameNumber;
 
 const todayLocal = () => {
   const d = new Date();
@@ -185,13 +230,6 @@ function Delta({ value, muted = false }: { value: number; muted?: boolean }) {
   );
 }
 
-function PencilIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-    </svg>
-  );
-}
 
 export default function StockOpnameSummaryPanel() {
   const labels = usePageLabels("stock_opname", STOCK_OPNAME_SUMMARY_LABELS);
@@ -201,14 +239,16 @@ export default function StockOpnameSummaryPanel() {
   const [search, setSearch] = useState("");
   const [onlyDiff, setOnlyDiff] = useState(false);
   const [hideNever, setHideNever] = useState(false);
-  const [hiddenIds, setHiddenIds] = useState<number[]>([]);
+  // Read once on the client. The only UI that depends on it renders after
+  // `data` has loaded, so the server render and first client render match.
+  const [hiddenIds, setHiddenIds] = useState<number[]>(() => (typeof window === "undefined" ? [] : readHidden()));
   const [showHidden, setShowHidden] = useState(false);
   const [sort, setSort] = useState<Sort>(null);
   const [selected, setSelected] = useState<string[] | null>(null);
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [detail, setDetail] = useState<{ itemId: number; date: string } | null>(null);
+  const [detail, setDetail] = useState<{ itemId: number; date: string; opnameNumber: string } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -245,10 +285,6 @@ export default function StockOpnameSummaryPanel() {
     };
   }, [from, to, warehouseId]);
 
-  useEffect(() => {
-    setHiddenIds(readHidden());
-  }, []);
-
   const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds]);
 
   function toggleHidden(itemId: number) {
@@ -275,16 +311,27 @@ export default function StockOpnameSummaryPanel() {
       }));
   }, [data, selected, labels]);
 
+  // Unticked columns, taken off each date's Total.
+  const excludedKeys = useMemo(() => (data && selected ? excludedFrom(data.buckets, selected) : []), [data, selected]);
+  const excludedNames = (data?.buckets ?? [])
+    .filter((b) => excludedKeys.includes(b.key))
+    .map((b) => (b.key === "other" ? labels.summary_other : b.name));
+
   const rows = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
     const filtered = data.items.filter((item) => {
       if (q && !item.sku.toLowerCase().includes(q) && !item.name.toLowerCase().includes(q)) return false;
       if (!showHidden && hiddenSet.has(item.itemId)) return false;
-      const cells = Object.values(item.cells);
+      const cells = Object.values(item.cells).flat();
       if (hideNever && cells.length === 0) return false;
       if (onlyDiff) {
-        const hasDiff = cells.some((c) => buckets.some((b) => figures(c, b.key).counted !== figures(c, b.key).system));
+        const hasDiff = cells.some((c) =>
+          buckets.some((b) => {
+            const f = shownFigures(c, b.key, excludedKeys);
+            return f.counted !== f.system;
+          })
+        );
         if (!hasDiff) return false;
       }
       return true;
@@ -296,7 +343,7 @@ export default function StockOpnameSummaryPanel() {
         ? (a.currentStock - b.currentStock) * factor || a.sku.localeCompare(b.sku)
         : a.sku.localeCompare(b.sku, undefined, { numeric: true }) * factor
     );
-  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet, sort]);
+  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet, sort, excludedKeys]);
 
   function toggleBucket(key: string) {
     if (!data || !selected) return;
@@ -307,12 +354,49 @@ export default function StockOpnameSummaryPanel() {
     writeStored(data.warehouse.id, ordered);
   }
 
+  // Put a saved / cleared adjustment into the loaded data, so the table
+  // updates without reloading the whole summary.
+  function applyAdjustment(target: AdjustTarget, adjustment: Adjustment | null) {
+    setData((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        items: current.items.map((item) => {
+          const list = item.itemId === target.itemId ? item.cells[target.date] : undefined;
+          if (!list?.some((c) => c.opnameNumber === target.opnameNumber)) return item;
+          const next = list.map((c) => (c.opnameNumber === target.opnameNumber ? { ...c, adjustment } : c));
+          return { ...item, cells: { ...item.cells, [target.date]: next } };
+        }),
+      };
+    });
+  }
+
+  // Save what was typed in an Adj field ("" clears it). Returns an error
+  // message when it couldn't be saved.
+  async function saveAdjustment(target: AdjustTarget, note: string): Promise<{ error?: string }> {
+    try {
+      const res = await fetch("/api/stock-opname/summary/adjustment", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ opnameNumber: target.opnameNumber, itemId: target.itemId, note }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json.error ?? `Failed to save (${res.status})` };
+      applyAdjustment(target, json.adjustment ?? null);
+      return {};
+    } catch {
+      return { error: "Failed to save" };
+    }
+  }
+
   function changeWarehouse(id: number) {
     setSelected(null);
     setWarehouseId(id);
   }
 
   const stockLabel = labels.summary_th_stock ?? "Total stock";
+  const adjLabel = labels.summary_th_adjusted ?? "Adj";
+  const soskuLabel = labels.summary_th_sosku ?? "SOSKU";
 
   function exportExcel() {
     if (!data) return;
@@ -326,27 +410,34 @@ export default function StockOpnameSummaryPanel() {
     if (buckets.length > 0) {
       for (const date of data.dates) {
         const start = header1.length;
-        header1.push(date, ...Array(buckets.length * 3 - 1).fill(""));
+        header1.push(date, ...Array(buckets.length * 3 + 1).fill(""));
         for (const b of buckets) {
           header2.push(`${b.name} ${labels.summary_system}`, `${b.name} ${labels.summary_so}`, labels.summary_delta);
         }
-        merges.push({ s: { r: 0, c: start }, e: { r: 0, c: start + buckets.length * 3 - 1 } });
+        header2.push(adjLabel, soskuLabel);
+        merges.push({ s: { r: 0, c: start }, e: { r: 0, c: start + buckets.length * 3 + 1 } });
       }
     }
-    const body = rows.map((item) => {
-      const row: (string | number)[] = [item.sku, item.name, item.currentStock];
-      for (const date of data.dates) {
-        const cell = item.cells[date];
-        for (const b of buckets) {
-          if (!cell) {
-            row.push("", "", "");
-          } else {
-            const f = figures(cell, b.key);
-            row.push(f.system, f.counted, f.counted - f.system);
+    // Same shape as the table: one row per SOSKU session on the product's
+    // busiest day (SKU / name repeated on each, so the sheet stays sortable).
+    const body = rows.flatMap((item) => {
+      const height = Math.max(1, ...data.dates.map((date) => item.cells[date]?.length ?? 0));
+      return Array.from({ length: height }, (_, k) => {
+        const row: (string | number)[] = [item.sku, item.name, item.currentStock];
+        for (const date of data.dates) {
+          const cell = item.cells[date]?.[k];
+          for (const b of buckets) {
+            if (!cell) {
+              row.push("", "", "");
+            } else {
+              const f = shownFigures(cell, b.key, excludedKeys);
+              row.push(f.system, f.counted, f.counted - f.system);
+            }
           }
+          if (buckets.length > 0) row.push(cell?.adjustment?.note ?? "", cell?.opnameNumber ?? "");
         }
-      }
-      return row;
+        return row;
+      });
     });
     const sheet = XLSX.utils.aoa_to_sheet([header1, header2, ...body]);
     sheet["!merges"] = merges;
@@ -365,16 +456,27 @@ export default function StockOpnameSummaryPanel() {
   // Table layout. SKU / Product name share one column, pinned left; its
   // box-shadow paints a divider line plus a strip of page background, so
   // scrolled date blocks never run flush under it. Every date block is its
-  // columns plus its own Detail (pencil) column. `gap` is the empty column
-  // before every date block, which separates the dates from each other.
-  const blockSpan = span + 1;
+  // columns plus its own Adj (checkbox) and Detail (pencil) columns. `gap`
+  // is the empty column before every date block, which separates the dates
+  // from each other.
+  const blockSpan = span + 2;
+  // The cell's content is a fixed-width grid of three lanes — SKU / name,
+  // Total stock, hide button. A long product name wraps onto more lines
+  // inside its own lane (the row grows taller) instead of running into the
+  // stock number.
+  const productGrid = "w-64 grid grid-cols-[minmax(0,1fr)_4rem_1rem] gap-x-2";
   const stickyLeft =
-    "sticky left-0 min-w-40 max-w-56 shadow-[1px_0_0_var(--color-zinc-700),12px_0_0_var(--color-zinc-950)]";
+    "sticky left-0 shadow-[1px_0_0_var(--color-zinc-700),12px_0_0_var(--color-zinc-950)]";
   const gap = "w-4 min-w-4 p-0 bg-zinc-950";
-  const subHead =
-    "px-1.5 py-1 text-right align-bottom font-medium bg-zinc-900 border-b border-zinc-700 whitespace-nowrap";
+  // Sub-headers wrap ("Good" / "Stock" / "System") and `w-px` makes each
+  // column shrink to its longest word or number instead of the whole label;
+  // numbers use the regular font with tabular digits, which is much
+  // narrower than monospace.
+  const subHeadBase =
+    "w-px px-1 py-1 align-bottom font-medium leading-[1.15] bg-zinc-900 border-b border-zinc-700 whitespace-normal";
+  const subHead = `${subHeadBase} text-right`;
   const dataCell =
-    "px-1.5 py-1 text-right font-mono bg-zinc-900/30 border-t border-zinc-800/70 group-hover:bg-zinc-900/70";
+    "px-1 py-1 text-right tabular-nums bg-zinc-900/30 border-t border-zinc-800/70 group-hover:bg-zinc-900/70";
 
   return (
     <div>
@@ -463,7 +565,7 @@ export default function StockOpnameSummaryPanel() {
           <input type="checkbox" checked={hideNever} onChange={(e) => setHideNever(e.target.checked)} className="h-4 w-4 accent-amber-500" />
           {labels.summary_hide_never}
         </label>
-        {hiddenIds.length > 0 && (
+        {data && hiddenIds.length > 0 && (
           <label className="flex items-center gap-1.5 text-zinc-300 cursor-pointer">
             <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="h-4 w-4 accent-amber-500" />
             {(labels.summary_show_hidden ?? "Show hidden ({n})").replace("{n}", String(hiddenIds.length))}
@@ -478,6 +580,11 @@ export default function StockOpnameSummaryPanel() {
           {loading
             ? labels.summary_loading
             : labels.summary_rows.replace("{n}", rows.length.toLocaleString()).replace("{d}", String(data.dates.length))}
+          {!loading && selected?.includes("total") && excludedNames.length > 0 && (
+            <span className="ml-3 text-amber-500/80">
+              * {(labels.summary_total_excludes ?? "Total excludes: {list}").replace("{list}", excludedNames.join(", "))}
+            </span>
+          )}
         </p>
       )}
 
@@ -485,22 +592,27 @@ export default function StockOpnameSummaryPanel() {
         <p className="text-sm text-zinc-600">{loading ? labels.summary_loading : ""}</p>
       ) : (
         <div ref={scroller} className={`border border-zinc-800 rounded-lg overflow-auto max-h-[70vh] ${loading ? "opacity-60" : ""}`}>
-          <table className="text-[10px] leading-tight border-separate border-spacing-0 min-w-full whitespace-nowrap">
+          {/* No min-w-full: stretching the table to the container is what made
+              the number columns wide when only a few dates are shown. */}
+          <table className="text-[10px] leading-tight border-separate border-spacing-0 whitespace-nowrap">
             <thead className="sticky top-0 z-20">
               <tr className="text-zinc-500 text-left">
                 <th rowSpan={2} className={`${stickyLeft} z-30 bg-zinc-900 px-2 py-1 font-medium align-bottom border-b border-zinc-800`}>
-                  <div className="flex items-end justify-between gap-3">
-                    <div>
+                  <div className={`${productGrid} items-end`}>
+                    <div className="min-w-0">
                       <SortHeader label={labels.summary_th_sku} sortKey="sku" sort={sort} onSort={(k) => setSort((c) => nextSort(c, k))} />
-                      <div className="font-normal text-zinc-600">{labels.summary_th_product}</div>
+                      <div className="font-normal text-zinc-600 truncate">{labels.summary_th_product}</div>
                     </div>
-                    <SortHeader
-                      label={stockLabel}
-                      sortKey="stock"
-                      sort={sort}
-                      onSort={(k) => setSort((c) => nextSort(c, k))}
-                      align="right"
-                    />
+                    <div className="text-right whitespace-normal">
+                      <SortHeader
+                        label={stockLabel}
+                        sortKey="stock"
+                        sort={sort}
+                        onSort={(k) => setSort((c) => nextSort(c, k))}
+                        align="right"
+                      />
+                    </div>
+                    <span aria-hidden="true" />
                   </div>
                 </th>
                 {data.dates.length === 0 ? (
@@ -533,28 +645,35 @@ export default function StockOpnameSummaryPanel() {
                   <Fragment key={date}>
                     {buckets.map((b, i) => (
                       <Fragment key={`${date}-${b.key}`}>
-                        <th className={`${subHead} border-l ${i === 0 ? "border-l-zinc-700" : "border-l-zinc-700/60"}`}>
+                        <th
+                          className={`${subHead} border-l ${i === 0 ? "border-l-zinc-700" : "border-l-zinc-700/60"}`}
+                          title={b.key === "total" && excludedNames.length > 0 ? `${b.name} − ${excludedNames.join(", ")}` : undefined}
+                        >
                           {b.name}
+                          {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
                           <br />
                           {labels.summary_system}
                         </th>
-                        <th className={subHead}>
+                        <th
+                          className={subHead}
+                          title={b.key === "total" && excludedNames.length > 0 ? `${b.name} − ${excludedNames.join(", ")}` : undefined}
+                        >
                           {b.name}
+                          {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
                           <br />
                           {labels.summary_so}
                         </th>
                         <th className={subHead}>{labels.summary_delta}</th>
                       </Fragment>
                     ))}
-                    <th className={`${subHead} text-center border-x border-l-zinc-700 border-r-zinc-700`}>
-                      {labels.summary_th_detail}
-                    </th>
+                    <th className={`${subHeadBase} text-left border-l border-l-zinc-700`}>{adjLabel}</th>
+                    <th className={`${subHeadBase} text-left border-x border-l-zinc-700/60 border-r-zinc-700`}>{soskuLabel}</th>
                   </Fragment>
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {rows.length === 0 ? (
+            {rows.length === 0 ? (
+              <tbody>
                 <tr>
                   <td
                     colSpan={2 + (data.dates.length === 0 ? 2 : data.dates.length * (blockSpan + 1))}
@@ -563,116 +682,176 @@ export default function StockOpnameSummaryPanel() {
                     {labels.summary_no_products}
                   </td>
                 </tr>
-              ) : (
-                rows.map((item) => {
-                  const isHidden = hiddenSet.has(item.itemId);
-                  return (
-                    <tr key={item.itemId} className={`group ${isHidden ? "opacity-40" : ""}`}>
-                      <td className={`${stickyLeft} z-10 bg-zinc-950 group-hover:bg-zinc-900 px-2 py-1 border-t border-zinc-800/70`}>
-                        <div className="flex items-start gap-1.5">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-baseline justify-between gap-3">
-                              <span className="font-mono text-amber-500">{item.sku}</span>
-                              <span
-                                title={stockLabel}
-                                className={`font-mono ${item.currentStock === 0 ? "text-zinc-600" : "text-zinc-200"}`}
-                              >
-                                {item.currentStock.toLocaleString()}
-                              </span>
-                            </div>
-                            <div className="text-zinc-400 truncate" title={item.name}>
-                              {item.name}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => toggleHidden(item.itemId)}
-                            title={isHidden ? labels.summary_unhide ?? "Unhide" : labels.summary_hide ?? "Hide"}
-                            aria-label={`${isHidden ? labels.summary_unhide ?? "Unhide" : labels.summary_hide ?? "Hide"} ${item.sku}`}
-                            className={`shrink-0 p-0.5 rounded text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-opacity ${
-                              isHidden ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            }`}
-                          >
-                            {isHidden ? <EyeIcon /> : <EyeOffIcon />}
-                          </button>
-                        </div>
-                      </td>
-                      {data.dates.length === 0 && (
-                        <>
-                          <td className={gap} aria-hidden="true" />
-                          <td className="border-t border-zinc-800/70" />
-                        </>
-                      )}
-                      {data.dates.map((date) => {
-                          const cell = item.cells[date];
-                          if (!cell) {
+              </tbody>
+            ) : (
+              // One <tbody> per product so hovering any of its sub-rows
+              // highlights the whole product. A product gets one sub-row per
+              // SOSKU session on its busiest day; the SKU / name cell spans
+              // them, and each date fills its sessions from the top (oldest
+              // first), leaving the rest of its block blank.
+              rows.map((item) => {
+                const isHidden = hiddenSet.has(item.itemId);
+                const perDate = data.dates.map((date) => item.cells[date] ?? []);
+                const height = Math.max(1, ...perDate.map((list) => list.length));
+                return (
+                  <tbody key={item.itemId} className={`group ${isHidden ? "opacity-40" : ""}`}>
+                    {Array.from({ length: height }, (_, k) => {
+                      // Lines between a product's own sub-rows are fainter
+                      // than the line between products.
+                      const rowBorder = k === 0 ? "" : "border-t-zinc-800/30";
+                      return (
+                        <tr key={k}>
+                          {k === 0 && (
+                            <td
+                              rowSpan={height}
+                              className={`${stickyLeft} z-10 bg-zinc-950 group-hover:bg-zinc-900 px-2 py-1 border-t border-zinc-800/70`}
+                            >
+                              <div className={`${productGrid} items-center`}>
+                                <div className="min-w-0">
+                                  <div className="font-mono text-amber-500 truncate">{item.sku}</div>
+                                  <div className="text-zinc-400 whitespace-normal break-words">{item.name}</div>
+                                </div>
+                                <div
+                                  title={stockLabel}
+                                  className={`text-right font-mono ${item.currentStock === 0 ? "text-zinc-600" : "text-zinc-200"}`}
+                                >
+                                  {item.currentStock.toLocaleString()}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleHidden(item.itemId)}
+                                  title={isHidden ? labels.summary_unhide ?? "Unhide" : labels.summary_hide ?? "Hide"}
+                                  aria-label={`${isHidden ? labels.summary_unhide ?? "Unhide" : labels.summary_hide ?? "Hide"} ${item.sku}`}
+                                  className={`justify-self-end p-0.5 rounded text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-opacity ${
+                                    isHidden ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                  }`}
+                                >
+                                  {isHidden ? <EyeIcon /> : <EyeOffIcon />}
+                                </button>
+                              </div>
+                            </td>
+                          )}
+                          {k === 0 && data.dates.length === 0 && (
+                            <>
+                              <td rowSpan={height} className={gap} aria-hidden="true" />
+                              <td rowSpan={height} className="border-t border-zinc-800/70" />
+                            </>
+                          )}
+                          {data.dates.map((date, d) => {
+                            const list = perDate[d];
+                            const cell = list[k];
+                            const gapCell = k === 0 ? <td rowSpan={height} className={gap} aria-hidden="true" /> : null;
+
+                            if (!cell) {
+                              // No opname that day: one "—" over the whole block.
+                              if (list.length === 0) {
+                                return k === 0 ? (
+                                  <Fragment key={date}>
+                                    {gapCell}
+                                    <td
+                                      rowSpan={height}
+                                      colSpan={blockSpan}
+                                      className="px-1.5 py-1 text-center text-zinc-700 bg-zinc-900/30 border-t border-x border-zinc-800/70 border-l-zinc-700 border-r-zinc-700 group-hover:bg-zinc-900/70"
+                                    >
+                                      —
+                                    </td>
+                                  </Fragment>
+                                ) : null;
+                              }
+                              // Fewer sessions that day than the busiest day:
+                              // blank under the last one.
+                              return k === list.length ? (
+                                <Fragment key={date}>
+                                  {gapCell}
+                                  <td
+                                    rowSpan={height - list.length}
+                                    colSpan={blockSpan}
+                                    className="bg-zinc-900/30 border-t border-x border-zinc-800/30 border-l-zinc-700 border-r-zinc-700 group-hover:bg-zinc-900/70"
+                                  />
+                                </Fragment>
+                              ) : (
+                                gapCell && <Fragment key={date}>{gapCell}</Fragment>
+                              );
+                            }
+
+                            const note = [
+                              cell.status === "IN_PROGRESS" ? labels.summary_in_progress : null,
+                              `${cell.opnameNumber} · ${cell.lockedAt}${cell.by ? ` · ${cell.by}` : ""}`,
+                            ]
+                              .filter(Boolean)
+                              .join("\n");
                             return (
                               <Fragment key={date}>
-                                <td className={gap} aria-hidden="true" />
-                                <td
-                                  colSpan={blockSpan}
-                                  className="px-1.5 py-1 text-center text-zinc-700 bg-zinc-900/30 border-t border-x border-zinc-800/70 border-l-zinc-700 border-r-zinc-700 group-hover:bg-zinc-900/70"
-                                >
-                                  —
+                                {gapCell}
+                                {buckets.map((b, i) => {
+                                  const f = shownFigures(cell, b.key, excludedKeys);
+                                  return (
+                                    <Fragment key={`${date}-${b.key}`}>
+                                      <td
+                                        title={note}
+                                        className={`${dataCell} ${rowBorder} text-zinc-400 border-l ${i === 0 ? "border-l-zinc-700" : "border-l-zinc-700/60"}`}
+                                      >
+                                        {i === 0 && cell.status === "IN_PROGRESS" && (
+                                          <span className="inline-block w-1 h-1 rounded-full mr-1 align-middle bg-amber-500" />
+                                        )}
+                                        {f.system.toLocaleString()}
+                                      </td>
+                                      <td title={note} className={`${dataCell} ${rowBorder} text-zinc-100`}>
+                                        {f.counted.toLocaleString()}
+                                      </td>
+                                      <td title={note} className={`${dataCell} ${rowBorder}`}>
+                                        <Delta value={f.counted - f.system} />
+                                      </td>
+                                    </Fragment>
+                                  );
+                                })}
+                                <td className={`${dataCell} ${rowBorder} text-left border-l border-l-zinc-700`}>
+                                  <AdjustmentInput
+                                    value={cell.adjustment?.note ?? ""}
+                                    title={
+                                      cell.adjustment
+                                        ? `${cell.adjustment.note}${cell.adjustment.at ? ` · ${cell.adjustment.at}` : ""}${
+                                            cell.adjustment.by ? ` · ${cell.adjustment.by}` : ""
+                                          }`
+                                        : labels.summary_mark_adjusted ?? "Adjustment note"
+                                    }
+                                    ariaLabel={`${adjLabel} ${item.sku} ${cell.opnameNumber}`}
+                                    onSave={(code) =>
+                                      saveAdjustment(
+                                        {
+                                          itemId: item.itemId,
+                                          sku: item.sku,
+                                          name: item.name,
+                                          date,
+                                          opnameNumber: cell.opnameNumber,
+                                          current: cell.adjustment,
+                                        },
+                                        code
+                                      )
+                                    }
+                                  />
+                                </td>
+                                <td className={`${dataCell} ${rowBorder} text-left border-x border-l-zinc-700/60 border-r-zinc-700`}>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetail({ itemId: item.itemId, date, opnameNumber: cell.opnameNumber })}
+                                    title={note}
+                                    className="font-mono text-amber-500 hover:text-amber-300 hover:underline"
+                                  >
+                                    {shortOpname(cell.opnameNumber)}
+                                  </button>
                                 </td>
                               </Fragment>
                             );
-                          }
-                          const note = [
-                            cell.status === "IN_PROGRESS" ? labels.summary_in_progress : null,
-                            cell.sessionsThatDay > 1 ? labels.summary_sessions_that_day.replace("{n}", String(cell.sessionsThatDay)) : null,
-                            `${cell.opnameNumber} · ${cell.lockedAt}${cell.by ? ` · ${cell.by}` : ""}`,
-                          ]
-                            .filter(Boolean)
-                            .join("\n");
-                          return (
-                            <Fragment key={date}>
-                              <td className={gap} aria-hidden="true" />
-                              {buckets.map((b, i) => {
-                                const f = figures(cell, b.key);
-                                return (
-                                  <Fragment key={`${date}-${b.key}`}>
-                                    <td
-                                      title={note}
-                                      className={`${dataCell} text-zinc-400 border-l ${i === 0 ? "border-l-zinc-700" : "border-l-zinc-700/60"}`}
-                                    >
-                                      {i === 0 && (cell.status === "IN_PROGRESS" || cell.sessionsThatDay > 1) && (
-                                        <span
-                                          className={`inline-block w-1 h-1 rounded-full mr-1 align-middle ${cell.status === "IN_PROGRESS" ? "bg-amber-500" : "bg-sky-500"}`}
-                                        />
-                                      )}
-                                      {f.system.toLocaleString()}
-                                    </td>
-                                    <td title={note} className={`${dataCell} text-zinc-100`}>
-                                      {f.counted.toLocaleString()}
-                                    </td>
-                                    <td title={note} className={dataCell}>
-                                      <Delta value={f.counted - f.system} />
-                                    </td>
-                                  </Fragment>
-                                );
-                              })}
-                              <td className={`${dataCell} text-center border-x border-l-zinc-700 border-r-zinc-700`}>
-                                <button
-                                  type="button"
-                                  onClick={() => setDetail({ itemId: item.itemId, date })}
-                                  title={`${labels.summary_th_detail} · ${cell.opnameNumber}`}
-                                  aria-label={`${labels.summary_th_detail} ${item.sku} ${date}`}
-                                  className="inline-flex items-center gap-0.5 p-0.5 rounded text-zinc-500 hover:text-amber-400 hover:bg-zinc-800 transition-colors"
-                                >
-                                  <PencilIcon />
-                                  {cell.sessionsThatDay > 1 && <span className="text-[8px]">×{cell.sessionsThatDay}</span>}
-                                </button>
-                              </td>
-                            </Fragment>
-                          );
-                        })}
-                      <td className={gap} aria-hidden="true" />
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
+                          })}
+                          {k === 0 && <td rowSpan={height} className={gap} aria-hidden="true" />}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                );
+              })
+            )}
           </table>
         </div>
       )}
@@ -681,6 +860,7 @@ export default function StockOpnameSummaryPanel() {
         <OpnameHistoryModal
           itemId={detail.itemId}
           date={detail.date}
+          opnameNumber={detail.opnameNumber}
           warehouseId={data.warehouse.id}
           bucketKeys={selected ?? []}
           labels={labels}
@@ -691,13 +871,14 @@ export default function StockOpnameSummaryPanel() {
   );
 }
 
-// The SOSKU opname(s) of one product on one date (newest first), with
-// System / SO / Δ per column, how the difference moved since that product's
-// previous opname (which may be on an earlier date), and the counted lines
-// behind each — expanded by default.
+// One SOSKU session of one product (opened from its SOSKU number in the
+// table), with System / SO / Δ per column, how the difference moved since
+// that product's previous opname (which may be an earlier session the same
+// day, or an earlier date), and its counted lines — expanded by default.
 function OpnameHistoryModal({
   itemId,
   date,
+  opnameNumber,
   warehouseId,
   bucketKeys,
   labels,
@@ -705,6 +886,7 @@ function OpnameHistoryModal({
 }: {
   itemId: number;
   date: string;
+  opnameNumber: string;
   warehouseId: number;
   bucketKeys: string[];
   labels: Record<string, string>;
@@ -712,6 +894,8 @@ function OpnameHistoryModal({
 }) {
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Opnames whose counted lines the user has folded away; everything else
+  // starts expanded.
   const [open, setOpen] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -738,6 +922,8 @@ function OpnameHistoryModal({
       .filter((b) => b.key === "total" || bucketKeys.includes(b.key))
       .map((b) => ({ ...b, name: name(b) }));
   }, [detail, bucketKeys, labels]);
+  // Same rule as the tab: unticked columns are taken off Total.
+  const excludedKeys = useMemo(() => (detail ? excludedFrom(detail.buckets, bucketKeys) : []), [detail, bucketKeys]);
   const bucketName = (key: string) =>
     key === "outside"
       ? "—"
@@ -748,12 +934,11 @@ function OpnameHistoryModal({
   // Full history newest first (for "change since previous"), and the
   // entries of the chosen date that the modal lists.
   const history = useMemo(() => (detail ? [...detail.entries].reverse() : []), [detail]);
-  const entries = useMemo(() => history.filter((e) => e.date === date), [history, date]);
+  const entries = useMemo(
+    () => history.filter((e) => e.date === date && e.opnameNumber === opnameNumber),
+    [history, date, opnameNumber]
+  );
 
-  // Show the counted lines of that date's opname(s) straight away.
-  useEffect(() => {
-    setOpen(new Set(entries.map((e) => e.opnameNumber)));
-  }, [entries]);
   const statusLabel = (s: Status) =>
     s === "CONFIRMED" ? labels.status_confirmed : s === "DONE" ? labels.status_done : labels.status_in_progress;
   const colCount = 5 + buckets.length * 3;
@@ -769,7 +954,8 @@ function OpnameHistoryModal({
             <h2 className="text-lg font-semibold">
               {labels.detail_title}{" "}
               <span className="text-zinc-500 font-normal">
-                · {formatDay(date).day} {formatDay(date).weekday}
+                · <span className="font-mono text-amber-500">{opnameNumber}</span> · {formatDay(date).day}{" "}
+                {formatDay(date).weekday}
               </span>
             </h2>
             {detail && (
@@ -800,6 +986,7 @@ function OpnameHistoryModal({
                   {buckets.map((b) => (
                     <th key={b.key} colSpan={3} className="px-2 py-2 font-medium text-center text-zinc-300 border-l border-b border-zinc-800">
                       {b.name}
+                      {b.key === "total" && excludedKeys.length > 0 && <span className="text-amber-500">*</span>}
                     </th>
                   ))}
                   <th rowSpan={2} className="px-2 py-2 font-medium text-right border-l border-b border-zinc-800 whitespace-nowrap">
@@ -821,8 +1008,11 @@ function OpnameHistoryModal({
                 {entries.map((entry) => {
                   const key = `${entry.opnameNumber}`;
                   const previous = history[history.indexOf(entry) + 1];
-                  const totalDelta = (e: DetailEntry) => figures(e, "total").counted - figures(e, "total").system;
-                  const expanded = open.has(key);
+                  const totalDelta = (e: DetailEntry) => {
+                    const t = shownFigures(e, "total", excludedKeys);
+                    return t.counted - t.system;
+                  };
+                  const expanded = !open.has(key);
                   return (
                     <Fragment key={key}>
                       <tr className="hover:bg-zinc-900/50">
@@ -835,9 +1025,17 @@ function OpnameHistoryModal({
                           <span className={entry.status === "IN_PROGRESS" ? "text-amber-400" : entry.status === "CONFIRMED" ? "text-sky-400" : "text-emerald-400"}>
                             {statusLabel(entry.status)}
                           </span>
+                          {entry.adjustment && (
+                            <span
+                              className="ml-2 font-mono text-emerald-400"
+                              title={`${entry.adjustment.at ?? ""}${entry.adjustment.by ? ` · ${entry.adjustment.by}` : ""}`}
+                            >
+                              ✓ {entry.adjustment.note}
+                            </span>
+                          )}
                         </td>
                         {buckets.map((b) => {
-                          const f = figures(entry, b.key);
+                          const f = shownFigures(entry, b.key, excludedKeys);
                           return (
                             <Fragment key={b.key}>
                               <td className="px-2 py-2 text-right font-mono text-zinc-400 border-t border-l border-zinc-800/70">{f.system.toLocaleString()}</td>
@@ -922,5 +1120,77 @@ function OpnameHistoryModal({
         </div>
       </div>
     </div>
+  );
+}
+
+// The Adj field of one SOSKU session: free text. Type and press Enter (or
+// click away) to save; empty it to clear. Escape puts the saved value back.
+// Green = saved, red = not saved (hover for the reason).
+function AdjustmentInput({
+  value,
+  title,
+  ariaLabel,
+  onSave,
+}: {
+  value: string;
+  title: string;
+  ariaLabel: string;
+  onSave: (note: string) => Promise<{ error?: string }>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null); // null = showing the saved value
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function commit() {
+    if (draft === null) return;
+    const note = draft.trim();
+    if (note === value) {
+      setDraft(null);
+      return;
+    }
+    setSaving(true);
+    const result = await onSave(note);
+    setSaving(false);
+    if (result.error) {
+      setError(result.error); // keep the typed text so it can be saved again
+      return;
+    }
+    setError(null);
+    setDraft(null);
+  }
+
+  const tone = error
+    ? "border-red-700 text-red-300"
+    : value
+      ? "border-emerald-900 text-emerald-400"
+      : "border-zinc-800 text-zinc-200";
+
+  return (
+    <input
+      type="text"
+      value={draft ?? value}
+      onFocus={() => setDraft((d) => d ?? value)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        if (error) setError(null);
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          setDraft(null);
+          setError(null);
+          // Let the blur that follows see nothing to save.
+          requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
+        }
+      }}
+      disabled={saving}
+      placeholder="—"
+      maxLength={200}
+      title={error ?? title}
+      aria-label={ariaLabel}
+      aria-invalid={error !== null}
+      className={`w-[4.75rem] px-1 py-0.5 rounded bg-zinc-950 border font-mono text-[9px] placeholder:text-zinc-700 focus:outline-none focus:border-amber-500 disabled:opacity-50 ${tone}`}
+    />
   );
 }

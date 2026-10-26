@@ -17,9 +17,9 @@ export const dynamic = "force-dynamic";
 // GET /api/stock-opname/summary?from=YYYY-MM-DD&to=YYYY-MM-DD&warehouseId=N
 // The Stock Opname Summary tab: every product, and for each day it had a
 // per-SKU (SOSKU-) opname, the system and counted (SO) quantity per Total
-// Stock column of the warehouse (lib/skuOpnameSummary.ts). When a SKU was
-// opnamed more than once on a day, that day shows the latest one
-// (sessionsThatDay says how many there were; Detail lists them all).
+// Stock column of the warehouse (lib/skuOpnameSummary.ts). Every session
+// is returned: when a SKU was opnamed more than once on a day, that day has
+// one entry per SOSKU session, oldest first (the tab shows one sub-row each).
 // currentStock is the product's live Total Stock in the warehouse right now
 // (same rule as the Total Stock page: locations ticked "Counts in Total
 // Stock"), independent of the date filter.
@@ -27,9 +27,9 @@ export const dynamic = "force-dynamic";
 //     warehouse: { id, name }, warehouses: [{ id, name, isActive }],
 //     buckets: [{ key, name }],      // "col:<id>" per column, "other", "total"
 //     dates: ["2026-10-20", ...],    // oldest first
-//     items: [{ itemId, sku, name, currentStock, cells: { [date]: { opnameNumber,
+//     items: [{ itemId, sku, name, currentStock, cells: { [date]: [{ opnameNumber,
 //               lockedAt, status, by, buckets: { [key]: { system, counted } },
-//               unaccounted, sessionsThatDay } } }]
+//               unaccounted, adjustment }, ...] } }]
 //   }
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -64,12 +64,12 @@ export async function GET(req: NextRequest) {
 
   const stockByItem = new Map(stockRows.map((r) => [r.itemId, r.quantity]));
 
-  // Latest opname per product per day (entries come oldest first).
-  const cells = new Map<number, Record<string, SummaryEntry & { sessionsThatDay: number }>>();
+  // Every opname per product per day (entries come oldest first, so each
+  // day's list is oldest first too).
+  const cells = new Map<number, Record<string, SummaryEntry[]>>();
   for (const entry of entries) {
     const byDate = cells.get(entry.itemId) ?? {};
-    const previous = byDate[entry.date];
-    byDate[entry.date] = { ...entry, sessionsThatDay: (previous?.sessionsThatDay ?? 0) + 1 };
+    (byDate[entry.date] ??= []).push(entry);
     cells.set(entry.itemId, byDate);
   }
 

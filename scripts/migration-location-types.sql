@@ -293,6 +293,86 @@ ALTER TABLE settings DROP COLUMN IF EXISTS default_staging_location_id;
 -- Warehouses can be deactivated (Locations → Warehouses).
 ALTER TABLE warehouses ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
 
+-- 9a. Stock Opname Summary: freeze where each per-SKU (SOSKU) opname's
+-- stock was, with each location's warehouse / Total Stock column as they are
+-- NOW, so later settings changes (e.g. a location no longer counting toward
+-- Total Stock) don't rewrite past opnames. New opnames save this
+-- themselves. Only fills rows that don't have it yet.
+ALTER TABLE stock_opname_skus ADD COLUMN IF NOT EXISTS column_snapshot jsonb;
+ALTER TABLE stock_opname_items ADD COLUMN IF NOT EXISTS snapshot_warehouse_id integer;
+ALTER TABLE stock_opname_items ADD COLUMN IF NOT EXISTS snapshot_stock_column_id integer;
+ALTER TABLE stock_opname_items ADD COLUMN IF NOT EXISTS snapshot_counts_in_total boolean;
+
+UPDATE stock_opname_items i SET
+  snapshot_warehouse_id = l.warehouse_id,
+  snapshot_stock_column_id = l.stock_column_id,
+  snapshot_counts_in_total = l.counts_in_total_stock
+FROM locations l
+WHERE l.id = i.location_id AND i.snapshot_warehouse_id IS NULL AND i.opname_number LIKE 'SOSKU-%';
+
+-- Stock per location when the SKU was locked = today's stock minus every
+-- movement since (RELEASE moves nothing) — same as the summary's rebuild.
+UPDATE stock_opname_skus s SET column_snapshot = (
+  SELECT coalesce(jsonb_agg(jsonb_build_object(
+      'locationId', l.id,
+      'warehouseId', l.warehouse_id,
+      'stockColumnId', l.stock_column_id,
+      'countsInTotalStock', l.counts_in_total_stock,
+      'qty', b.qty
+    ) ORDER BY l.id), '[]'::jsonb)
+  FROM (
+    SELECT x.location_id, sum(x.q)::int AS qty
+    FROM (
+      SELECT ls.location_id, ls.quantity AS q
+        FROM location_stock ls WHERE ls.item_id = s.item_id
+      UNION ALL
+      SELECT e.destination_location_id, -e.quantity
+        FROM location_stock_events e
+        WHERE e.item_id = s.item_id AND e.created_at > s.added_at AND e.type::text <> 'RELEASE'
+          AND e.destination_location_id IS NOT NULL
+      UNION ALL
+      SELECT e.source_location_id, e.quantity
+        FROM location_stock_events e
+        WHERE e.item_id = s.item_id AND e.created_at > s.added_at AND e.type::text <> 'RELEASE'
+          AND e.source_location_id IS NOT NULL
+    ) x
+    GROUP BY x.location_id
+    HAVING sum(x.q) <> 0
+  ) b
+  JOIN locations l ON l.id = b.location_id
+)
+WHERE s.column_snapshot IS NULL AND s.opname_number LIKE 'SOSKU-%';
+
+-- 9b. New web permissions split from existing ones (/permissions):
+--   locations.warehouses   "Manage warehouses"          from locations.edit
+--   settings.locations     "Edit Locations & Marking"   from settings.edit
+--   settings.stockColumns  "Edit Total Stock columns"   from settings.edit
+-- Roles that had the old permission get the new one, once per key
+-- (permission_seeds remembers it), so unticking it later on /permissions
+-- isn't undone by running this script again.
+CREATE TABLE IF NOT EXISTS permission_seeds (
+  action_key text PRIMARY KEY,
+  seeded_at timestamp NOT NULL DEFAULT now()
+);
+
+DO $$
+DECLARE
+  pair text[];
+BEGIN
+  FOREACH pair SLICE 1 IN ARRAY ARRAY[
+    ['locations.warehouses', 'locations.edit'],
+    ['settings.locations', 'settings.edit'],
+    ['settings.stockColumns', 'settings.edit']
+  ] LOOP
+    IF NOT EXISTS (SELECT 1 FROM permission_seeds WHERE action_key = pair[1]) THEN
+      INSERT INTO role_action_permissions (role_id, action_key)
+        SELECT role_id, pair[1] FROM role_action_permissions WHERE action_key = pair[2]
+        ON CONFLICT (role_id, action_key) DO NOTHING;
+      INSERT INTO permission_seeds (action_key) VALUES (pair[1]);
+    END IF;
+  END LOOP;
+END $$;
+
 -- 10. Warnings for setups the PDA's pickers can't resolve
 DO $$
 BEGIN
