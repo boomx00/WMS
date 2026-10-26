@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import VerifyStockIntegrityPanel from "./VerifyStockIntegrityPanel";
+import StockOpnameSummaryPanel from "./StockOpnameSummaryPanel";
+import { STOCK_OPNAME_SUMMARY_LABELS } from "@/lib/stockOpnameSummaryLabels";
 import { formatDateTime } from "@/lib/formatDateTime";
 import SkuOpnameDetail, { type SkuDetailResponse } from "./SkuOpnameDetail";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
@@ -42,9 +44,9 @@ export default function StockOpnameClient({
   sessions: Session[];
   users: { username: string }[];
 }) {
-  const [activeTab, setActiveTab] = useState<"opname" | "verify">("opname");
+  const [activeTab, setActiveTab] = useState<"opname" | "verify" | "summary">("opname");
   const router = useRouter();
-  const labels = usePageLabels("stock_opname");
+  const labels = usePageLabels("stock_opname", STOCK_OPNAME_SUMMARY_LABELS);
   const [opnameNumber, setOpnameNumber] = useState("");
   const [locationCodes, setLocationCodes] = useState("");
   const [assignedToUsername, setAssignedToUsername] = useState("");
@@ -94,16 +96,23 @@ export default function StockOpnameClient({
   return (
     <div>
       <div className="flex gap-1 mb-6 border-b border-zinc-800">
-        <TabButton label="Stock Opname" active={activeTab === "opname"} onClick={() => setActiveTab("opname")} />
+        <TabButton label={labels.tab_opname} active={activeTab === "opname"} onClick={() => setActiveTab("opname")} />
         <TabButton
-          label="Verify Stock Integrity"
+          label={labels.tab_verify}
           active={activeTab === "verify"}
           onClick={() => setActiveTab("verify")}
+        />
+        <TabButton
+          label={labels.tab_summary}
+          active={activeTab === "summary"}
+          onClick={() => setActiveTab("summary")}
         />
       </div>
 
       {activeTab === "verify" ? (
         <VerifyStockIntegrityPanel />
+      ) : activeTab === "summary" ? (
+        <StockOpnameSummaryPanel />
       ) : (
         <div>
           <form onSubmit={handleCreate} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4 mb-8">

@@ -1,0 +1,69 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+import { getSession } from "@/lib/auth";
+import { getWarehouses, resolveWarehouse } from "@/lib/warehouses";
+import {
+  cleanDate,
+  getSkuOpnameEntries,
+  getSummaryBuckets,
+  getSummaryItems,
+  type SummaryEntry,
+} from "@/lib/skuOpnameSummary";
+
+export const dynamic = "force-dynamic";
+
+// GET /api/stock-opname/summary?from=YYYY-MM-DD&to=YYYY-MM-DD&warehouseId=N
+// The Stock Opname Summary tab: every product, and for each day it had a
+// per-SKU (SOSKU-) opname, the system and counted (SO) quantity per Total
+// Stock column of the warehouse (lib/skuOpnameSummary.ts). When a SKU was
+// opnamed more than once on a day, that day shows the latest one
+// (sessionsThatDay says how many there were; Detail lists them all).
+//   {
+//     warehouse: { id, name }, warehouses: [{ id, name, isActive }],
+//     buckets: [{ key, name }],      // "col:<id>" per column, "other", "total"
+//     dates: ["2026-10-20", ...],    // oldest first
+//     items: [{ itemId, sku, name, cells: { [date]: { opnameNumber, lockedAt,
+//               status, by, buckets: { [key]: { system, counted } },
+//               unaccounted, sessionsThatDay } } }]
+//   }
+export async function GET(req: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+  }
+
+  const params = req.nextUrl.searchParams;
+  const resolved = await resolveWarehouse(db, params.get("warehouseId"));
+  if ("error" in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  }
+  const { warehouse } = resolved;
+  const from = cleanDate(params.get("from"));
+  const to = cleanDate(params.get("to"));
+
+  const [entries, buckets, products, warehouses] = await Promise.all([
+    getSkuOpnameEntries(db, { warehouseId: warehouse.id, from, to }),
+    getSummaryBuckets(db, warehouse.id),
+    getSummaryItems(db),
+    getWarehouses(db),
+  ]);
+
+  // Latest opname per product per day (entries come oldest first).
+  const cells = new Map<number, Record<string, SummaryEntry & { sessionsThatDay: number }>>();
+  for (const entry of entries) {
+    const byDate = cells.get(entry.itemId) ?? {};
+    const previous = byDate[entry.date];
+    byDate[entry.date] = { ...entry, sessionsThatDay: (previous?.sessionsThatDay ?? 0) + 1 };
+    cells.set(entry.itemId, byDate);
+  }
+
+  const dates = [...new Set(entries.map((e) => e.date))].sort();
+
+  return NextResponse.json({
+    warehouse: { id: warehouse.id, name: warehouse.name },
+    warehouses: warehouses.map(({ id, name, isActive }) => ({ id, name, isActive })),
+    buckets,
+    dates,
+    items: products.map((p) => ({ ...p, cells: cells.get(p.itemId) ?? {} })),
+  });
+}
