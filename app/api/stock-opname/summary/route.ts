@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { locationStock, locations } from "@/db/schema";
+import { and, eq, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { getWarehouses, resolveWarehouse } from "@/lib/warehouses";
 import {
@@ -18,12 +20,15 @@ export const dynamic = "force-dynamic";
 // Stock column of the warehouse (lib/skuOpnameSummary.ts). When a SKU was
 // opnamed more than once on a day, that day shows the latest one
 // (sessionsThatDay says how many there were; Detail lists them all).
+// currentStock is the product's live Total Stock in the warehouse right now
+// (same rule as the Total Stock page: locations ticked "Counts in Total
+// Stock"), independent of the date filter.
 //   {
 //     warehouse: { id, name }, warehouses: [{ id, name, isActive }],
 //     buckets: [{ key, name }],      // "col:<id>" per column, "other", "total"
 //     dates: ["2026-10-20", ...],    // oldest first
-//     items: [{ itemId, sku, name, cells: { [date]: { opnameNumber, lockedAt,
-//               status, by, buckets: { [key]: { system, counted } },
+//     items: [{ itemId, sku, name, currentStock, cells: { [date]: { opnameNumber,
+//               lockedAt, status, by, buckets: { [key]: { system, counted } },
 //               unaccounted, sessionsThatDay } } }]
 //   }
 export async function GET(req: NextRequest) {
@@ -41,12 +46,23 @@ export async function GET(req: NextRequest) {
   const from = cleanDate(params.get("from"));
   const to = cleanDate(params.get("to"));
 
-  const [entries, buckets, products, warehouses] = await Promise.all([
+  const [entries, buckets, products, warehouses, stockRows] = await Promise.all([
     getSkuOpnameEntries(db, { warehouseId: warehouse.id, from, to }),
     getSummaryBuckets(db, warehouse.id),
     getSummaryItems(db),
     getWarehouses(db),
+    db
+      .select({
+        itemId: locationStock.itemId,
+        quantity: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::int`,
+      })
+      .from(locationStock)
+      .innerJoin(locations, eq(locationStock.locationId, locations.id))
+      .where(and(eq(locations.countsInTotalStock, true), eq(locations.warehouseId, warehouse.id)))
+      .groupBy(locationStock.itemId),
   ]);
+
+  const stockByItem = new Map(stockRows.map((r) => [r.itemId, r.quantity]));
 
   // Latest opname per product per day (entries come oldest first).
   const cells = new Map<number, Record<string, SummaryEntry & { sessionsThatDay: number }>>();
@@ -64,6 +80,10 @@ export async function GET(req: NextRequest) {
     warehouses: warehouses.map(({ id, name, isActive }) => ({ id, name, isActive })),
     buckets,
     dates,
-    items: products.map((p) => ({ ...p, cells: cells.get(p.itemId) ?? {} })),
+    items: products.map((p) => ({
+      ...p,
+      currentStock: stockByItem.get(p.itemId) ?? 0,
+      cells: cells.get(p.itemId) ?? {},
+    })),
   });
 }

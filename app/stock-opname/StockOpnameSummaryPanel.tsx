@@ -29,7 +29,7 @@ type SummaryResponse = {
   warehouses: { id: number; name: string; isActive: boolean }[];
   buckets: Bucket[];
   dates: string[];
-  items: { itemId: number; sku: string; name: string; cells: Record<string, Cell> }[];
+  items: { itemId: number; sku: string; name: string; currentStock: number; cells: Record<string, Cell> }[];
 };
 
 type DetailLine = {
@@ -110,6 +110,46 @@ function EyeIcon() {
   );
 }
 
+// Table sort: by SKU (A→Z first) or by current Total Stock (highest first).
+// A third click on the same header goes back to the API's order.
+type SortKey = "sku" | "stock";
+type Sort = { key: SortKey; dir: "asc" | "desc" } | null;
+
+function nextSort(current: Sort, key: SortKey): Sort {
+  const first = key === "stock" ? "desc" : "asc";
+  if (!current || current.key !== key) return { key, dir: first };
+  if (current.dir === first) return { key, dir: first === "asc" ? "desc" : "asc" };
+  return null;
+}
+
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align = "left",
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: Sort;
+  onSort: (key: SortKey) => void;
+  align?: "left" | "right";
+}) {
+  const active = sort?.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      className={`inline-flex items-center gap-0.5 hover:text-zinc-200 transition-colors ${active ? "text-amber-400" : ""} ${
+        align === "right" ? "flex-row-reverse" : ""
+      }`}
+    >
+      {label}
+      <span className={active ? "" : "text-zinc-700"}>{active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+    </button>
+  );
+}
+
 // Columns shown by default: those anything was counted in (Good Stock,
 // Defect, ...); if nothing was counted yet, those with system stock.
 function defaultBucketKeys(data: SummaryResponse): string[] {
@@ -163,6 +203,7 @@ export default function StockOpnameSummaryPanel() {
   const [hideNever, setHideNever] = useState(false);
   const [hiddenIds, setHiddenIds] = useState<number[]>([]);
   const [showHidden, setShowHidden] = useState(false);
+  const [sort, setSort] = useState<Sort>(null);
   const [selected, setSelected] = useState<string[] | null>(null);
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -237,7 +278,7 @@ export default function StockOpnameSummaryPanel() {
   const rows = useMemo(() => {
     if (!data) return [];
     const q = search.trim().toLowerCase();
-    return data.items.filter((item) => {
+    const filtered = data.items.filter((item) => {
       if (q && !item.sku.toLowerCase().includes(q) && !item.name.toLowerCase().includes(q)) return false;
       if (!showHidden && hiddenSet.has(item.itemId)) return false;
       const cells = Object.values(item.cells);
@@ -248,7 +289,14 @@ export default function StockOpnameSummaryPanel() {
       }
       return true;
     });
-  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet]);
+    if (!sort) return filtered;
+    const factor = sort.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) =>
+      sort.key === "stock"
+        ? (a.currentStock - b.currentStock) * factor || a.sku.localeCompare(b.sku)
+        : a.sku.localeCompare(b.sku, undefined, { numeric: true }) * factor
+    );
+  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet, sort]);
 
   function toggleBucket(key: string) {
     if (!data || !selected) return;
@@ -264,13 +312,16 @@ export default function StockOpnameSummaryPanel() {
     setWarehouseId(id);
   }
 
+  const stockLabel = labels.summary_th_stock ?? "Total stock";
+
   function exportExcel() {
     if (!data) return;
-    const header1: (string | number)[] = [labels.summary_th_sku, labels.summary_th_product];
-    const header2: (string | number)[] = ["", ""];
+    const header1: (string | number)[] = [labels.summary_th_sku, labels.summary_th_product, stockLabel];
+    const header2: (string | number)[] = ["", "", ""];
     const merges: XLSX.Range[] = [
       { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } },
       { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } },
+      { s: { r: 0, c: 2 }, e: { r: 1, c: 2 } },
     ];
     if (buckets.length > 0) {
       for (const date of data.dates) {
@@ -283,7 +334,7 @@ export default function StockOpnameSummaryPanel() {
       }
     }
     const body = rows.map((item) => {
-      const row: (string | number)[] = [item.sku, item.name];
+      const row: (string | number)[] = [item.sku, item.name, item.currentStock];
       for (const date of data.dates) {
         const cell = item.cells[date];
         for (const b of buckets) {
@@ -438,8 +489,19 @@ export default function StockOpnameSummaryPanel() {
             <thead className="sticky top-0 z-20">
               <tr className="text-zinc-500 text-left">
                 <th rowSpan={2} className={`${stickyLeft} z-30 bg-zinc-900 px-2 py-1 font-medium align-bottom border-b border-zinc-800`}>
-                  <div>{labels.summary_th_sku}</div>
-                  <div className="font-normal text-zinc-600">{labels.summary_th_product}</div>
+                  <div className="flex items-end justify-between gap-3">
+                    <div>
+                      <SortHeader label={labels.summary_th_sku} sortKey="sku" sort={sort} onSort={(k) => setSort((c) => nextSort(c, k))} />
+                      <div className="font-normal text-zinc-600">{labels.summary_th_product}</div>
+                    </div>
+                    <SortHeader
+                      label={stockLabel}
+                      sortKey="stock"
+                      sort={sort}
+                      onSort={(k) => setSort((c) => nextSort(c, k))}
+                      align="right"
+                    />
+                  </div>
                 </th>
                 {data.dates.length === 0 ? (
                   <>
@@ -509,7 +571,15 @@ export default function StockOpnameSummaryPanel() {
                       <td className={`${stickyLeft} z-10 bg-zinc-950 group-hover:bg-zinc-900 px-2 py-1 border-t border-zinc-800/70`}>
                         <div className="flex items-start gap-1.5">
                           <div className="min-w-0 flex-1">
-                            <div className="font-mono text-amber-500">{item.sku}</div>
+                            <div className="flex items-baseline justify-between gap-3">
+                              <span className="font-mono text-amber-500">{item.sku}</span>
+                              <span
+                                title={stockLabel}
+                                className={`font-mono ${item.currentStock === 0 ? "text-zinc-600" : "text-zinc-200"}`}
+                              >
+                                {item.currentStock.toLocaleString()}
+                              </span>
+                            </div>
                             <div className="text-zinc-400 truncate" title={item.name}>
                               {item.name}
                             </div>
