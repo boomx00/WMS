@@ -5,7 +5,8 @@ import { and, eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { isSkuOpname } from "@/lib/skuOpname";
 
-const MAX_LENGTH = 200;
+// Same limit as the Adj field on the Stock Opname Summary (NOTE_MAX_LENGTH).
+const MAX_LENGTH = 1000;
 
 function sanitize(input: unknown): string {
   return typeof input === "string" ? input.replace(/\0/g, "").trim() : "";

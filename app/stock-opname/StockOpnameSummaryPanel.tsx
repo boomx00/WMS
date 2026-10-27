@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
+import { useLanguage } from "@/lib/LanguageContext";
 import { STOCK_OPNAME_SUMMARY_LABELS } from "@/lib/stockOpnameSummaryLabels";
 
 // Stock Opname → Stock Opname Summary: every product, and for each day it
@@ -235,11 +236,15 @@ const todayLocal = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 
-function formatDay(date: string): { day: string; weekday: string } {
+// Dates follow the language picked in the top bar.
+const DATE_LOCALES: Record<string, string> = { en: "en-GB", id: "id-ID", zh: "zh-CN" };
+const useDateLocale = () => DATE_LOCALES[useLanguage().language] ?? "en-GB";
+
+function formatDay(date: string, locale = "en-GB"): { day: string; weekday: string } {
   const d = new Date(`${date}T00:00:00`);
   return {
-    day: d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
-    weekday: d.toLocaleDateString("en-GB", { weekday: "short" }),
+    day: d.toLocaleDateString(locale, { day: "2-digit", month: "short", year: "numeric" }),
+    weekday: d.toLocaleDateString(locale, { weekday: "short" }),
   };
 }
 
@@ -255,7 +260,11 @@ function Delta({ value, muted = false }: { value: number; muted?: boolean }) {
 
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
+// Longest adjustment note (same limit as /api/stock-opname/summary/adjustment).
+const NOTE_MAX_LENGTH = 1000;
 const fmtQty = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 3 });
+// Excel sheet names: max 31 characters, none of [ ] : * ? / \
+const sheetName = (name: string) => name.replace(/[[\]:*?/\\]/g, " ").trim().slice(0, 31) || "Sheet1";
 
 // One row of K3's export, as sent to the import endpoint (which keeps the
 // Good Stock ones and matches Material Code to the WMS SKU).
@@ -274,15 +283,13 @@ const headerKey = (v: unknown) => String(v ?? "").toLowerCase().replace(/[^a-z0-
 // .xlsx, .xls, .csv) is returned untouched.
 const ZIP_MAX32 = 0xffffffff;
 
-async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
-  if (typeof DecompressionStream === "undefined") {
-    throw new Error("This browser can't open this file — please use an up-to-date Chrome or Edge");
-  }
+async function inflateRaw(data: Uint8Array, t: Record<string, string>): Promise<Uint8Array> {
+  if (typeof DecompressionStream === "undefined") throw new Error(t.k3_err_browser);
   const stream = new Blob([data as BlobPart]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-async function normalizeXlsx(buffer: ArrayBuffer): Promise<Uint8Array> {
+async function normalizeXlsx(buffer: ArrayBuffer, t: Record<string, string>): Promise<Uint8Array> {
   const u8 = new Uint8Array(buffer);
   const dv = new DataView(buffer);
   const u16 = (o: number) => dv.getUint16(o, true);
@@ -315,7 +322,7 @@ async function normalizeXlsx(buffer: ArrayBuffer): Promise<Uint8Array> {
   const entries: Entry[] = [];
   let p = cdOffset;
   for (let i = 0; i < count; i++) {
-    if (u32(p) !== 0x02014b50) throw new Error("The file looks damaged (bad zip directory)");
+    if (u32(p) !== 0x02014b50) throw new Error(t.k3_err_damaged);
     const method = u16(p + 10);
     let csz = u32(p + 20);
     let usz = u32(p + 24);
@@ -356,8 +363,8 @@ async function normalizeXlsx(buffer: ArrayBuffer): Promise<Uint8Array> {
   for (const e of entries) {
     const raw = u8.subarray(e.dataStart, e.dataStart + e.csz);
     if (e.method === 0) parts.push({ name: e.name, data: raw });
-    else if (e.method === 8) parts.push({ name: e.name, data: await inflateRaw(raw) });
-    else throw new Error(`Unsupported zip compression (${e.method})`);
+    else if (e.method === 8) parts.push({ name: e.name, data: await inflateRaw(raw, t) });
+    else throw new Error(t.k3_err_compression.replace("{n}", String(e.method)));
   }
   const total =
     parts.reduce((n, f) => n + 30 + f.name.length + f.data.length + 46 + f.name.length, 0) + 22;
@@ -401,8 +408,8 @@ async function normalizeXlsx(buffer: ArrayBuffer): Promise<Uint8Array> {
 // Material Name / Warehouse Name / Inventory Status / Inventory Qty (CUoM)
 // columns. Which rows count (MCI Warehouse, Good Stock) is decided by the
 // import endpoint.
-async function readK3File(file: File): Promise<K3Row[]> {
-  const book = XLSX.read(await normalizeXlsx(await file.arrayBuffer()), { type: "array" });
+async function readK3File(file: File, t: Record<string, string>): Promise<K3Row[]> {
+  const book = XLSX.read(await normalizeXlsx(await file.arrayBuffer(), t), { type: "array" });
   for (const sheetName of book.SheetNames) {
     const grid = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[sheetName], {
       header: 1,
@@ -424,7 +431,7 @@ async function readK3File(file: File): Promise<K3Row[]> {
       status < 0 ? "Inventory Status" : null,
       qty < 0 ? "Inventory Qty (CUoM)" : null,
     ].filter(Boolean);
-    if (missing.length > 0) throw new Error(`The file has no ${missing.join(" or ")} column`);
+    if (missing.length > 0) throw new Error(t.k3_err_missing_columns.replace("{columns}", missing.join(", ")));
     return grid
       .slice(headerRow + 1)
       .map((r) => ({
@@ -436,11 +443,12 @@ async function readK3File(file: File): Promise<K3Row[]> {
       }))
       .filter((r) => r.code !== null && r.code !== "");
   }
-  throw new Error('No "Material Code" column found in the file');
+  throw new Error(t.k3_err_no_material_code);
 }
 
 export default function StockOpnameSummaryPanel() {
   const labels = usePageLabels("stock_opname", STOCK_OPNAME_SUMMARY_LABELS);
+  const locale = useDateLocale();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [warehouseId, setWarehouseId] = useState<number | null>(null);
@@ -458,6 +466,8 @@ export default function StockOpnameSummaryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ itemId: number; date: string; opnameNumber: string } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  // The date whose report window is open.
+  const [reportDate, setReportDate] = useState<string | null>(null);
   // Bumped to reload the summary (e.g. after a K3 import), keeping filters.
   const [reloadKey, setReloadKey] = useState(0);
   // K3 import: one hidden file input, aimed at the date whose button was
@@ -482,7 +492,7 @@ export default function StockOpnameSummaryPanel() {
     fetch(`/api/stock-opname/summary?${params.toString()}`)
       .then(async (res) => {
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error ?? `Failed to load (${res.status})`);
+        if (!res.ok) throw new Error(json.error ?? ""); // "" = the generic "failed to load" text
         return json as SummaryResponse;
       })
       .then((json) => {
@@ -495,7 +505,7 @@ export default function StockOpnameSummaryPanel() {
         if (warehouseId === null) setWarehouseId(json.warehouse.id);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+        if (!cancelled) setError(err instanceof Error ? err.message : "");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -607,20 +617,20 @@ export default function StockOpnameSummaryPanel() {
         body: JSON.stringify({ opnameNumber: target.opnameNumber, itemId: target.itemId, note }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) return { error: json.error ?? `Failed to save (${res.status})` };
+      if (!res.ok) return { error: json.error ?? `${labels.summary_err_save} (${res.status})` };
       applyAdjustment(target, json.adjustment ?? null);
       return {};
     } catch {
-      return { error: "Failed to save" };
+      return { error: labels.summary_err_save };
     }
   }
 
   function startK3Import(date: string) {
     if (data?.k3?.[date]) {
       const ok = window.confirm(
-        (labels.k3_replace_confirm ?? "Replace the K3 stock already imported for {date}?").replace(
+        labels.k3_replace_confirm.replace(
           "{date}",
-          formatDay(date).day
+          formatDay(date, locale).day
         )
       );
       if (!ok) return;
@@ -637,18 +647,18 @@ export default function StockOpnameSummaryPanel() {
     setK3Busy(date);
     setK3Notice(null);
     try {
-      const rows = await readK3File(file);
+      const rows = await readK3File(file, labels);
       const res = await fetch("/api/stock-opname/summary/k3", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ warehouseId: data.warehouse.id, date, fileName: file.name, rows }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? `Import failed (${res.status})`);
+      if (!res.ok) throw new Error(json.error ?? `${labels.k3_err_import} (${res.status})`);
       setK3Notice({ kind: "ok", date, result: json.import as K3Import });
       setReloadKey((k) => k + 1);
     } catch (err) {
-      setK3Notice({ kind: "error", date, message: err instanceof Error ? err.message : "Import failed" });
+      setK3Notice({ kind: "error", date, message: err instanceof Error ? err.message : labels.k3_err_import });
     } finally {
       setK3Busy(null);
     }
@@ -657,7 +667,7 @@ export default function StockOpnameSummaryPanel() {
   async function removeK3(date: string) {
     if (!data) return;
     const ok = window.confirm(
-      (labels.k3_remove_confirm ?? "Remove the K3 stock imported for {date}?").replace("{date}", formatDay(date).day)
+      labels.k3_remove_confirm.replace("{date}", formatDay(date, locale).day)
     );
     if (!ok) return;
     setK3Busy(date);
@@ -666,11 +676,11 @@ export default function StockOpnameSummaryPanel() {
         method: "DELETE",
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? `Failed (${res.status})`);
+      if (!res.ok) throw new Error(json.error ?? `${labels.k3_err_remove} (${res.status})`);
       if (k3Notice?.date === date) setK3Notice(null);
       setReloadKey((k) => k + 1);
     } catch (err) {
-      setK3Notice({ kind: "error", date, message: err instanceof Error ? err.message : "Failed to remove" });
+      setK3Notice({ kind: "error", date, message: err instanceof Error ? err.message : labels.k3_err_remove });
     } finally {
       setK3Busy(null);
     }
@@ -681,12 +691,12 @@ export default function StockOpnameSummaryPanel() {
     setWarehouseId(id);
   }
 
-  const stockLabel = labels.summary_th_stock ?? "Total stock";
-  const adjLabel = labels.summary_th_adjusted ?? "Adj";
-  const soskuLabel = labels.summary_th_sosku ?? "SOSKU";
-  const k3Label = labels.summary_th_k3 ?? "K3 Stock";
-  const k3DeltaLabel = labels.summary_th_k3_delta ?? "Δ K3";
-  const k3DeltaTitle = labels.summary_k3_delta_title ?? "Total SO − K3 Good Stock";
+  const stockLabel = labels.summary_th_stock;
+  const adjLabel = labels.summary_th_adjusted;
+  const soskuLabel = labels.summary_th_sosku;
+  const k3Label = labels.summary_th_k3;
+  const k3DeltaLabel = labels.summary_th_k3_delta;
+  const k3DeltaTitle = labels.summary_k3_delta_title;
 
   function exportExcel() {
     if (!data) return;
@@ -742,7 +752,7 @@ export default function StockOpnameSummaryPanel() {
     const sheet = XLSX.utils.aoa_to_sheet([header1, header2, ...body]);
     sheet["!merges"] = merges;
     const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Stock Opname Summary");
+    XLSX.utils.book_append_sheet(book, sheet, sheetName(labels.tab_summary));
     const range = from || to ? `-${from || "start"}_${to || "now"}` : "";
     XLSX.writeFile(book, `stock-opname-summary${range}.xlsx`, { bookType: "xlsx" });
   }
@@ -870,12 +880,12 @@ export default function StockOpnameSummaryPanel() {
         {data && hiddenIds.length > 0 && (
           <label className="flex items-center gap-1.5 text-zinc-300 cursor-pointer">
             <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} className="h-4 w-4 accent-amber-500" />
-            {(labels.summary_show_hidden ?? "Show hidden ({n})").replace("{n}", String(hiddenIds.length))}
+            {labels.summary_show_hidden.replace("{n}", String(hiddenIds.length))}
           </label>
         )}
       </div>
 
-      {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+      {error !== null && <p className="text-xs text-red-400 mb-3">{error || labels.summary_err_load}</p>}
 
       {data && (
         <p className="text-xs text-zinc-600 mb-2">
@@ -884,7 +894,7 @@ export default function StockOpnameSummaryPanel() {
             : labels.summary_rows.replace("{n}", rows.length.toLocaleString()).replace("{d}", String(data.dates.length))}
           {!loading && selected?.includes("total") && excludedNames.length > 0 && (
             <span className="ml-3 text-amber-500/80">
-              * {(labels.summary_total_excludes ?? "Total excludes: {list}").replace("{list}", excludedNames.join(", "))}
+              * {labels.summary_total_excludes.replace("{list}", excludedNames.join(", "))}
             </span>
           )}
         </p>
@@ -909,13 +919,13 @@ export default function StockOpnameSummaryPanel() {
           <div className="flex items-start justify-between gap-3">
             <div>
               {k3Notice.kind === "error" ? (
-                <>
-                  K3 · {formatDay(k3Notice.date).day}: {k3Notice.message}
-                </>
+                labels.k3_error
+                  .replace("{date}", formatDay(k3Notice.date, locale).day)
+                  .replace("{message}", k3Notice.message)
               ) : (
                 <>
-                  {(labels.k3_import_done ?? "K3 imported for {date} ({warehouse}, Good Stock): {skus} SKUs matched, total {qty}")
-                    .replace("{date}", formatDay(k3Notice.date).day)
+                  {labels.k3_import_done
+                    .replace("{date}", formatDay(k3Notice.date, locale).day)
                     .replace("{warehouse}", k3Notice.result.k3Warehouse ?? "")
                     .replace("{skus}", k3Notice.result.matchedSkus.toLocaleString())
                     .replace("{qty}", fmtQty(k3Notice.result.totalQuantity))}
@@ -923,7 +933,7 @@ export default function StockOpnameSummaryPanel() {
                     <span className="text-amber-400">
                       {" "}
                       ·{" "}
-                      {(labels.k3_unmatched ?? "{n} material code(s) not in WMS").replace(
+                      {labels.k3_unmatched.replace(
                         "{n}",
                         k3Notice.result.unmatched.length.toLocaleString()
                       )}
@@ -936,7 +946,7 @@ export default function StockOpnameSummaryPanel() {
               type="button"
               onClick={() => setK3Notice(null)}
               className="text-zinc-500 hover:text-zinc-200 leading-none"
-              aria-label="Close"
+              aria-label={labels.detail_close}
             >
               ✕
             </button>
@@ -944,7 +954,7 @@ export default function StockOpnameSummaryPanel() {
           {k3Notice.kind === "ok" && k3Notice.result.unmatched.length > 0 && (
             <details className="mt-1.5">
               <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">
-                {labels.k3_show_unmatched ?? "Show codes"}
+                {labels.k3_show_unmatched}
               </summary>
               <table className="mt-1 text-[10px]">
                 <tbody>
@@ -998,7 +1008,7 @@ export default function StockOpnameSummaryPanel() {
                   </>
                 ) : (
                   data.dates.map((date) => {
-                    const { day, weekday } = formatDay(date);
+                    const { day, weekday } = formatDay(date, locale);
                     const k3 = data.k3?.[date];
                     const busy = k3Busy === date;
                     return (
@@ -1015,14 +1025,22 @@ export default function StockOpnameSummaryPanel() {
                             <span className="inline-flex items-center gap-0.5 font-normal">
                               <button
                                 type="button"
+                                onClick={() => setReportDate(date)}
+                                title={labels.report_button_title}
+                                className="px-1.5 py-0.5 rounded border border-zinc-600 text-[9px] text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700 transition-colors"
+                              >
+                                {labels.report_button}
+                              </button>
+                              <button
+                                type="button"
                                 onClick={() => startK3Import(date)}
                                 disabled={k3Busy !== null}
                                 title={
                                   k3
-                                    ? `${labels.k3_imported ?? "K3 imported"} ${k3.importedAt}${k3.by ? ` · ${k3.by}` : ""}${
+                                    ? `${labels.k3_imported} ${k3.importedAt}${k3.by ? ` · ${k3.by}` : ""}${
                                         k3.fileName ? `\n${k3.fileName}` : ""
-                                      }\n${labels.k3_click_replace ?? "Click to import again (replaces it)"}`
-                                    : labels.k3_import_title ?? "Import K3 stock (Real-time Inventory export) for this date"
+                                      }\n${labels.k3_click_replace}`
+                                    : labels.k3_import_title
                                 }
                                 className={`px-1.5 py-0.5 rounded border text-[9px] transition-colors disabled:opacity-50 ${
                                   k3
@@ -1030,15 +1048,15 @@ export default function StockOpnameSummaryPanel() {
                                     : "border-zinc-600 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700"
                                 }`}
                               >
-                                {busy ? "K3 …" : k3 ? "K3 ✓" : `↑ ${labels.k3_import ?? "Import K3"}`}
+                                {busy ? labels.k3_button_busy : k3 ? labels.k3_button_imported : `↑ ${labels.k3_import}`}
                               </button>
                               {k3 && !busy && (
                                 <button
                                   type="button"
                                   onClick={() => removeK3(date)}
                                   disabled={k3Busy !== null}
-                                  title={labels.k3_remove ?? "Remove this K3 import"}
-                                  aria-label={`${labels.k3_remove ?? "Remove this K3 import"} ${date}`}
+                                  title={labels.k3_remove}
+                                  aria-label={`${labels.k3_remove} ${date}`}
                                   className="px-1 py-0.5 rounded text-[9px] text-zinc-500 hover:text-red-400 hover:bg-zinc-700 disabled:opacity-50"
                                 >
                                   ✕
@@ -1081,7 +1099,7 @@ export default function StockOpnameSummaryPanel() {
                     ))}
                     {data.k3?.[date] && (
                       <>
-                        <th className={`${subHead} text-sky-300 border-l border-l-zinc-700`} title={labels.k3_stock_title ?? "K3 Good Stock (Inventory Qty, CUoM)"}>
+                        <th className={`${subHead} text-sky-300 border-l border-l-zinc-700`} title={labels.k3_stock_title}>
                           {k3Label}
                         </th>
                         <th
@@ -1147,8 +1165,8 @@ export default function StockOpnameSummaryPanel() {
                                 <button
                                   type="button"
                                   onClick={() => toggleHidden(item.itemId)}
-                                  title={isHidden ? labels.summary_unhide ?? "Unhide" : labels.summary_hide ?? "Hide"}
-                                  aria-label={`${isHidden ? labels.summary_unhide ?? "Unhide" : labels.summary_hide ?? "Hide"} ${item.sku}`}
+                                  title={isHidden ? labels.summary_unhide : labels.summary_hide}
+                                  aria-label={`${isHidden ? labels.summary_unhide : labels.summary_hide} ${item.sku}`}
                                   className={`justify-self-end p-0.5 rounded text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-opacity ${
                                     isHidden ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100"
                                   }`}
@@ -1243,8 +1261,8 @@ export default function StockOpnameSummaryPanel() {
                                         <td
                                           title={
                                             k3 === undefined
-                                              ? labels.k3_not_in_file ?? "Not in the K3 file (0)"
-                                              : labels.k3_stock_title ?? "K3 Good Stock (Inventory Qty, CUoM)"
+                                              ? labels.k3_not_in_file
+                                              : labels.k3_stock_title
                                           }
                                           className={`${dataCell} ${rowBorder} border-l border-l-zinc-700 ${
                                             k3 === undefined ? "text-zinc-600" : "text-sky-300"
@@ -1269,7 +1287,7 @@ export default function StockOpnameSummaryPanel() {
                                         ? `${cell.adjustment.note}${cell.adjustment.at ? ` · ${cell.adjustment.at}` : ""}${
                                             cell.adjustment.by ? ` · ${cell.adjustment.by}` : ""
                                           }`
-                                        : labels.summary_mark_adjusted ?? "Adjustment note"
+                                        : labels.summary_mark_adjusted
                                     }
                                     ariaLabel={`${adjLabel} ${item.sku} ${cell.opnameNumber}`}
                                     onSave={(code) =>
@@ -1312,6 +1330,21 @@ export default function StockOpnameSummaryPanel() {
         </div>
       )}
 
+      {reportDate !== null && data && (
+        <DateReportModal
+          date={reportDate}
+          data={data}
+          rows={rows}
+          buckets={buckets}
+          excludedKeys={excludedKeys}
+          excludedNames={excludedNames}
+          labels={labels}
+          locale={locale}
+          onSaveNote={saveAdjustment}
+          onClose={() => setReportDate(null)}
+        />
+      )}
+
       {detail !== null && data && (
         <OpnameHistoryModal
           itemId={detail.itemId}
@@ -1323,6 +1356,560 @@ export default function StockOpnameSummaryPanel() {
           onClose={() => setDetail(null)}
         />
       )}
+    </div>
+  );
+}
+
+type ReportFilterKey = "sku" | "product" | "status" | "sosku";
+
+// A report column header with a filter: the label plus a ▾ button opening a
+// checklist of the column's values (with how many lines have each), a
+// search box, and Select all / Clear all (for the values matching the
+// search). `hidden` = the unticked values.
+function ColumnFilter({
+  label,
+  options,
+  hidden,
+  onChange,
+  onOpenChange,
+  labels,
+}: {
+  label: string;
+  options: { value: string; count: number }[];
+  hidden: string[];
+  onChange: (hidden: string[]) => void;
+  onOpenChange: (open: boolean) => void;
+  labels: Record<string, string>;
+}) {
+  const [pos, setPosState] = useState<{ top: number; left: number } | null>(null);
+  const setPos = (next: { top: number; left: number } | null) => {
+    setPosState(next);
+    onOpenChange(next !== null);
+  };
+  const [search, setSearch] = useState("");
+  const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const open = pos !== null;
+  const active = hidden.length > 0;
+  const PANEL_WIDTH = 288;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => {
+      setPosState(null);
+      onOpenChange(false);
+    };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!panel.current?.contains(t) && !button.current?.contains(t)) close();
+    };
+    // Capture phase, so Escape closes this list without closing the report.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open, onOpenChange]);
+
+  function toggleOpen() {
+    if (open) return setPos(null);
+    const r = button.current!.getBoundingClientRect();
+    setSearch("");
+    setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, window.innerWidth - PANEL_WIDTH - 8)) });
+  }
+
+  const q = search.trim().toLowerCase();
+  const matching = q ? options.filter((o) => o.value.toLowerCase().includes(q)) : options;
+  const hiddenSet = new Set(hidden);
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <button
+        ref={button}
+        type="button"
+        onClick={toggleOpen}
+        title={labels.report_filter_button.replace("{column}", label)}
+        aria-label={labels.report_filter_button.replace("{column}", label)}
+        aria-expanded={open}
+        className={`px-1 rounded text-[10px] leading-4 border transition-colors ${
+          active
+            ? "border-amber-600 bg-amber-950/60 text-amber-300"
+            : "border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
+        }`}
+      >
+        ▾{active ? ` ${options.length - hidden.length}/${options.length}` : ""}
+      </button>
+      {open && (
+        <div
+          ref={panel}
+          style={{ top: pos.top, left: pos.left, width: PANEL_WIDTH }}
+          className="fixed z-[60] rounded-md border border-zinc-700 bg-zinc-900 shadow-xl text-left font-normal text-zinc-200 normal-case"
+        >
+          <div className="p-2 border-b border-zinc-800 space-y-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={labels.report_filter_search}
+              autoFocus
+              className="w-full px-2 py-1 rounded bg-zinc-950 border border-zinc-800 text-xs focus:outline-none focus:border-amber-500"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => onChange(hidden.filter((v) => !matching.some((o) => o.value === v)))}
+                className="flex-1 px-2 py-1 rounded border border-zinc-700 text-xs hover:bg-zinc-800"
+              >
+                {labels.report_filter_select_all}
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange([...new Set([...hidden, ...matching.map((o) => o.value)])])}
+                className="flex-1 px-2 py-1 rounded border border-zinc-700 text-xs hover:bg-zinc-800"
+              >
+                {labels.report_filter_clear_all}
+              </button>
+            </div>
+          </div>
+          <div className="max-h-72 overflow-auto py-1">
+            {matching.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-zinc-500">{labels.report_filter_no_values}</p>
+            ) : (
+              matching.map((o) => (
+                <label
+                  key={o.value}
+                  className="flex items-start gap-2 px-3 py-1 text-xs cursor-pointer hover:bg-zinc-800"
+                >
+                  <input
+                    type="checkbox"
+                    checked={!hiddenSet.has(o.value)}
+                    onChange={() =>
+                      onChange(hiddenSet.has(o.value) ? hidden.filter((v) => v !== o.value) : [...hidden, o.value])
+                    }
+                    className="mt-0.5 h-3.5 w-3.5 accent-amber-500"
+                  />
+                  <span className="flex-1 break-words">{o.value}</span>
+                  <span className="text-zinc-500 tabular-nums">{o.count}</span>
+                </label>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+// The Report button of a date: every SOSKU session that day (with the page's
+// search, hidden products, filters and column choices applied) in a window
+// 90% of the screen, so full product names and adjustment notes fit. Notes
+// can be written here too; totals at the bottom; Excel export of the report.
+function DateReportModal({
+  date,
+  data,
+  rows,
+  buckets,
+  excludedKeys,
+  excludedNames,
+  labels,
+  locale,
+  onSaveNote,
+  onClose,
+}: {
+  date: string;
+  data: SummaryResponse;
+  rows: SummaryResponse["items"];
+  buckets: Bucket[];
+  excludedKeys: string[];
+  excludedNames: string[];
+  labels: Record<string, string>;
+  locale: string;
+  onSaveNote: (target: AdjustTarget, note: string) => Promise<{ error?: string }>;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const k3 = data.k3?.[date];
+  const { day, weekday } = formatDay(date, locale);
+  const statusLabel = (st: Status) =>
+    st === "CONFIRMED" ? labels.status_confirmed : st === "DONE" ? labels.status_done : labels.status_in_progress;
+
+  // One line per SOSKU session that day, with everything the table shows.
+  const allLines = rows.flatMap((item) =>
+    (item.cells[date] ?? []).map((cell) => {
+      const figs = buckets.map((b) => shownFigures(cell, b.key, excludedKeys));
+      const totalSo = shownFigures(cell, "total", excludedKeys).counted;
+      const k3Qty = k3 ? item.k3?.[date] ?? 0 : null;
+      const k3Delta = k3Qty === null ? null : round3(totalSo - k3Qty);
+      const hasDiff = figs.some((f) => f.counted !== f.system) || (k3Delta !== null && k3Delta !== 0);
+      return { item, cell, figs, k3Qty, k3Delta, hasDiff };
+    })
+  );
+
+  // Column filters (SKU, Product Name, Status, SOSKU): the values each
+  // one has unticked. Empty = everything shown, so new values show by default.
+  const [hidden, setHidden] = useState<Record<ReportFilterKey, string[]>>({ sku: [], product: [], status: [], sosku: [] });
+  // A click on the dark backdrop closes the report — unless a filter list was
+  // open, in which case that click only closes the list.
+  const filterOpen = useRef(false);
+  const backdropCloses = useRef(false);
+  const onFilterOpenChange = useCallback((isOpen: boolean) => {
+    filterOpen.current = isOpen;
+  }, []);
+  const valueOf: Record<ReportFilterKey, (l: (typeof allLines)[number]) => string> = {
+    sku: (l) => l.item.sku,
+    product: (l) => l.item.name,
+    status: (l) => statusLabel(l.cell.status),
+    sosku: (l) => l.cell.opnameNumber,
+  };
+  const filterKeys = Object.keys(hidden) as ReportFilterKey[];
+  const optionsOf = (key: ReportFilterKey) => {
+    const counts = new Map<string, number>();
+    for (const l of allLines) counts.set(valueOf[key](l), (counts.get(valueOf[key](l)) ?? 0) + 1);
+    return [...counts]
+      .map(([value, count]) => ({ value, count }))
+      .sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true }));
+  };
+  const filtered = filterKeys.some((k) => hidden[k].length > 0);
+  const shownLines = allLines.filter((l) => filterKeys.every((k) => !hidden[k].includes(valueOf[k](l))));
+
+  // A product opnamed more than once that day: only its latest shown session
+  // (a recount) goes into the totals, so nothing is counted twice.
+  const lastShown = new Map<number, (typeof allLines)[number]>();
+  for (const l of shownLines) lastShown.set(l.item.itemId, l);
+  const lines = shownLines.map((l) => ({ ...l, latest: lastShown.get(l.item.itemId) === l }));
+  const totalLines = lines.filter((l) => l.latest);
+  const totals = buckets.map((_, i) =>
+    totalLines.reduce(
+      (t, l) => ({ system: t.system + l.figs[i].system, counted: t.counted + l.figs[i].counted }),
+      { system: 0, counted: 0 }
+    )
+  );
+  const k3Total = round3(totalLines.reduce((n, l) => n + (l.k3Qty ?? 0), 0));
+  const k3DeltaTotal = round3(totalLines.reduce((n, l) => n + (l.k3Delta ?? 0), 0));
+  const skuCount = new Set(lines.map((l) => l.item.itemId)).size;
+  const diffCount = lines.filter((l) => l.hasDiff).length;
+  const notedCount = lines.filter((l) => l.cell.adjustment).length;
+
+  function exportReport() {
+    const header: (string | number)[] = ["#", labels.summary_th_sku, labels.summary_th_product];
+    for (const b of buckets) header.push(`${b.name} ${labels.summary_system}`, `${b.name} ${labels.summary_so}`, labels.summary_delta);
+    if (k3) header.push(labels.summary_th_k3, labels.summary_th_k3_delta);
+    header.push(labels.detail_th_status, labels.summary_th_sosku, labels.report_th_pic, labels.detail_th_date, labels.report_th_note);
+    const body = lines.map((l, i) => {
+      const r: (string | number)[] = [i + 1, l.item.sku, l.item.name];
+      for (const f of l.figs) r.push(f.system, f.counted, f.counted - f.system);
+      if (k3) r.push(l.k3Qty ?? 0, l.k3Delta ?? 0);
+      r.push(statusLabel(l.cell.status), l.cell.opnameNumber, l.cell.by ?? "", l.cell.lockedAt, l.cell.adjustment?.note ?? "");
+      return r;
+    });
+    const totalRow: (string | number)[] = ["", labels.report_totals, ""];
+    for (const tt of totals) totalRow.push(tt.system, tt.counted, tt.counted - tt.system);
+    if (k3) totalRow.push(k3Total, k3DeltaTotal);
+    const title = [`${labels.report_title} — ${day} ${weekday} — ${data.warehouse.name}`];
+    const sheet = XLSX.utils.aoa_to_sheet([title, [], header, ...body, totalRow]);
+    sheet["!cols"] = header.map((h) =>
+      h === labels.summary_th_product ? { wch: 45 } : h === labels.report_th_note ? { wch: 60 } : { wch: 14 }
+    );
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, sheetName(labels.report_title));
+    XLSX.writeFile(book, `stock-opname-report-${date}.xlsx`, { bookType: "xlsx" });
+  }
+
+  // Base cell styles, then text-left / text-right added per column (never
+  // both, or the stylesheet's order decides which one wins).
+  const thBase = "px-2 py-1.5 font-medium align-bottom border-b border-zinc-700 bg-zinc-900";
+  const tdBase = "px-2 py-1.5 tabular-nums border-t border-zinc-800/70 align-top";
+  const th = `${thBase} text-right`;
+  const td = `${tdBase} text-right`;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center"
+      onMouseDown={(e) => {
+        backdropCloses.current = e.target === e.currentTarget && !filterOpen.current;
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && backdropCloses.current) onClose();
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-[90vw] h-[90vh] bg-zinc-950 border border-zinc-800 rounded-lg flex flex-col overflow-hidden"
+      >
+        <div className="px-5 py-3 border-b border-zinc-800 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {labels.report_title}{" "}
+              <span className="text-zinc-400 font-normal">
+                · {day} {weekday} · {data.warehouse.name}
+              </span>
+            </h2>
+            <p className="text-xs text-zinc-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+              <span>
+                {labels.report_count.replace("{lines}", lines.length.toLocaleString()).replace("{skus}", skuCount.toLocaleString())}
+              </span>
+              {filtered && (
+                <span className="text-amber-400">
+                  {labels.report_filtered
+                    .replace("{shown}", lines.length.toLocaleString())
+                    .replace("{total}", allLines.length.toLocaleString())}{" "}
+                  <button
+                    type="button"
+                    onClick={() => setHidden({ sku: [], product: [], status: [], sosku: [] })}
+                    className="underline hover:text-amber-200"
+                  >
+                    {labels.report_filter_reset}
+                  </button>
+                </span>
+              )}
+              <span className={diffCount > 0 ? "text-amber-400" : ""}>
+                {labels.report_with_diff.replace("{n}", diffCount.toLocaleString())}
+              </span>
+              <span className={notedCount > 0 ? "text-emerald-400" : ""}>
+                {labels.report_noted.replace("{n}", notedCount.toLocaleString())}
+              </span>
+              {k3 && (
+                <span className="text-sky-300">
+                  {labels.report_k3_info
+                    .replace("{file}", k3.fileName ?? "—")
+                    .replace("{at}", k3.importedAt)
+                    .replace("{by}", k3.by ?? "—")}
+                </span>
+              )}
+              {excludedNames.length > 0 && (
+                <span className="text-amber-500/80">
+                  * {labels.summary_total_excludes.replace("{list}", excludedNames.join(", "))}
+                </span>
+              )}
+            </p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">{labels.report_filters_note}</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={exportReport}
+              disabled={lines.length === 0}
+              className="px-3 py-1.5 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+            >
+              {labels.summary_export}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-md border border-zinc-800 text-sm text-zinc-400 hover:text-zinc-100"
+            >
+              {labels.detail_close}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          {allLines.length === 0 ? (
+            <p className="p-6 text-sm text-zinc-600">{labels.report_empty}</p>
+          ) : (
+            <table className="w-full text-xs border-separate border-spacing-0">
+              <thead className="sticky top-0 z-10">
+                <tr className="text-zinc-400">
+                  <th className={`${thBase} text-left w-8`}>#</th>
+                  <th className={`${thBase} text-left`}>
+                    <ColumnFilter
+                      label={labels.summary_th_sku}
+                      options={optionsOf("sku")}
+                      hidden={hidden.sku}
+                      onChange={(next) => setHidden((h) => ({ ...h, sku: next }))}
+                      onOpenChange={onFilterOpenChange}
+                      labels={labels}
+                    />
+                  </th>
+                  <th className={`${thBase} text-left min-w-[11rem]`}>
+                    <ColumnFilter
+                      label={labels.summary_th_product}
+                      options={optionsOf("product")}
+                      hidden={hidden.product}
+                      onChange={(next) => setHidden((h) => ({ ...h, product: next }))}
+                      onOpenChange={onFilterOpenChange}
+                      labels={labels}
+                    />
+                  </th>
+                  {buckets.map((b) => (
+                    <Fragment key={b.key}>
+                      <th className={`${th} border-l border-l-zinc-800`}>
+                        {b.name}
+                        {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
+                        <br />
+                        {labels.summary_system}
+                      </th>
+                      <th className={th}>
+                        {b.name}
+                        {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
+                        <br />
+                        {labels.summary_so}
+                      </th>
+                      <th className={th}>{labels.summary_delta}</th>
+                    </Fragment>
+                  ))}
+                  {k3 && (
+                    <>
+                      <th className={`${th} text-sky-300 border-l border-l-zinc-800`}>{labels.summary_th_k3}</th>
+                      <th className={`${th} text-sky-300`} title={labels.summary_k3_delta_title}>
+                        {labels.summary_th_k3_delta}
+                      </th>
+                    </>
+                  )}
+                  <th className={`${thBase} text-left border-l border-l-zinc-800`}>
+                    <ColumnFilter
+                      label={labels.detail_th_status}
+                      options={optionsOf("status")}
+                      hidden={hidden.status}
+                      onChange={(next) => setHidden((h) => ({ ...h, status: next }))}
+                      onOpenChange={onFilterOpenChange}
+                      labels={labels}
+                    />
+                  </th>
+                  <th className={`${thBase} text-left`}>
+                    <ColumnFilter
+                      label={labels.summary_th_sosku}
+                      options={optionsOf("sosku")}
+                      hidden={hidden.sosku}
+                      onChange={(next) => setHidden((h) => ({ ...h, sosku: next }))}
+                      onOpenChange={onFilterOpenChange}
+                      labels={labels}
+                    />
+                    <div className="font-normal text-zinc-500">
+                      {labels.report_th_pic} · {labels.detail_th_date}
+                    </div>
+                  </th>
+                  <th className={`${thBase} text-left min-w-[14rem]`}>{labels.report_th_note}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.length === 0 && (
+                  <tr>
+                    <td colSpan={99} className="px-4 py-8 text-center text-sm text-zinc-600">
+                      {labels.report_empty_filtered}
+                    </td>
+                  </tr>
+                )}
+                {lines.map((l, i) => (
+                  <tr
+                    key={`${l.item.itemId}-${l.cell.opnameNumber}`}
+                    className={`hover:bg-zinc-900/60 ${l.latest ? "" : "text-zinc-500 [&_td]:opacity-60"}`}
+                    title={l.latest ? undefined : labels.report_not_in_totals}
+                  >
+                    <td className={`${tdBase} text-left text-zinc-600`}>{i + 1}</td>
+                    <td className={`${tdBase} text-left font-mono text-amber-500 whitespace-nowrap`}>{l.item.sku}</td>
+                    <td className={`${tdBase} text-left text-zinc-300 whitespace-normal break-words`}>{l.item.name}</td>
+                    {l.figs.map((f, j) => (
+                      <Fragment key={buckets[j].key}>
+                        <td className={`${td} text-zinc-400 border-l border-l-zinc-800`}>{f.system.toLocaleString()}</td>
+                        <td className={`${td} text-zinc-100`}>{f.counted.toLocaleString()}</td>
+                        <td className={td}>
+                          <Delta value={f.counted - f.system} />
+                        </td>
+                      </Fragment>
+                    ))}
+                    {k3 && (
+                      <>
+                        <td
+                          className={`${td} border-l border-l-zinc-800 ${l.item.k3?.[date] === undefined ? "text-zinc-600" : "text-sky-300"}`}
+                          title={l.item.k3?.[date] === undefined ? labels.k3_not_in_file : labels.k3_stock_title}
+                        >
+                          {fmtQty(l.k3Qty ?? 0)}
+                        </td>
+                        <td className={td}>
+                          <Delta value={l.k3Delta ?? 0} />
+                        </td>
+                      </>
+                    )}
+                    <td className={`${tdBase} text-left whitespace-nowrap border-l border-l-zinc-800`}>
+                      <span
+                        className={
+                          l.cell.status === "IN_PROGRESS" ? "text-amber-400" : l.cell.status === "CONFIRMED" ? "text-sky-400" : "text-emerald-400"
+                        }
+                      >
+                        {statusLabel(l.cell.status)}
+                      </span>
+                    </td>
+                    <td className={`${tdBase} text-left whitespace-nowrap`}>
+                      <div className="font-mono text-amber-500">{l.cell.opnameNumber}</div>
+                      <div className="text-[10px] text-zinc-500">
+                        {l.cell.by ?? "—"} · <span className="font-mono">{l.cell.lockedAt}</span>
+                      </div>
+                    </td>
+                    <td className={`${tdBase} text-left`}>
+                      <AdjustmentInput
+                        multiline
+                        value={l.cell.adjustment?.note ?? ""}
+                        placeholder={labels.report_note_placeholder}
+                        title={
+                          l.cell.adjustment
+                            ? `${l.cell.adjustment.at ?? ""}${l.cell.adjustment.by ? ` · ${l.cell.adjustment.by}` : ""}`
+                            : labels.summary_mark_adjusted
+                        }
+                        ariaLabel={`${labels.report_th_note} ${l.item.sku} ${l.cell.opnameNumber}`}
+                        onSave={(note) =>
+                          onSaveNote(
+                            {
+                              itemId: l.item.itemId,
+                              sku: l.item.sku,
+                              name: l.item.name,
+                              date,
+                              opnameNumber: l.cell.opnameNumber,
+                              current: l.cell.adjustment,
+                            },
+                            note
+                          )
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="sticky bottom-0">
+                <tr className="text-zinc-200 font-medium">
+                  <td className={`${td} bg-zinc-900 border-t-zinc-700`} />
+                  <td className={`${td} bg-zinc-900 border-t-zinc-700 text-left`} colSpan={2}>
+                    {labels.report_totals}
+                  </td>
+                  {totals.map((tt, j) => (
+                    <Fragment key={buckets[j].key}>
+                      <td className={`${td} bg-zinc-900 border-t-zinc-700 border-l border-l-zinc-800 text-zinc-400`}>
+                        {tt.system.toLocaleString()}
+                      </td>
+                      <td className={`${td} bg-zinc-900 border-t-zinc-700`}>{tt.counted.toLocaleString()}</td>
+                      <td className={`${td} bg-zinc-900 border-t-zinc-700`}>
+                        <Delta value={tt.counted - tt.system} />
+                      </td>
+                    </Fragment>
+                  ))}
+                  {k3 && (
+                    <>
+                      <td className={`${td} bg-zinc-900 border-t-zinc-700 border-l border-l-zinc-800 text-sky-300`}>{fmtQty(k3Total)}</td>
+                      <td className={`${td} bg-zinc-900 border-t-zinc-700`}>
+                        <Delta value={k3DeltaTotal} />
+                      </td>
+                    </>
+                  )}
+                  <td className={`${td} bg-zinc-900 border-t-zinc-700 border-l border-l-zinc-800`} colSpan={3} />
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1348,6 +1935,7 @@ function OpnameHistoryModal({
   labels: Record<string, string>;
   onClose: () => void;
 }) {
+  const locale = useDateLocale();
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Opnames whose counted lines the user has folded away; everything else
@@ -1358,10 +1946,10 @@ function OpnameHistoryModal({
     fetch(`/api/stock-opname/summary/${itemId}?warehouseId=${warehouseId}`)
       .then(async (res) => {
         const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error ?? `Failed to load (${res.status})`);
+        if (!res.ok) throw new Error(json.error ?? ""); // "" = the generic "failed to load" text
         setDetail(json);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"));
+      .catch((err) => setError(err instanceof Error ? err.message : ""));
   }, [itemId, warehouseId]);
 
   useEffect(() => {
@@ -1410,8 +1998,8 @@ function OpnameHistoryModal({
             <h2 className="text-lg font-semibold">
               {labels.detail_title}{" "}
               <span className="text-zinc-500 font-normal">
-                · <span className="font-mono text-amber-500">{opnameNumber}</span> · {formatDay(date).day}{" "}
-                {formatDay(date).weekday}
+                · <span className="font-mono text-amber-500">{opnameNumber}</span> · {formatDay(date, locale).day}{" "}
+                {formatDay(date, locale).weekday}
               </span>
             </h2>
             {detail && (
@@ -1426,8 +2014,8 @@ function OpnameHistoryModal({
         </div>
 
         <div className="overflow-auto p-5">
-          {error ? (
-            <p className="text-sm text-red-400">{error}</p>
+          {error !== null ? (
+            <p className="text-sm text-red-400">{error || labels.summary_err_load}</p>
           ) : !detail ? (
             <p className="text-sm text-zinc-600">{labels.summary_loading}</p>
           ) : entries.length === 0 ? (
@@ -1587,11 +2175,17 @@ function AdjustmentInput({
   title,
   ariaLabel,
   onSave,
+  multiline = false,
+  placeholder = "—",
 }: {
   value: string;
   title: string;
   ariaLabel: string;
   onSave: (note: string) => Promise<{ error?: string }>;
+  // The report's version: a wide box that wraps and grows with the text;
+  // Enter saves, Shift+Enter adds a line.
+  multiline?: boolean;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState<string | null>(null); // null = showing the saved value
   const [saving, setSaving] = useState(false);
@@ -1621,31 +2215,49 @@ function AdjustmentInput({
       ? "border-emerald-900 text-emerald-400"
       : "border-zinc-800 text-zinc-200";
 
+  const shared = {
+    value: draft ?? value,
+    onFocus: () => setDraft((d) => d ?? value),
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setDraft(e.target.value);
+      if (error) setError(null);
+    },
+    onBlur: commit,
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !(multiline && e.shiftKey)) {
+        e.preventDefault();
+        e.currentTarget.blur();
+      }
+      if (e.key === "Escape") {
+        e.stopPropagation(); // undo the edit, don't close the report
+        setDraft(null);
+        setError(null);
+        // Let the blur that follows see nothing to save.
+        const el = e.currentTarget;
+        requestAnimationFrame(() => el.blur());
+      }
+    },
+    disabled: saving,
+    placeholder,
+    maxLength: NOTE_MAX_LENGTH,
+    title: error ?? title,
+    "aria-label": ariaLabel,
+    "aria-invalid": error !== null,
+  };
+
+  if (multiline) {
+    return (
+      <textarea
+        {...shared}
+        rows={1}
+        className={`block w-full min-h-[2rem] resize-y [field-sizing:content] px-2 py-1 rounded bg-zinc-950 border text-xs leading-snug whitespace-pre-wrap break-words placeholder:text-zinc-700 focus:outline-none focus:border-amber-500 disabled:opacity-50 ${tone}`}
+      />
+    );
+  }
   return (
     <input
       type="text"
-      value={draft ?? value}
-      onFocus={() => setDraft((d) => d ?? value)}
-      onChange={(e) => {
-        setDraft(e.target.value);
-        if (error) setError(null);
-      }}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") e.currentTarget.blur();
-        if (e.key === "Escape") {
-          setDraft(null);
-          setError(null);
-          // Let the blur that follows see nothing to save.
-          requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
-        }
-      }}
-      disabled={saving}
-      placeholder="—"
-      maxLength={200}
-      title={error ?? title}
-      aria-label={ariaLabel}
-      aria-invalid={error !== null}
+      {...shared}
       className={`w-[4.75rem] px-1 py-0.5 rounded bg-zinc-950 border font-mono text-[9px] placeholder:text-zinc-700 focus:outline-none focus:border-amber-500 disabled:opacity-50 ${tone}`}
     />
   );

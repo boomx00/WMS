@@ -2,6 +2,8 @@
 // A page's customizable strings are exactly the keys listed here — adding
 // a new customizable page/string later just means adding an entry here
 // and using usePageLabels(page).key wherever that string is rendered.
+    import { STOCK_OPNAME_SUMMARY_LABELS } from "./stockOpnameSummaryLabels";
+
 export const DEFAULT_LABELS = {
     stock_opname: {
     th_location: "Location",
@@ -15,6 +17,7 @@ export const DEFAULT_LABELS = {
     th_current_system_qty: "Current System Qty",
     th_by: "By",
     th_counted_at: "Counted At",   // ADD
+    ...STOCK_OPNAME_SUMMARY_LABELS,
   },
   location_stock: {
     th_location: "Location",
@@ -401,7 +404,7 @@ carton: "Carton (s)"
     
   },
 
-
+   
 } as const;
 
 export type PageKey = keyof typeof DEFAULT_LABELS;

@@ -1,9 +1,10 @@
-// English text for the Stock Opname Summary tab, used when these keys
-// haven't been added to the stock_opname section of lib/pageLabels.ts yet
-// (usePageLabels' fallbacks). Keys added there take over and become
-// editable on Settings → Translations.
+// English text for the Stock Opname page's tabs and the Stock Opname
+// Summary. These are spread into the stock_opname section of
+// lib/pageLabels.ts, so every key here is listed (and translatable) on
+// Settings → Translations. Placeholders like {n} or {date} are filled in by
+// the page — keep them in the translations.
 
-export const STOCK_OPNAME_SUMMARY_LABELS: Record<string, string> = {
+export const STOCK_OPNAME_SUMMARY_LABELS = {
   tab_opname: "Stock Opname",
   tab_verify: "Verify Stock Integrity",
   tab_summary: "Stock Opname Summary",
@@ -51,4 +52,67 @@ export const STOCK_OPNAME_SUMMARY_LABELS: Record<string, string> = {
   status_in_progress: "In progress",
   status_done: "Done",
   status_confirmed: "Confirmed",
-};
+
+  // Summary table
+  summary_th_stock: "Total stock",
+  summary_hide: "Hide",
+  summary_unhide: "Unhide",
+  summary_show_hidden: "Show hidden ({n})",
+  summary_total_excludes: "Total excludes: {list}",
+  summary_th_adjusted: "Adj",
+  summary_mark_adjusted: "Adjustment note",
+  summary_th_sosku: "SOSKU",
+  summary_th_k3: "K3 Stock",
+  summary_th_k3_delta: "Δ K3",
+  summary_k3_delta_title: "Total SO − K3 Good Stock",
+  summary_err_load: "Failed to load",
+  summary_err_save: "Failed to save",
+
+  // K3 import
+  k3_import: "Import K3",
+  k3_import_title: "Import K3 stock (Real-time Inventory export) for this date",
+  k3_button_imported: "K3 ✓",
+  k3_button_busy: "K3 …",
+  k3_imported: "K3 imported",
+  k3_click_replace: "Click to import again (replaces it)",
+  k3_remove: "Remove this K3 import",
+  k3_replace_confirm: "Replace the K3 stock already imported for {date}?",
+  k3_remove_confirm: "Remove the K3 stock imported for {date}?",
+  k3_import_done: "K3 imported for {date} ({warehouse}, Good Stock): {skus} SKUs matched, total {qty}",
+  k3_unmatched: "{n} material code(s) not in WMS",
+  k3_show_unmatched: "Show codes",
+  k3_stock_title: "K3 Good Stock (Inventory Qty, CUoM)",
+  k3_not_in_file: "Not in the K3 file (0)",
+  k3_error: "K3 · {date}: {message}",
+  k3_err_import: "Import failed",
+  k3_err_remove: "Failed to remove",
+  k3_err_browser: "This browser can't open this file — please use an up-to-date Chrome or Edge",
+  k3_err_damaged: "The file looks damaged (bad zip directory)",
+  k3_err_compression: "Unsupported zip compression ({n})",
+  k3_err_missing_columns: "The file has no {columns} column",
+  k3_err_no_material_code: 'No "Material Code" column found in the file',
+
+  // Report (per date)
+  report_button: "Report",
+  report_button_title: "Open the report for this date",
+  report_title: "Stock opname report",
+  report_count: "{lines} SOSKU line(s) · {skus} product(s)",
+  report_filters_note: "Uses the search, columns and filters set on the page.",
+  report_with_diff: "{n} with a difference",
+  report_noted: "{n} with an adjustment note",
+  report_k3_info: "K3: {file} · imported {at} · {by}",
+  report_th_pic: "PIC",
+  report_th_note: "Adjustment note",
+  report_totals: "Total (latest SOSKU per product)",
+  report_not_in_totals: "Recounted later the same day — not in the totals",
+  report_filter_button: "Filter {column}",
+  report_filter_search: "Search…",
+  report_filter_select_all: "Select all",
+  report_filter_clear_all: "Clear all",
+  report_filter_no_values: "No matches",
+  report_filtered: "{shown} of {total} lines shown",
+  report_filter_reset: "Reset filters",
+  report_empty_filtered: "No lines match the column filters.",
+  report_note_placeholder: "Write the adjustment details…",
+  report_empty: "No SOSKU stock opname on this date matches the current search and filters.",
+} as const;
