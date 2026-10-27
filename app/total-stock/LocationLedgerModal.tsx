@@ -40,6 +40,12 @@ function describeEvent(entry: LedgerEntry): string {
     const order = entry.soNumber ? `SO ${entry.soNumber} · ` : entry.tambahanNumber ? `Tambahan ${entry.tambahanNumber} · ` : "";
     return `${order}${Math.abs(entry.quantity).toLocaleString()} released — no stock moved`;
   }
+  // Marked stock moved back out of staging, or a Tambahan return.
+  if (entry.type === "UNPICK") {
+    const order = entry.soNumber ? `SO ${entry.soNumber}` : entry.tambahanNumber ? `Tambahan ${entry.tambahanNumber}` : "";
+    const where = entry.direction === "IN" ? `from ${entry.otherLocationCode ?? "?"}` : `to ${entry.otherLocationCode ?? "?"}`;
+    return order ? `Un-picked · ${order} · ${where}` : `Un-picked · ${where}`;
+  }
   if (entry.soNumber) return `SO ${entry.soNumber}`;
   if (entry.tambahanNumber) return `Tambahan ${entry.tambahanNumber}`;
   if (entry.direction === "IN") return entry.otherLocationCode ? `from ${entry.otherLocationCode}` : "in";

@@ -9,6 +9,9 @@ import { locationStockEvents } from "@/db/schema";
 //   - SHIP: there is no destination (stock leaves the building) — the
 //     relevant location instead is the SOURCE, i.e. Outbound WH, since
 //     that's what the shipment actually drew down.
+//   - Un-picks (a negative PICKING / DEFAULT_PICKING — lib/unpick.ts): the
+//     SOURCE too, because that's where the stock physically went (Movement
+//     History shows it as the "To" location).
 //
 // Both branches use the same backward-anchored approach: start from the
 // LIVE location_stock value for that (location, item) and subtract the
@@ -28,7 +31,10 @@ import { locationStockEvents } from "@/db/schema";
 // column is used to pull the live starting value, differs.
 export const finalStockAtDestinationSql = sql<number | null>`
   CASE
-    WHEN ${locationStockEvents.type} = 'SHIP' AND ${locationStockEvents.sourceLocationId} IS NOT NULL THEN (
+    WHEN (
+      ${locationStockEvents.type} = 'SHIP'
+      OR (${locationStockEvents.type} IN ('PICKING', 'DEFAULT_PICKING') AND ${locationStockEvents.quantity} < 0)
+    ) AND ${locationStockEvents.sourceLocationId} IS NOT NULL THEN (
       COALESCE(
         (
           SELECT ls.quantity

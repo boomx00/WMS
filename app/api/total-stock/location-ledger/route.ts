@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { items, locationStock, locationStockEvents, locations, users, salesOrders, tambahanOrders } from "@/db/schema";
 import { eq, and, or, gte, asc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { isUnpick, UNPICK_TYPE } from "@/lib/unpick";
 import { getLedgerStartAt, parseDateParam, formatLocalDateTime, locationDelta, movesStock } from "@/lib/ledger";
 export const dynamic = "force-dynamic";
 
@@ -131,13 +132,16 @@ export async function GET(req: NextRequest) {
     if (ev.createdAtRaw < effectiveFrom) {
       openingBalance = running;
     } else if (!toExclusive || ev.createdAtRaw < toExclusive) {
+      // Un-picks are stored reversed (lib/unpick.ts): show them as the move
+      // that physically happened, so IN / OUT matches the delta.
+      const unpick = isUnpick(ev.type, ev.quantity);
       entries.push({
         id: ev.id,
-        type: ev.type,
-        quantity: ev.quantity,
+        type: unpick ? UNPICK_TYPE : ev.type,
+        quantity: unpick ? -ev.quantity : ev.quantity,
         itemSku: ev.itemSku,
         itemName: ev.itemName,
-        direction: isIn ? "IN" : isOut ? "OUT" : null,
+        direction: unpick ? (isIn ? "OUT" : isOut ? "IN" : null) : isIn ? "IN" : isOut ? "OUT" : null,
         otherLocationCode: isIn ? ev.sourceCode : isOut ? ev.destinationCode : null,
         soNumber: ev.soNumber,
         tambahanNumber: ev.tambahanNumber,

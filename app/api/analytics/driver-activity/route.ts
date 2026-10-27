@@ -4,6 +4,7 @@ import { locationStockEvents, users, roles, locations, locationTypes } from "@/d
 import { eq, and, gte, lte, inArray } from "drizzle-orm";
 import { SUPER_ROLE_NAME } from "@/lib/roles";
 import { alias } from "drizzle-orm/pg-core";
+import { isUnpick } from "@/lib/unpick";
 import { isOpenPickArea } from "@/lib/locationRules";
 
 const sourceLoc = alias(locations, "source_loc");
@@ -82,6 +83,7 @@ export async function GET(req: NextRequest) {
   const events = await db
     .select({
       userId: locationStockEvents.userId,
+      type: locationStockEvents.type,
       quantity: locationStockEvents.quantity,
       sourcePickable: sourceType.pickable,
       sourceHasPosition: sourceType.hasPosition,
@@ -135,10 +137,12 @@ export async function GET(req: NextRequest) {
     const row = summary.get(ev.userId);
     if (!row) continue;
 
-    const category = classifyDriverEvent(
-      driverSide(ev.sourcePickable, ev.sourceHasPosition, ev.sourceStaging),
-      driverSide(ev.destPickable, ev.destHasPosition, ev.destStaging)
-    );
+    // Un-picks are stored reversed (lib/unpick.ts): classify the move that
+    // physically happened (staging → elsewhere).
+    const unpick = isUnpick(ev.type, ev.quantity);
+    const sourceSide = driverSide(ev.sourcePickable, ev.sourceHasPosition, ev.sourceStaging);
+    const destSide = driverSide(ev.destPickable, ev.destHasPosition, ev.destStaging);
+    const category = unpick ? classifyDriverEvent(destSide, sourceSide) : classifyDriverEvent(sourceSide, destSide);
     const qty = Math.abs(ev.quantity);
 
     if (category === "INBOUND") {

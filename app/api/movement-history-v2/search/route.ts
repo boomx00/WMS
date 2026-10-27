@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locationStockEvents, items, locations, users, salesOrders } from "@/db/schema";
-import { eq, desc, or, and, ilike } from "drizzle-orm";
+import { eq, desc, or, and, ilike, gte, lt, inArray } from "drizzle-orm";
+import { asPhysicalMove, UNPICK_TYPE } from "@/lib/unpick";
 import { alias } from "drizzle-orm/pg-core";
 import { finalStockAtDestinationSql } from "@/lib/finalStock";
 import { tambahanOrders } from "@/db/schema";
@@ -47,9 +48,19 @@ export async function GET(req: NextRequest) {
   const user = params.get("user")?.trim() ?? "";
   const so = params.get("so")?.trim() ?? "";
   const type = params.get("type")?.trim() ?? "";
-  const validatedType = type ? asEventType(type) : null;
+  // "UNPICK" isn't stored as its own type: it's a negative PICKING /
+  // DEFAULT_PICKING (lib/unpick.ts). Picking filters leave un-picks out.
+  const wantsUnpick = type === UNPICK_TYPE;
+  const validatedType = type && !wantsUnpick ? asEventType(type) : null;
+  const typeCondition = wantsUnpick
+    ? and(inArray(locationStockEvents.type, ["PICKING", "DEFAULT_PICKING"]), lt(locationStockEvents.quantity, 0))
+    : validatedType === "PICKING" || validatedType === "DEFAULT_PICKING"
+      ? and(eq(locationStockEvents.type, validatedType), gte(locationStockEvents.quantity, 0))
+      : validatedType
+        ? eq(locationStockEvents.type, validatedType)
+        : undefined;
 
-  const isAdvanced = Boolean(sku || location || user || so || validatedType);
+  const isAdvanced = Boolean(sku || location || user || so || typeCondition);
 
   if (!q && !isAdvanced) {
     return NextResponse.json([]);
@@ -70,7 +81,7 @@ export async function GET(req: NextRequest) {
                 ilike(tambahanOrders.convertedSoNumber, `%${so}%`)
               )
             : undefined,
-          validatedType ? eq(locationStockEvents.type, validatedType) : undefined,
+          typeCondition,
         ].filter((c): c is NonNullable<typeof c> => c !== undefined)
       )
     : (() => {
@@ -113,5 +124,6 @@ export async function GET(req: NextRequest) {
     .orderBy(desc(locationStockEvents.createdAt))
     .limit(200);
 
-  return NextResponse.json(rows);
+  // Un-picks show as the move that physically happened (lib/unpick.ts).
+  return NextResponse.json(rows.map((r) => asPhysicalMove(r, "sourceCode", "destinationCode")));
 }

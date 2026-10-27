@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { locationStockEvents, items, locations, locationTypes, users } from "@/db/schema";
 import { eq, and, gte, lte } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { isUnpick } from "@/lib/unpick";
 import { classifyDriverEvent, driverSide, type DriverActivityCategory } from "../route";
 
 const sourceLoc = alias(locations, "source_loc");
@@ -60,6 +61,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
       destPickable: destType.pickable,
       destHasPosition: destType.hasPosition,
       destStaging: destLoc.isStaging,
+      type: locationStockEvents.type,
       quantity: locationStockEvents.quantity,
       createdAt: locationStockEvents.createdAt,
     })
@@ -97,12 +99,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ user
   for (const cat of CATEGORY_ORDER) byCategory.set(cat, new Map());
 
   for (const ev of eventRows) {
-    const category = classifyDriverEvent(
-      driverSide(ev.sourcePickable, ev.sourceHasPosition, ev.sourceStaging),
-      driverSide(ev.destPickable, ev.destHasPosition, ev.destStaging)
-    );
-    const from = ev.sourceCode ?? "—";
-    const to = ev.destCode ?? "—";
+    // Un-picks are stored reversed (lib/unpick.ts): classify the move that
+    // physically happened (staging → elsewhere).
+    const unpick = isUnpick(ev.type, ev.quantity);
+    const sourceSide = driverSide(ev.sourcePickable, ev.sourceHasPosition, ev.sourceStaging);
+    const destSide = driverSide(ev.destPickable, ev.destHasPosition, ev.destStaging);
+    const category = unpick ? classifyDriverEvent(destSide, sourceSide) : classifyDriverEvent(sourceSide, destSide);
+    const from = (unpick ? ev.destCode : ev.sourceCode) ?? "—";
+    const to = (unpick ? ev.sourceCode : ev.destCode) ?? "—";
     const routeKey = `${from}→${to}`;
 
     const routes = byCategory.get(category)!;

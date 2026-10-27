@@ -11,6 +11,7 @@ import {
 } from "@/db/schema";
 import { eq, and, gte, sql, asc } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { isUnpick, UNPICK_TYPE } from "@/lib/unpick";
 import {
   getLedgerStartAt,
   parseDateParam,
@@ -198,11 +199,14 @@ export async function GET(
       if (ev.createdAtRaw < effectiveFrom) {
         opening.set(id, running.get(id)!);
       } else if ((delta !== 0 || !moves) && (!toExclusive || ev.createdAtRaw < toExclusive)) {
+        // Un-picks are stored reversed (lib/unpick.ts): show them as the
+        // move that physically happened, so IN / OUT matches the delta.
+        const unpick = isUnpick(ev.type, ev.quantity);
         entries.get(id)!.push({
           id: ev.id,
-          type: ev.type,
-          quantity: ev.quantity,
-          direction: destColumn === id ? "IN" : "OUT",
+          type: unpick ? UNPICK_TYPE : ev.type,
+          quantity: unpick ? -ev.quantity : ev.quantity,
+          direction: (destColumn === id) !== unpick ? "IN" : "OUT",
           otherLocationCode: destColumn === id ? ev.sourceCode : ev.destinationCode,
           soNumber: ev.soNumber,
           tambahanNumber: ev.tambahanNumber,

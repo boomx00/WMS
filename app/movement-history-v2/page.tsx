@@ -4,6 +4,7 @@ import { eq, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { finalStockAtDestinationSql } from "@/lib/finalStock";
 import MovementHistoryV2Table from "./MovementHistoryV2Table";
+import { asPhysicalMove } from "@/lib/unpick";
 import { tambahanOrders } from "@/db/schema";
 export const dynamic = "force-dynamic";
 
@@ -78,7 +79,9 @@ export default async function MovementHistoryV2Page({
   const { page: pageParam } = await searchParams;
   const page = Math.max(1, Number(pageParam) || 1);
 
-  const [totalCount, rows] = await Promise.all([getTotalCount(), getEventsForPage(page)]);
+  const [totalCount, rawRows] = await Promise.all([getTotalCount(), getEventsForPage(page)]);
+  // Un-picks show as the move that physically happened (lib/unpick.ts).
+  const rows = rawRows.map((r) => asPhysicalMove(r, "sourceCode", "destinationCode"));
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (

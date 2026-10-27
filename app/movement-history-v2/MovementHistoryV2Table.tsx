@@ -5,6 +5,9 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
+
+// Shown when "unpick" isn't in lib/pageLabels.ts yet.
+const UNPICK_LABELS = { unpick: "Un-pick" };
 type Row = {
   id: number;
   type: string;
@@ -24,6 +27,7 @@ const TYPE_STYLES: Record<string, string> = {
   INBOUND: "bg-blue-950 text-blue-300",
   DEFAULT_INBOUND: "bg-cyan-950 text-cyan-300",
   PICKING: "bg-amber-950 text-amber-300",
+  UNPICK: "bg-orange-950 text-orange-300",
   DEFAULT_PICKING: "bg-purple-950 text-purple-300",
   MOVE: "bg-indigo-950 text-indigo-300",
   DEFAULT_MOVE: "bg-fuchsia-950 text-fuchsia-300",
@@ -64,12 +68,13 @@ export default function MovementHistoryV2Table({
 
   // Tracks the in-flight quick search so older responses can't overwrite newer ones
   const quickSearchAbortRef = useRef<AbortController | null>(null);
-  const labels = usePageLabels("movement_history_page")
+  const labels = usePageLabels("movement_history_page", UNPICK_LABELS)
 
   const TYPE_LABELS: Record<string, string> = {
   INBOUND: labels.inbound,
   DEFAULT_INBOUND: labels.default_inbound,
   PICKING:  labels.picking,
+  UNPICK: labels.unpick,
   DEFAULT_PICKING:  labels.default_picking,
   MOVE:  labels.move,
   DEFAULT_MOVE:  labels.default_move,
@@ -279,7 +284,8 @@ export default function MovementHistoryV2Table({
                 <option className="text-sm" value="INBOUND">{labels.inbound}</option>
                 <option className="text-sm" value="DEFAULT_INBOUND">{labels.default_inbound}</option>
                 <option className="text-sm" value="PICKING">{labels.picking}</option>
-                <option className="text-sm" value="DEFAULT_PICKING">{labels.default_picking}g</option>
+                <option className="text-sm" value="DEFAULT_PICKING">{labels.default_picking}</option>
+                <option className="text-sm" value="UNPICK">{labels.unpick}</option>
                 <option className="text-sm" value="MOVE">{labels.move}</option>
                 <option className="text-sm" value="DEFAULT_MOVE">{labels.default_move}</option>
                 <option className="text-sm" value="SHIP">{labels.ship}</option>
