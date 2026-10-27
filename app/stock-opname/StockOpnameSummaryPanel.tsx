@@ -793,10 +793,10 @@ export default function StockOpnameSummaryPanel() {
   // numbers use the regular font with tabular digits, which is much
   // narrower than monospace.
   const subHeadBase =
-    "w-px px-2.5 py-1 align-bottom font-medium leading-[1.15] bg-zinc-900 border-b border-zinc-700 whitespace-normal";
+    "w-px px-1 py-1 align-bottom font-medium leading-[1.15] bg-zinc-900 border-b border-zinc-700 whitespace-normal break-keep";
   const subHead = `${subHeadBase} text-right`;
   const dataCell =
-    "px-2.5 py-1 text-right tabular-nums bg-zinc-900/30 border-t border-zinc-800/70 group-hover:bg-zinc-900/70";
+    "px-1 py-1 text-right tabular-nums bg-zinc-900/30 border-t border-zinc-800/70 group-hover:bg-zinc-900/70";
 
   return (
     <div>
@@ -1089,7 +1089,7 @@ export default function StockOpnameSummaryPanel() {
                           title={b.key === "total" && excludedNames.length > 0 ? `${b.name} − ${excludedNames.join(", ")}` : undefined}
                         >
                           {b.name}
-                          {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
+                          {/* {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>} */}
                           <br />
                           {labels.summary_system}
                         </th>
@@ -1098,7 +1098,7 @@ export default function StockOpnameSummaryPanel() {
                           title={b.key === "total" && excludedNames.length > 0 ? `${b.name} − ${excludedNames.join(", ")}` : undefined}
                         >
                           {b.name}
-                          {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
+                          {/* {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>} */}
                           <br />
                           {labels.summary_so}
                         </th>
@@ -1638,8 +1638,8 @@ function DateReportModal({
 
   // Base cell styles, then text-left / text-right added per column (never
   // both, or the stylesheet's order decides which one wins).
-  const thBase = "px-2 py-1.5 font-medium align-bottom border-b border-zinc-700 bg-zinc-900";
-  const tdBase = "px-2 py-1.5 tabular-nums border-t border-zinc-800/70 align-top";
+  const thBase = "px-2 py-1.5 font-medium align-bottom border-b border-zinc-700 bg-zinc-900 break-keep";
+    const tdBase = "px-2 py-1.5 tabular-nums border-t border-zinc-800/70 align-top";
   const th = `${thBase} text-right`;
   const td = `${tdBase} text-right`;
 
