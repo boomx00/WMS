@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { downloadXlsxMultiSheet } from "./exportLedgerXlsx";
 import { useLanguage } from "@/lib/LanguageContext";
 import { columnNameFor } from "@/lib/columnNames";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
 type BucketEntry = {
   id: number;
@@ -140,27 +141,27 @@ function BucketSection({
 }) {
   const rows = groupEntries(data.entries, bucketKey);
   const { language } = useLanguage();
-
+  const labels = usePageLabels("total_stock")
   return (
     <div className="mb-6">
-      <h3 className="text-sm font-semibold text-zinc-200 mb-2">{columnNameFor(data, language)} Ledger</h3>
+      <h3 className="text-sm font-semibold text-zinc-200 mb-2">{columnNameFor(data, language)} {labels.th_ledger}</h3>
       <div className="border border-zinc-800 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-zinc-900 text-zinc-500 text-left">
               <th className="px-3 py-2 font-medium w-6"></th>
-              <th className="px-3 py-2 font-medium">When</th>
-              <th className="px-3 py-2 font-medium">Type</th>
-              <th className="px-3 py-2 font-medium">Detail</th>
-              <th className="px-3 py-2 font-medium">By</th>
+              <th className="px-3 py-2 font-medium">{labels.when}</th>
+              <th className="px-3 py-2 font-medium">{labels.type}</th>
+              <th className="px-3 py-2 font-medium">{labels.detail}</th>
+              <th className="px-3 py-2 font-medium">{labels.by}</th>
               <th className="px-3 py-2 font-medium text-right">Δ</th>
-              <th className="px-3 py-2 font-medium text-right">Balance</th>
+              <th className="px-3 py-2 font-medium text-right">{labels.balance}</th>
             </tr>
           </thead>
           <tbody>
             <tr className="border-t border-zinc-800 bg-zinc-900/40">
               <td className="px-3 py-2 font-mono text-xs text-zinc-500" colSpan={5}>
-                Opening balance
+                {labels.opening_balance}
               </td>
               <td className="px-3 py-2 text-right text-zinc-600">—</td>
               <td className="px-3 py-2 text-right font-mono">{data.openingBalance.toLocaleString()}</td>
@@ -169,7 +170,7 @@ function BucketSection({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-3 py-4 text-center text-zinc-600">
-                  No movement in this range.
+                  {labels.no_movement}
                 </td>
               </tr>
             ) : (
@@ -252,7 +253,7 @@ function BucketSection({
 
             <tr className="border-t border-zinc-800 bg-zinc-900/40">
               <td className="px-3 py-2 font-mono text-xs text-zinc-500" colSpan={5}>
-                Closing balance
+                {labels.closing_balance}
               </td>
               <td className="px-3 py-2 text-right text-zinc-600">—</td>
               <td className="px-3 py-2 text-right font-mono">{data.closingBalance.toLocaleString()}</td>
@@ -285,6 +286,7 @@ export default function LedgerModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const labels = usePageLabels("total_stock")
 
   useEffect(() => {
     const trimmedSku = query.sku.trim();
@@ -386,7 +388,7 @@ export default function LedgerModal({
           <div>
             <h2 className="text-lg font-semibold">{data ? `${data.sku} — ${data.name}` : skuInput}</h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              One ledger per Total Stock column for this SKU — each starts from its own opening balance, not full history.
+              {labels.ledger_description}
             </p>
           </div>
           <button
@@ -413,7 +415,7 @@ export default function LedgerModal({
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">From</label>
+            <label className="block text-xs text-zinc-500 mb-1">{labels.from}</label>
             <input
               type="date"
               value={fromInput}
@@ -423,7 +425,7 @@ export default function LedgerModal({
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-500 mb-1">To</label>
+            <label className="block text-xs text-zinc-500 mb-1">{labels.to}</label>
             <input
               type="date"
               value={toInput}
@@ -436,7 +438,7 @@ export default function LedgerModal({
             onClick={applyFilters}
             className="px-4 py-1.5 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 transition-colors"
           >
-            Apply
+            {labels.search}
           </button>
 
           {(query.from || query.to) && (
@@ -444,7 +446,7 @@ export default function LedgerModal({
               onClick={clearDates}
               className="px-3 py-1.5 rounded-md border border-zinc-800 text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
             >
-              Clear dates
+              {labels.clear_date}
             </button>
           )}
 
@@ -453,7 +455,7 @@ export default function LedgerModal({
             disabled={!data}
             className="ml-auto px-4 py-1.5 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800/80 disabled:opacity-40 transition-colors"
           >
-            Export to Excel
+            {labels.export_excel}
           </button>
         </div>
 
@@ -475,7 +477,7 @@ export default function LedgerModal({
                 </div>
                 {data.truncated && (
                   <div className="text-amber-500">
-                    Ledger only goes back to {data.anchorOpeningAt} — showing from there instead.
+                    {labels.ledger_information.replace("{opening}", data.anchorOpeningAt)}
                   </div>
                 )}
               </div>
@@ -500,7 +502,7 @@ export default function LedgerModal({
 
         {data && (
           <div className="px-5 py-3 border-t border-zinc-800 shrink-0 flex items-center justify-between bg-zinc-900/60">
-            <span className="text-sm text-zinc-400">Total Stock</span>
+            <span className="text-sm text-zinc-400">{labels.total_stock}</span>
             <span className="font-mono text-sm">
               <span className="text-zinc-500">{data.total.openingBalance.toLocaleString()}</span>
               <span className="text-zinc-600 mx-2">→</span>

@@ -18,7 +18,7 @@ export default function InventoryClient({
   // working even if it's a server component that fetches its own data.
   map: ReactNode;
 }) {
-  const labels = usePageLabels("inventory_page");
+  const labels = usePageLabels("heatmap_page");
 
   return (
     <div className="p-8">

@@ -24,7 +24,7 @@ import { canAccessPath, type PageAccess } from "@/lib/pages";
 // ];
 
 type NavItems =
-  | "Inventory"
+  | "HeatMap"
   | "Location_Stock"
   | "Total_Stock"
   | "Sales_Orders"
@@ -85,7 +85,7 @@ export default function SiteNav({
 
 
   const navItem:{key: NavItems; label: string, href: string}[] = [
-    {key: "Inventory", label: labels.inventory, href:"/"},
+    {key: "HeatMap", label: labels.heat_map, href:"/"},
     {key: "Location_Stock", label: labels.location_stock, href:"/location-stock"},
     {key: "Total_Stock", label: labels.total_stock, href:"/total-stock"},
     {key: "Sales_Orders", label: labels.sales_order, href:"/sales-orders"},
@@ -103,6 +103,7 @@ export default function SiteNav({
     {key: "Item_List", label: labels.item_list, href:"/items"},
     {key: "Location_List", label: labels.location_list, href:"/locations"},
     {key: "User_List", label: labels.user_list, href:"/users"},
+    {key: "Role_List", label: labels.role_list, href:"/roles"},
     {key: "Permissions", label: labels.permissions, href:"/permissions"},
   ]
 

@@ -20,14 +20,14 @@ export const DEFAULT_LABELS = {
     ...STOCK_OPNAME_SUMMARY_LABELS,
   },
   location_stock: {
+    location_header: "Location Stock",
+    header_description: "Total stock in all locations",
     th_location: "Location",
     th_sku: "SKU",
     th_product: "Product",
     th_quantity: "Quantity",
     th_updated: "Updated",
     search_placeholder: "Search all location stock by location or SKU ...",
-    location_header: "Location Stock",
-    header_description: "Total stock in all locations",
     total_stock_card: "Total Stock (Floor + Rack)",
     total_floor_card: "Total Floor",
     total_rack: "Total Rack",
@@ -52,6 +52,22 @@ export const DEFAULT_LABELS = {
     details_button: "Details",
     th_quantity: "Quantity",
     th_updated: "Updated",
+    ledger_description: "One ledger per Total Stock column for this SKU — each starts from its own opening balance, not full history.",
+    from: "From",
+    to: "To",
+    apply: "Search",
+    export_excel: "Export To Excel",
+    clear_date: "Clear Date",
+    ledger_information: "Ledger only goes back to {opening} — showing from there instead.",
+    total_stock: "Total Stock",
+    when: "When",
+    type: "Type",
+    detail: "Detail",
+    by: "By",
+    balance: "Balance",
+    opening_balance: "Opening Balance",
+    no_movement: "No movement in this range.",
+    closing_balance: "Closing Balance"
   },
   scan: {
     page_header: "System Control",
@@ -88,7 +104,7 @@ export const DEFAULT_LABELS = {
     
   },
   navbar: {
-    inventory: "Inventory",
+    heat_map: "Heat Map",
     location_stock: "Location Stock",
     total_stock: "Total Stock",
     sales_order: "Sales Order",
@@ -106,7 +122,7 @@ export const DEFAULT_LABELS = {
     role_list: "Role List",
     permissions: "Permissions"
   },
-  inventory_page:{
+  heatmap_page:{
     inventory_header: "Inventory Heat Map",
     header_description: "Active pallets currently in the warehouse",
     warehouse_map_title: "Warehouse Map"
@@ -412,12 +428,15 @@ export type LabelKey<P extends PageKey> = keyof (typeof DEFAULT_LABELS)[P];
 
 export const PAGE_OPTIONS: { key: PageKey; label: string }[] = [
     { key: "navbar", label: "NavBar"},
-    { key: "stock_opname", label: "Stock Opname" }, 
-    { key: "location_stock", label: "Location Stock (v2)"},
-    { key: "scan", label: "System Control"},
-    { key: "inventory_page", label: "Inventory Heat Map"},
+    { key: "heatmap_page", label: "Heat Map"},
+    { key: "location_stock", label: "Location Stock"},
         { key: "total_stock", label: "Total Stock"},
+    {key:"work_orders_page", label: "Work Order"},
          { key: "sales_page", label: "Sales Page"},
+
+    { key: "stock_opname", label: "Stock Opname" }, 
+    { key: "scan", label: "System Control"},
+    
                   { key: "movement_history_page", label: "Movement History"},
     { key: "locations_master", label: "Locations" },
 
