@@ -59,6 +59,8 @@ export const stockColumns = pgTable(
       .notNull()
       .references((): AnyPgColumn => warehouses.id, { onDelete: "cascade" }),
     name: text("name").notNull(), // e.g. "Good Stock"
+        nameId: text("name_id"),
+    nameZh: text("name_zh"),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },

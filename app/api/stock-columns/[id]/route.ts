@@ -4,7 +4,7 @@ import { locations, stockColumns } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { denyUnlessAllowed } from "@/lib/pagePermissions";
-import { cleanColumnName, columnNameTaken, locationsUsingColumn } from "@/lib/stockColumns";
+import { cleanColumnName, cleanColumnTranslation, columnNameTaken, locationsUsingColumn } from "@/lib/stockColumns";
 
 async function authorize() {
   const session = await getSession();
@@ -25,7 +25,9 @@ async function findColumn(params: Promise<{ id: string }>) {
 }
 
 // PATCH /api/stock-columns/:id
-// body: { name } — renames the column. Locations under it stay under it.
+// body: { name, nameId?, nameZh? } — renames the column (and its Indonesian /
+// Chinese names; a translation left out stays as it is, an empty one is
+// cleared). Locations under it stay under it.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error } = await authorize();
   if (error) return error;
@@ -46,7 +48,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const [updated] = await db
     .update(stockColumns)
-    .set({ name })
+    .set({
+      name,
+      ...(body && "nameId" in body ? { nameId: cleanColumnTranslation(body.nameId) } : {}),
+      ...(body && "nameZh" in body ? { nameZh: cleanColumnTranslation(body.nameZh) } : {}),
+    })
     .where(eq(stockColumns.id, column.id))
     .returning();
 

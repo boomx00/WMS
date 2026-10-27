@@ -9,6 +9,8 @@ import LocationLedgerModal from "./LocationLedgerModal";
 import { downloadXlsx } from "./exportLedgerXlsx";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { TOTAL_STOCK_WAREHOUSE_LABELS } from "@/lib/warehouseLabels";
+import { useLanguage } from "@/lib/LanguageContext";
+import { columnNameFor } from "@/lib/columnNames";
 
 export type SkuLocation = {
   locationCode: string;
@@ -19,8 +21,9 @@ export type SkuLocation = {
   updatedAt: string;
 };
 
-// A Total Stock column from Settings → Total Stock Columns.
-export type StockColumn = { id: number; name: string };
+// A Total Stock column from Settings → Total Stock Columns, with its
+// optional Indonesian / Chinese names.
+export type StockColumn = { id: number; name: string; nameId?: string | null; nameZh?: string | null };
 
 export type SkuStock = {
   itemId: number;
@@ -124,6 +127,7 @@ export default function TotalStockTable({
   const [ledgerSku, setLedgerSku] = useState<string | null>(null);
   const [locationLedger, setLocationLedger] = useState<{ sku: string; location: string } | null>(null);
     const labels = usePageLabels("total_stock", TOTAL_STOCK_WAREHOUSE_LABELS);
+  const { language } = useLanguage();
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
@@ -200,7 +204,7 @@ export default function TotalStockTable({
         : "";
     downloadXlsx(
       `total-stock${tabPart}-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      ["SKU CODE", "SKU NAME", ...columns.map((c) => c.name.toUpperCase()), "TOTAL"],
+      ["SKU CODE", "SKU NAME", ...columns.map((c) => columnNameFor(c, language).toUpperCase()), "TOTAL"],
       rows
     );
   }
@@ -279,7 +283,7 @@ export default function TotalStockTable({
               {columns.map((c) => (
                 <SortableTh
                   key={c.id}
-                  label={c.name}
+                  label={columnNameFor(c, language)}
                   sortKey={`col:${c.id}`}
                   activeKey={sortKey}
                   dir={sortDir}

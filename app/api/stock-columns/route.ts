@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth";
 import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import {
   cleanColumnName,
+  cleanColumnTranslation,
   columnNameTaken,
   listStockColumnsWithCounts,
   nextColumnSortOrder,
@@ -25,8 +26,9 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/stock-columns
-// body: { name, warehouseId } — added at the end of that warehouse's list
-// (the default warehouse when warehouseId is left out).
+// body: { name, nameId?, nameZh?, warehouseId } — added at the end of that
+// warehouse's list (the default warehouse when warehouseId is left out).
+// nameId / nameZh: optional Indonesian / Chinese names.
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -52,7 +54,13 @@ export async function POST(req: NextRequest) {
 
   const [created] = await db
     .insert(stockColumns)
-    .values({ warehouseId, name, sortOrder: await nextColumnSortOrder(db, warehouseId) })
+    .values({
+      warehouseId,
+      name,
+      nameId: cleanColumnTranslation(body?.nameId),
+      nameZh: cleanColumnTranslation(body?.nameZh),
+      sortOrder: await nextColumnSortOrder(db, warehouseId),
+    })
     .returning();
 
   return NextResponse.json(created, { status: 201 });

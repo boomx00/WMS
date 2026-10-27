@@ -230,6 +230,8 @@ export async function GET(
     columns: columns.map((c) => ({
       id: c.id,
       name: c.name,
+      nameId: c.nameId,
+      nameZh: c.nameZh,
       openingBalance: opening.get(c.id)!,
       closingBalance: running.get(c.id)!,
       entries: entries.get(c.id)!,

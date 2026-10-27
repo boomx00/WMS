@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { downloadXlsxMultiSheet } from "./exportLedgerXlsx";
+import { useLanguage } from "@/lib/LanguageContext";
+import { columnNameFor } from "@/lib/columnNames";
 
 type BucketEntry = {
   id: number;
@@ -22,6 +24,8 @@ type BucketEntry = {
 type BucketData = {
   id: number;
   name: string;
+  nameId?: string | null; // Indonesian name
+  nameZh?: string | null; // Chinese name
   openingBalance: number;
   closingBalance: number;
   entries: BucketEntry[];
@@ -135,10 +139,11 @@ function BucketSection({
   onToggleGroup: (key: string) => void;
 }) {
   const rows = groupEntries(data.entries, bucketKey);
+  const { language } = useLanguage();
 
   return (
     <div className="mb-6">
-      <h3 className="text-sm font-semibold text-zinc-200 mb-2">{data.name} Ledger</h3>
+      <h3 className="text-sm font-semibold text-zinc-200 mb-2">{columnNameFor(data, language)} Ledger</h3>
       <div className="border border-zinc-800 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -270,6 +275,7 @@ export default function LedgerModal({
   warehouseId?: number | null;
   onClose: () => void;
 }) {
+  const { language } = useLanguage();
   const [skuInput, setSkuInput] = useState(sku);
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
@@ -354,7 +360,11 @@ export default function LedgerModal({
         ...bucket.entries.map((e) => [e.createdAt, e.type, describeEvent(e), e.username, e.delta, e.runningTotal]),
         ["Closing balance", "", "", "", "", bucket.closingBalance],
       ];
-      return { name: sheetName(bucket.name, used), headers: ["When", "Type", "Detail", "By", "Delta", "Balance"], rows };
+      return {
+        name: sheetName(columnNameFor(bucket, language), used),
+        headers: ["When", "Type", "Detail", "By", "Delta", "Balance"],
+        rows,
+      };
     });
 
     sheets.push({

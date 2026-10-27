@@ -9,7 +9,14 @@
 import { locations, stockColumns } from "@/db/schema";
 import { and, asc, eq, ne, sql, type SQL } from "drizzle-orm";
 
-export type StockColumn = { id: number; warehouseId: number; name: string; sortOrder: number };
+export type StockColumn = {
+  id: number;
+  warehouseId: number;
+  name: string;
+  nameId: string | null; // Indonesian name (null = use name)
+  nameZh: string | null; // Chinese name (null = use name)
+  sortOrder: number;
+};
 export type StockColumnListRow = StockColumn & { locationCount: number };
 
 const inWarehouse = (warehouseId?: number | null): SQL | undefined =>
@@ -22,6 +29,8 @@ export async function getStockColumns(db: any, warehouseId?: number | null): Pro
       id: stockColumns.id,
       warehouseId: stockColumns.warehouseId,
       name: stockColumns.name,
+      nameId: stockColumns.nameId,
+      nameZh: stockColumns.nameZh,
       sortOrder: stockColumns.sortOrder,
     })
     .from(stockColumns)
@@ -36,6 +45,8 @@ export async function listStockColumnsWithCounts(db: any, warehouseId?: number |
       id: stockColumns.id,
       warehouseId: stockColumns.warehouseId,
       name: stockColumns.name,
+      nameId: stockColumns.nameId,
+      nameZh: stockColumns.nameZh,
       sortOrder: stockColumns.sortOrder,
       locationCount: sql<number>`count(${locations.id})::int`,
     })
@@ -52,6 +63,8 @@ export async function getStockColumnById(db: any, id: number): Promise<StockColu
       id: stockColumns.id,
       warehouseId: stockColumns.warehouseId,
       name: stockColumns.name,
+      nameId: stockColumns.nameId,
+      nameZh: stockColumns.nameZh,
       sortOrder: stockColumns.sortOrder,
     })
     .from(stockColumns)
@@ -62,6 +75,11 @@ export async function getStockColumnById(db: any, id: number): Promise<StockColu
 
 export function cleanColumnName(value: unknown): string {
   return typeof value === "string" ? value.replace(/\0/g, "").trim() : "";
+}
+
+// An optional translated name: trimmed, or null when left empty.
+export function cleanColumnTranslation(value: unknown): string | null {
+  return cleanColumnName(value) || null;
 }
 
 // Case-insensitive and per warehouse, so "good stock" and "Good Stock"

@@ -103,7 +103,7 @@ export default async function TotalStockPage({
         // Fresh sort / search / expanded rows per tab.
         key={active?.id ?? "none"}
         skus={skus}
-        columns={columns.map(({ id, name }) => ({ id, name }))}
+        columns={columns.map(({ id, name, nameId, nameZh }) => ({ id, name, nameId, nameZh }))}
         warehouses={warehouses.map(({ id, name, isActive }) => ({ id, name, isActive }))}
         activeWarehouseId={active?.id ?? null}
       />

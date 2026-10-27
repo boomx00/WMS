@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import * as XLSX from "xlsx";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { useLanguage } from "@/lib/LanguageContext";
+import { columnNameFor } from "@/lib/columnNames";
 import { STOCK_OPNAME_SUMMARY_LABELS } from "@/lib/stockOpnameSummaryLabels";
 
 // Stock Opname → Stock Opname Summary: every product, and for each day it
@@ -12,7 +13,8 @@ import { STOCK_OPNAME_SUMMARY_LABELS } from "@/lib/stockOpnameSummaryLabels";
 // the right. Detail (pencil) shows the product's full opname history.
 
 type Figures = { system: number; counted: number };
-type Bucket = { key: string; name: string };
+// nameId / nameZh: a Total Stock column's Indonesian / Chinese names.
+type Bucket = { key: string; name: string; nameId?: string | null; nameZh?: string | null };
 type Status = "IN_PROGRESS" | "DONE" | "CONFIRMED";
 
 type Cell = {
@@ -449,6 +451,11 @@ async function readK3File(file: File, t: Record<string, string>): Promise<K3Row[
 export default function StockOpnameSummaryPanel() {
   const labels = usePageLabels("stock_opname", STOCK_OPNAME_SUMMARY_LABELS);
   const locale = useDateLocale();
+  const { language } = useLanguage();
+  // A column's name as shown: Other / Total from the labels, a Total Stock
+  // column in the picked language.
+  const bucketLabel = (b: Bucket) =>
+    b.key === "other" ? labels.summary_other : b.key === "total" ? labels.summary_total : columnNameFor(b, language);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [warehouseId, setWarehouseId] = useState<number | null>(null);
@@ -537,15 +544,16 @@ export default function StockOpnameSummaryPanel() {
       .filter((b) => selected.includes(b.key))
       .map((b) => ({
         ...b,
-        name: b.key === "other" ? labels.summary_other : b.key === "total" ? labels.summary_total : b.name,
+        name:
+          b.key === "other" ? labels.summary_other : b.key === "total" ? labels.summary_total : columnNameFor(b, language),
       }));
-  }, [data, selected, labels]);
+  }, [data, selected, labels, language]);
 
   // Unticked columns, taken off each date's Total.
   const excludedKeys = useMemo(() => (data && selected ? excludedFrom(data.buckets, selected) : []), [data, selected]);
   const excludedNames = (data?.buckets ?? [])
     .filter((b) => excludedKeys.includes(b.key))
-    .map((b) => (b.key === "other" ? labels.summary_other : b.name));
+    .map((b) => bucketLabel(b));
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -865,7 +873,7 @@ export default function StockOpnameSummaryPanel() {
               onChange={() => toggleBucket(b.key)}
               className="h-4 w-4 accent-amber-500"
             />
-            {b.key === "other" ? labels.summary_other : b.key === "total" ? labels.summary_total : b.name}
+            {bucketLabel(b)}
           </label>
         ))}
         <span className="w-px h-4 bg-zinc-800" />
@@ -1936,6 +1944,7 @@ function OpnameHistoryModal({
   onClose: () => void;
 }) {
   const locale = useDateLocale();
+  const { language } = useLanguage();
   const [detail, setDetail] = useState<DetailResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Opnames whose counted lines the user has folded away; everything else
@@ -1961,11 +1970,12 @@ function OpnameHistoryModal({
   // The tab's columns, plus Total (always).
   const buckets = useMemo(() => {
     if (!detail) return [];
-    const name = (b: Bucket) => (b.key === "other" ? labels.summary_other : b.key === "total" ? labels.summary_total : b.name);
+    const name = (b: Bucket) =>
+      b.key === "other" ? labels.summary_other : b.key === "total" ? labels.summary_total : columnNameFor(b, language);
     return detail.buckets
       .filter((b) => b.key === "total" || bucketKeys.includes(b.key))
       .map((b) => ({ ...b, name: name(b) }));
-  }, [detail, bucketKeys, labels]);
+  }, [detail, bucketKeys, labels, language]);
   // Same rule as the tab: unticked columns are taken off Total.
   const excludedKeys = useMemo(() => (detail ? excludedFrom(detail.buckets, bucketKeys) : []), [detail, bucketKeys]);
   const bucketName = (key: string) =>
@@ -1973,7 +1983,10 @@ function OpnameHistoryModal({
       ? "—"
       : key === "other"
         ? labels.summary_other
-        : detail?.buckets.find((b) => b.key === key)?.name ?? key;
+        : (() => {
+            const b = detail?.buckets.find((x) => x.key === key);
+            return b ? columnNameFor(b, language) : key;
+          })();
 
   // Full history newest first (for "change since previous"), and the
   // entries of the chosen date that the modal lists.

@@ -9,8 +9,14 @@ export type Labels = Record<string, string>;
 export type TypeRow = Omit<LocationTypeListRow, "createdAt">;
 export type LocationRowData = LocationListRow;
 // A Total Stock column from Settings → Total Stock Columns (each belongs to
-// one warehouse).
-export type StockColumnOption = { id: number; name: string; warehouseId: number };
+// one warehouse), with its optional Indonesian / Chinese names.
+export type StockColumnOption = {
+  id: number;
+  name: string;
+  nameId?: string | null;
+  nameZh?: string | null;
+  warehouseId: number;
+};
 // A warehouse (parent location), in display order — the first active one
 // is the default.
 export type WarehouseRow = {

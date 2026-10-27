@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { LOCATIONS_WAREHOUSE_LABELS } from "@/lib/warehouseLabels";
 import { useCan } from "@/lib/AccessContext";
+import { useLanguage } from "@/lib/LanguageContext";
+import { columnNameFor } from "@/lib/columnNames";
 import LocationTypeModal from "./LocationTypeModal";
 import LocationModal from "./LocationModal";
 import WarehouseModal from "./WarehouseModal";
@@ -27,7 +29,7 @@ type Tab = "types" | "locations" | "warehouses";
 export default function LocationsView({
   types,
   locations,
-  columns,
+  columns: rawColumns,
   warehouses,
 }: {
   types: TypeRow[];
@@ -36,6 +38,13 @@ export default function LocationsView({
   warehouses: WarehouseRow[]; // in display order; the first is the default
 }) {
   const labels = usePageLabels("locations_master", LOCATIONS_WAREHOUSE_LABELS);
+  // Column names in the picked language (Settings → Total Stock Columns),
+  // for the table and the location popup alike.
+  const { language } = useLanguage();
+  const columns = useMemo(
+    () => rawColumns.map((c) => ({ ...c, name: columnNameFor(c, language) })),
+    [rawColumns, language]
+  );
   const can = useCan();
   const canEdit = can("locations.edit");
   const [tab, setTab] = useState<Tab>("types");

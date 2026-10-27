@@ -19,7 +19,7 @@ export default async function LocationsPage() {
       // Dates aren't needed on the page; keep the props plain.
       types={types.map(({ createdAt, ...rest }) => rest)}
       locations={locations}
-      columns={columns.map(({ id, name, warehouseId }) => ({ id, name, warehouseId }))}
+      columns={columns.map(({ id, name, nameId, nameZh, warehouseId }) => ({ id, name, nameId, nameZh, warehouseId }))}
       warehouses={warehouses.map(({ sortOrder, ...rest }) => rest)}
     />
   );

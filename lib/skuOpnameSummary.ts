@@ -29,7 +29,7 @@ import { SKU_OPNAME_PREFIX } from "@/lib/skuOpname";
 // A column of the summary: one Total Stock column of the warehouse, "other"
 // (locations under no column, or not counted in Total Stock), or "total"
 // (everything, using the locked system total).
-export type SummaryBucket = { key: string; name: string };
+export type SummaryBucket = { key: string; name: string; nameId?: string | null; nameZh?: string | null };
 
 export type BucketFigures = { system: number; counted: number };
 
@@ -77,13 +77,15 @@ const localDateTime = (column: any) =>
 
 // The warehouse's Total Stock columns, then Other, then Total.
 export async function getSummaryBuckets(db: any, warehouseId: number): Promise<SummaryBucket[]> {
-  const columns: { id: number; name: string }[] = await db
-    .select({ id: stockColumns.id, name: stockColumns.name })
+  const columns: { id: number; name: string; nameId: string | null; nameZh: string | null }[] = await db
+    .select({ id: stockColumns.id, name: stockColumns.name, nameId: stockColumns.nameId, nameZh: stockColumns.nameZh })
     .from(stockColumns)
     .where(eq(stockColumns.warehouseId, warehouseId))
     .orderBy(asc(stockColumns.sortOrder), asc(stockColumns.id));
   return [
-    ...columns.map((c) => ({ key: `col:${c.id}`, name: c.name })),
+    // nameId / nameZh: the column's Indonesian / Chinese names (Settings →
+    // Total Stock Columns), picked by the page for the chosen language.
+    ...columns.map((c) => ({ key: `col:${c.id}`, name: c.name, nameId: c.nameId, nameZh: c.nameZh })),
     { key: "other", name: "Other" },
     { key: "total", name: "Total" },
   ];

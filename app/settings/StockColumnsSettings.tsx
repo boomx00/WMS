@@ -4,13 +4,22 @@ import { useEffect, useState } from "react";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { SETTINGS_WAREHOUSE_LABELS } from "@/lib/warehouseLabels";
 
-type Column = { id: number; name: string; sortOrder: number; locationCount: number };
+type Column = {
+  id: number;
+  name: string;
+  nameId: string | null; // Indonesian name (empty = the name)
+  nameZh: string | null; // Chinese name (empty = the name)
+  sortOrder: number;
+  locationCount: number;
+};
 type WarehouseOption = { id: number; name: string; isActive: boolean };
 
 // Settings → Total Stock Columns: the columns of one warehouse's Total
 // Stock tab (and the sections of its per-SKU ledger), in display order —
 // the warehouse is chosen at the top. Each location picks one of its
-// warehouse's columns as "Shown under" on the Locations page.
+// warehouse's columns as "Shown under" on the Locations page. Every column
+// can also have an Indonesian and a Chinese name, shown wherever the column
+// appears when that language is picked (left empty = the default name).
 export default function StockColumnsSettings({
   readOnly = false,
   warehouses,
@@ -25,8 +34,12 @@ export default function StockColumnsSettings({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
+  const [newNameId, setNewNameId] = useState("");
+  const [newNameZh, setNewNameZh] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+  const [editNameId, setEditNameId] = useState("");
+  const [editNameZh, setEditNameZh] = useState("");
 
   useEffect(() => {
     setEditingId(null);
@@ -73,10 +86,14 @@ export default function StockColumnsSettings({
       fetch("/api/stock-columns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim(), warehouseId }),
+        body: JSON.stringify({ name: newName.trim(), nameId: newNameId, nameZh: newNameZh, warehouseId }),
       })
     );
-    if (ok) setNewName("");
+    if (ok) {
+      setNewName("");
+      setNewNameId("");
+      setNewNameZh("");
+    }
   }
 
   async function handleRename(id: number) {
@@ -84,7 +101,7 @@ export default function StockColumnsSettings({
       fetch(`/api/stock-columns/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim() }),
+        body: JSON.stringify({ name: editName.trim(), nameId: editNameId, nameZh: editNameZh }),
       })
     );
     if (ok) setEditingId(null);
@@ -144,13 +161,30 @@ export default function StockColumnsSettings({
       </div>
 
       {!readOnly && (
-        <form onSubmit={handleAdd} className="flex gap-2 mb-4">
+        <form onSubmit={handleAdd} className="flex flex-wrap gap-2 mb-4">
           <input
             type="text"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             placeholder={labels.stock_column_name}
-            className="flex-1 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+            aria-label={`${labels.stock_column_name} (${labels.default_lang})`}
+            className="flex-1 min-w-40 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+          />
+          <input
+            type="text"
+            value={newNameId}
+            onChange={(e) => setNewNameId(e.target.value)}
+            placeholder={labels.Indonesian}
+            aria-label={`${labels.stock_column_name} (${labels.Indonesian})`}
+            className="flex-1 min-w-32 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+          />
+          <input
+            type="text"
+            value={newNameZh}
+            onChange={(e) => setNewNameZh(e.target.value)}
+            placeholder={labels.Chinese}
+            aria-label={`${labels.stock_column_name} (${labels.Chinese})`}
+            className="flex-1 min-w-32 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
           />
           <button
             type="submit"
@@ -169,35 +203,58 @@ export default function StockColumnsSettings({
       ) : columns.length === 0 ? (
         <p className="text-xs text-zinc-600">{labels.stock_column_none}</p>
       ) : (
-        <div className="border border-zinc-800 rounded-lg overflow-hidden">
+        <div className="border border-zinc-800 rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-zinc-900 text-zinc-500 text-left">
-                <th className="px-3 py-2 font-medium w-12">#</th>
-                <th className="px-3 py-2 font-medium">{labels.stock_column_name}</th>
-                <th className="px-3 py-2 font-medium text-right">{labels.stock_column_locations}</th>
-                {!readOnly && <th className="px-3 py-2 font-medium" />}
+                <th className="px-2 py-2 font-medium w-8">#</th>
+                <th className="px-2 py-2 font-medium whitespace-nowrap">
+                  {labels.stock_column_name}
+                  <div className="font-normal text-xs text-zinc-600">{labels.default_lang}</div>
+                </th>
+                <th className="px-2 py-2 font-medium">{labels.Indonesian}</th>
+                <th className="px-2 py-2 font-medium">{labels.Chinese}</th>
+                <th className="px-2 py-2 font-medium text-right">{labels.stock_column_locations}</th>
+                {!readOnly && <th className="px-2 py-2 font-medium" />}
               </tr>
             </thead>
             <tbody>
               {columns.map((column, index) => (
                 <tr key={column.id} className="border-t border-zinc-800/60">
-                  <td className="px-3 py-2 font-mono text-zinc-600">{index + 1}</td>
-                  <td className="px-3 py-2">
-                    {editingId === column.id ? (
+                  <td className="px-2 py-2 font-mono text-zinc-600">{index + 1}</td>
+                  {editingId === column.id ? (
+                    <td className="px-2 py-2" colSpan={3}>
                       <form
                         onSubmit={(e) => {
                           e.preventDefault();
                           handleRename(column.id);
                         }}
-                        className="flex gap-2"
+                        className="flex flex-wrap gap-2"
                       >
                         <input
                           type="text"
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
                           autoFocus
-                          className="flex-1 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+                          placeholder={labels.stock_column_name}
+                          aria-label={`${labels.stock_column_name} (${labels.default_lang})`}
+                          className="flex-1 min-w-32 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+                        />
+                        <input
+                          type="text"
+                          value={editNameId}
+                          onChange={(e) => setEditNameId(e.target.value)}
+                          placeholder={labels.Indonesian}
+                          aria-label={`${labels.stock_column_name} (${labels.Indonesian})`}
+                          className="flex-1 min-w-28 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
+                        />
+                        <input
+                          type="text"
+                          value={editNameZh}
+                          onChange={(e) => setEditNameZh(e.target.value)}
+                          placeholder={labels.Chinese}
+                          aria-label={`${labels.stock_column_name} (${labels.Chinese})`}
+                          className="flex-1 min-w-28 px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500 placeholder:text-zinc-600"
                         />
                         <button type="submit" disabled={busy || !editName.trim()} className={small}>
                           {labels.save}
@@ -206,16 +263,20 @@ export default function StockColumnsSettings({
                           {labels.cancel}
                         </button>
                       </form>
-                    ) : (
-                      <span className="text-zinc-200">{column.name}</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right font-mono text-zinc-400">
+                    </td>
+                  ) : (
+                    <>
+                      <td className="px-2 py-2 text-zinc-200 whitespace-nowrap">{column.name}</td>
+                      <td className="px-2 py-2 text-zinc-300">{column.nameId || <span className="text-zinc-700">—</span>}</td>
+                      <td className="px-2 py-2 text-zinc-300">{column.nameZh || <span className="text-zinc-700">—</span>}</td>
+                    </>
+                  )}
+                  <td className="px-2 py-2 text-right font-mono text-zinc-400">
                     {column.locationCount.toLocaleString()}
                   </td>
                   {!readOnly && (
-                    <td className="px-3 py-2">
-                      <div className="flex justify-end gap-1.5">
+                    <td className="px-2 py-2">
+                      <div className="flex justify-end gap-1.5 whitespace-nowrap">
                         <button
                           type="button"
                           onClick={() => handleMove(index, -1)}
@@ -241,6 +302,8 @@ export default function StockColumnsSettings({
                           onClick={() => {
                             setEditingId(column.id);
                             setEditName(column.name);
+                            setEditNameId(column.nameId ?? "");
+                            setEditNameZh(column.nameZh ?? "");
                           }}
                           disabled={busy}
                           className={small}
