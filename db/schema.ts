@@ -635,11 +635,13 @@ export const stockOpname = pgTable("stock_opname", {
 // K3 stock (Stock Opname Summary → Import K3)
 // ============================================================
 
-// The main system's (K3) stock of every product on one date, imported from
-// its "Real-time Inventory" export on the Stock Opname Summary: Inventory
-// Qty (CUoM) of the rows whose Inventory Status is Good Stock, summed per
-// Material Code (= items.sku). One import per WMS warehouse per date;
-// importing again for the same date replaces it.
+// The main system's (K3) stock of every product, imported from its
+// "Real-time Inventory" export on the Stock Opname Summary: Inventory Qty
+// (CUoM) of the rows whose Warehouse Name is MCI Warehouse and Inventory
+// Status is Good Stock, summed per Material Code (= items.sku). Each user
+// pulls their own export, so an import belongs to the SOSKU sessions it was
+// imported for (k3_stock_import_sessions) — one file can serve several
+// sessions; a date can have several imports.
 export const k3StockImports = pgTable(
   "k3_stock_imports",
   {
@@ -658,7 +660,27 @@ export const k3StockImports = pgTable(
     importedBy: integer("imported_by").references(() => users.id),
     importedAt: timestamp("imported_at").defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("k3_stock_imports_warehouse_date_idx").on(table.warehouseId, table.stockDate)]
+  (table) => [index("k3_stock_imports_warehouse_date_idx").on(table.warehouseId, table.stockDate)]
+);
+
+// Which K3 import each SOSKU session is compared against (at most one per
+// session; importing again for a session replaces its link). An import no
+// session uses any more is deleted.
+export const k3StockImportSessions = pgTable(
+  "k3_stock_import_sessions",
+  {
+    id: serial("id").primaryKey(),
+    importId: integer("import_id")
+      .notNull()
+      .references(() => k3StockImports.id, { onDelete: "cascade" }),
+    opnameNumber: varchar("opname_number", { length: 50 })
+      .notNull()
+      .references(() => stockOpname.opnameNumber, { onDelete: "cascade" }),
+  },
+  (table) => [
+    uniqueIndex("k3_stock_import_sessions_opname_idx").on(table.opnameNumber),
+    index("k3_stock_import_sessions_import_idx").on(table.importId),
+  ]
 );
 
 export const k3StockLines = pgTable(

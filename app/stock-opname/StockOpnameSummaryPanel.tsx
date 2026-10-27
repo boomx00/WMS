@@ -41,9 +41,13 @@ type AdjustTarget = {
   current: Adjustment | null;
 };
 
-// A K3 (main system) import for one date column: Good Stock per product,
-// read from K3's "Real-time Inventory" export.
+// A K3 (main system) import: Good Stock per product, read from K3's
+// "Real-time Inventory" export that one PIC pulled, used by the SOSKU
+// sessions it was imported for.
 type K3Import = {
+  id?: number;
+  date: string;
+  sessions: string[]; // the SOSKU sessions using it
   fileName: string | null;
   importedAt: string;
   by: string | null;
@@ -59,7 +63,8 @@ type SummaryResponse = {
   warehouses: { id: number; name: string; isActive: boolean }[];
   buckets: Bucket[];
   dates: string[];
-  k3?: Record<string, K3Import>; // date -> import, only dates that have one
+  k3Sessions?: Record<string, number>; // SOSKU session -> its K3 import's id
+  k3Imports?: Record<string, K3Import>; // import id -> import
   items: {
     itemId: number;
     sku: string;
@@ -67,8 +72,8 @@ type SummaryResponse = {
     currentStock: number;
     // cells[date] = every SOSKU session of that product that day, oldest first.
     cells: Record<string, Cell[]>;
-    // k3[date] = K3 Good Stock that day; missing while the date has an
-    // import = not in the K3 file, i.e. 0.
+    // k3[importId] = K3 Good Stock in that import; missing = not in the
+    // K3 file, i.e. 0.
     k3?: Record<string, number>;
   }[];
 };
@@ -262,6 +267,66 @@ function Delta({ value, muted = false }: { value: number; muted?: boolean }) {
 
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+// A product's K3 Good Stock for one SOSKU session: null when that session has
+// no K3 import (no K3 figures are shown for it); inFile = false when the
+// product wasn't in the session's K3 file (0 in K3).
+function k3Of(
+  data: SummaryResponse,
+  item: SummaryResponse["items"][number],
+  opnameNumber: string
+): { qty: number; inFile: boolean; importId: number } | null {
+  const importId = data.k3Sessions?.[opnameNumber];
+  if (importId === undefined) return null;
+  const qty = item.k3?.[importId];
+  return { qty: qty ?? 0, inFile: qty !== undefined, importId };
+}
+
+// One SOSKU session of a date, as listed in the Import K3 window.
+type DateSession = {
+  opnameNumber: string;
+  by: string | null;
+  status: Status;
+  skus: number;
+  firstAt: string;
+  lastAt: string;
+};
+
+// Every SOSKU session of each date (from all products, not just the shown
+// ones), ordered by session number.
+function sessionsByDate(data: SummaryResponse): Map<string, DateSession[]> {
+  const out = new Map<string, Map<string, DateSession>>();
+  for (const item of data.items) {
+    for (const [date, list] of Object.entries(item.cells)) {
+      const byNumber = out.get(date) ?? new Map<string, DateSession>();
+      for (const c of list) {
+        const s = byNumber.get(c.opnameNumber);
+        if (!s) {
+          byNumber.set(c.opnameNumber, {
+            opnameNumber: c.opnameNumber,
+            by: c.by,
+            status: c.status,
+            skus: 1,
+            firstAt: c.lockedAt,
+            lastAt: c.lockedAt,
+          });
+        } else {
+          s.skus++;
+          if (c.lockedAt < s.firstAt) s.firstAt = c.lockedAt;
+          if (c.lockedAt > s.lastAt) s.lastAt = c.lockedAt;
+          if (!s.by) s.by = c.by;
+        }
+      }
+      out.set(date, byNumber);
+    }
+  }
+  return new Map(
+    [...out].map(([date, m]) => [
+      date,
+      [...m.values()].sort((a, b) => a.opnameNumber.localeCompare(b.opnameNumber, undefined, { numeric: true })),
+    ])
+  );
+}
 // Longest adjustment note (same limit as /api/stock-opname/summary/adjustment).
 const NOTE_MAX_LENGTH = 1000;
 const fmtQty = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 3 });
@@ -477,16 +542,8 @@ export default function StockOpnameSummaryPanel() {
   const [reportDate, setReportDate] = useState<string | null>(null);
   // Bumped to reload the summary (e.g. after a K3 import), keeping filters.
   const [reloadKey, setReloadKey] = useState(0);
-  // K3 import: one hidden file input, aimed at the date whose button was
-  // clicked; the date being imported; and the result / error to show.
-  const k3Input = useRef<HTMLInputElement>(null);
-  const k3TargetDate = useRef<string | null>(null);
-  const [k3Busy, setK3Busy] = useState<string | null>(null);
-  const [k3Notice, setK3Notice] = useState<
-    | { kind: "ok"; date: string; result: K3Import }
-    | { kind: "error"; date: string; message: string }
-    | null
-  >(null);
+  // The date whose Import K3 window (pick SOSKU sessions + file) is open.
+  const [k3Date, setK3Date] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -523,6 +580,13 @@ export default function StockOpnameSummaryPanel() {
   }, [from, to, warehouseId, reloadKey]);
 
   const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds]);
+
+  // Each date's SOSKU sessions, and how many of them have K3 data. A date
+  // gets the K3 Stock / Δ K3 columns once any of its sessions has K3 data.
+  const dateSessions = useMemo(() => (data ? sessionsByDate(data) : new Map<string, DateSession[]>()), [data]);
+  const k3CountOf = (date: string) =>
+    (dateSessions.get(date) ?? []).filter((s) => data?.k3Sessions?.[s.opnameNumber] !== undefined).length;
+  const hasK3 = (date: string) => k3CountOf(date) > 0;
 
   function toggleHidden(itemId: number) {
     setHiddenIds((current) => {
@@ -564,16 +628,18 @@ export default function StockOpnameSummaryPanel() {
       const cells = Object.values(item.cells).flat();
       if (hideNever && cells.length === 0) return false;
       if (onlyDiff) {
-        const hasDiff = Object.entries(item.cells).some(([date, list]) =>
+        const hasDiff = Object.values(item.cells).some((list) =>
           list.some(
             (c) =>
               buckets.some((b) => {
                 const f = shownFigures(c, b.key, excludedKeys);
                 return f.counted !== f.system;
               }) ||
-              // or Total SO doesn't match K3, on a date with a K3 import
-              (!!data.k3?.[date] &&
-                round3(shownFigures(c, "total", excludedKeys).counted - (item.k3?.[date] ?? 0)) !== 0)
+              // or Total SO doesn't match K3, for a session with K3 data
+              (() => {
+                const k3 = k3Of(data, item, c.opnameNumber);
+                return !!k3 && round3(shownFigures(c, "total", excludedKeys).counted - k3.qty) !== 0;
+              })()
           )
         );
         if (!hasDiff) return false;
@@ -633,67 +699,6 @@ export default function StockOpnameSummaryPanel() {
     }
   }
 
-  function startK3Import(date: string) {
-    if (data?.k3?.[date]) {
-      const ok = window.confirm(
-        labels.k3_replace_confirm.replace(
-          "{date}",
-          formatDay(date, locale).day
-        )
-      );
-      if (!ok) return;
-    }
-    k3TargetDate.current = date;
-    k3Input.current?.click();
-  }
-
-  async function onK3File(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    const date = k3TargetDate.current;
-    e.target.value = ""; // so picking the same file again still fires
-    if (!file || !date || !data) return;
-    setK3Busy(date);
-    setK3Notice(null);
-    try {
-      const rows = await readK3File(file, labels);
-      const res = await fetch("/api/stock-opname/summary/k3", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ warehouseId: data.warehouse.id, date, fileName: file.name, rows }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? `${labels.k3_err_import} (${res.status})`);
-      setK3Notice({ kind: "ok", date, result: json.import as K3Import });
-      setReloadKey((k) => k + 1);
-    } catch (err) {
-      setK3Notice({ kind: "error", date, message: err instanceof Error ? err.message : labels.k3_err_import });
-    } finally {
-      setK3Busy(null);
-    }
-  }
-
-  async function removeK3(date: string) {
-    if (!data) return;
-    const ok = window.confirm(
-      labels.k3_remove_confirm.replace("{date}", formatDay(date, locale).day)
-    );
-    if (!ok) return;
-    setK3Busy(date);
-    try {
-      const res = await fetch(`/api/stock-opname/summary/k3?warehouseId=${data.warehouse.id}&date=${date}`, {
-        method: "DELETE",
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? `${labels.k3_err_remove} (${res.status})`);
-      if (k3Notice?.date === date) setK3Notice(null);
-      setReloadKey((k) => k + 1);
-    } catch (err) {
-      setK3Notice({ kind: "error", date, message: err instanceof Error ? err.message : labels.k3_err_remove });
-    } finally {
-      setK3Busy(null);
-    }
-  }
-
   function changeWarehouse(id: number) {
     setSelected(null);
     setWarehouseId(id);
@@ -718,12 +723,12 @@ export default function StockOpnameSummaryPanel() {
     if (buckets.length > 0) {
       for (const date of data.dates) {
         const start = header1.length;
-        const width = buckets.length * 3 + (data.k3?.[date] ? 2 : 0) + 2;
+        const width = buckets.length * 3 + (hasK3(date) ? 2 : 0) + 2;
         header1.push(date, ...Array(width - 1).fill(""));
         for (const b of buckets) {
           header2.push(`${b.name} ${labels.summary_system}`, `${b.name} ${labels.summary_so}`, labels.summary_delta);
         }
-        if (data.k3?.[date]) header2.push(k3Label, k3DeltaLabel);
+        if (hasK3(date)) header2.push(k3Label, k3DeltaLabel);
         header2.push(adjLabel, soskuLabel);
         merges.push({ s: { r: 0, c: start }, e: { r: 0, c: start + width - 1 } });
       }
@@ -744,12 +749,13 @@ export default function StockOpnameSummaryPanel() {
               row.push(f.system, f.counted, f.counted - f.system);
             }
           }
-          if (buckets.length > 0 && data.k3?.[date]) {
-            if (!cell) {
+          if (buckets.length > 0 && hasK3(date)) {
+            // Blank for a session without K3 data.
+            const k3 = cell ? k3Of(data, item, cell.opnameNumber) : null;
+            if (!cell || !k3) {
               row.push("", "");
             } else {
-              const k3 = item.k3?.[date] ?? 0;
-              row.push(k3, round3(shownFigures(cell, "total", excludedKeys).counted - k3));
+              row.push(k3.qty, round3(shownFigures(cell, "total", excludedKeys).counted - k3.qty));
             }
           }
           if (buckets.length > 0) row.push(cell?.adjustment?.note ?? "", cell?.opnameNumber ?? "");
@@ -778,8 +784,8 @@ export default function StockOpnameSummaryPanel() {
   // is the empty column before every date block, which separates the dates
   // from each other.
   const blockSpan = span + 2;
-  // A date with a K3 import has two more columns: K3 Stock and Δ K3.
-  const spanOf = (date: string) => blockSpan + (data?.k3?.[date] ? 2 : 0);
+  // A date where any session has K3 data has two more columns: K3 Stock and Δ K3.
+  const spanOf = (date: string) => blockSpan + (hasK3(date) ? 2 : 0);
   // The cell's content is a fixed-width grid of three lanes — SKU / name,
   // Total stock, hide button. A long product name wraps onto more lines
   // inside its own lane (the row grows taller) instead of running into the
@@ -908,78 +914,6 @@ export default function StockOpnameSummaryPanel() {
         </p>
       )}
 
-      <input
-        ref={k3Input}
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        className="hidden"
-        onChange={onK3File}
-        aria-hidden="true"
-        tabIndex={-1}
-      />
-
-      {k3Notice && (
-        <div
-          className={`mb-3 rounded-md border px-3 py-2 text-xs ${
-            k3Notice.kind === "ok" ? "border-sky-900 bg-sky-950/30 text-sky-200" : "border-red-900 bg-red-950/30 text-red-300"
-          }`}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              {k3Notice.kind === "error" ? (
-                labels.k3_error
-                  .replace("{date}", formatDay(k3Notice.date, locale).day)
-                  .replace("{message}", k3Notice.message)
-              ) : (
-                <>
-                  {labels.k3_import_done
-                    .replace("{date}", formatDay(k3Notice.date, locale).day)
-                    .replace("{warehouse}", k3Notice.result.k3Warehouse ?? "")
-                    .replace("{skus}", k3Notice.result.matchedSkus.toLocaleString())
-                    .replace("{qty}", fmtQty(k3Notice.result.totalQuantity))}
-                  {k3Notice.result.unmatched.length > 0 && (
-                    <span className="text-amber-400">
-                      {" "}
-                      ·{" "}
-                      {labels.k3_unmatched.replace(
-                        "{n}",
-                        k3Notice.result.unmatched.length.toLocaleString()
-                      )}
-                    </span>
-                  )}
-                </>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setK3Notice(null)}
-              className="text-zinc-500 hover:text-zinc-200 leading-none"
-              aria-label={labels.detail_close}
-            >
-              ✕
-            </button>
-          </div>
-          {k3Notice.kind === "ok" && k3Notice.result.unmatched.length > 0 && (
-            <details className="mt-1.5">
-              <summary className="cursor-pointer text-zinc-400 hover:text-zinc-200">
-                {labels.k3_show_unmatched}
-              </summary>
-              <table className="mt-1 text-[10px]">
-                <tbody>
-                  {k3Notice.result.unmatched.map((u) => (
-                    <tr key={u.code}>
-                      <td className="pr-3 font-mono text-amber-400">{u.code}</td>
-                      <td className="pr-3 text-zinc-400">{u.name ?? ""}</td>
-                      <td className="text-right tabular-nums text-zinc-300">{fmtQty(u.quantity)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </details>
-          )}
-        </div>
-      )}
-
       {!data ? (
         <p className="text-sm text-zinc-600">{loading ? labels.summary_loading : ""}</p>
       ) : (
@@ -1017,8 +951,8 @@ export default function StockOpnameSummaryPanel() {
                 ) : (
                   data.dates.map((date) => {
                     const { day, weekday } = formatDay(date, locale);
-                    const k3 = data.k3?.[date];
-                    const busy = k3Busy === date;
+                    const k3Count = k3CountOf(date);
+                    const sessionCount = dateSessions.get(date)?.length ?? 0;
                     return (
                       <Fragment key={date}>
                         <th rowSpan={2} className={gap} aria-hidden="true" />
@@ -1041,35 +975,20 @@ export default function StockOpnameSummaryPanel() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => startK3Import(date)}
-                                disabled={k3Busy !== null}
-                                title={
-                                  k3
-                                    ? `${labels.k3_imported} ${k3.importedAt}${k3.by ? ` · ${k3.by}` : ""}${
-                                        k3.fileName ? `\n${k3.fileName}` : ""
-                                      }\n${labels.k3_click_replace}`
-                                    : labels.k3_import_title
-                                }
-                                className={`px-1.5 py-0.5 rounded border text-[9px] transition-colors disabled:opacity-50 ${
-                                  k3
+                                onClick={() => setK3Date(date)}
+                                title={k3Count > 0 ? labels.k3_click_replace : labels.k3_import_title}
+                                className={`px-1.5 py-0.5 rounded border text-[9px] transition-colors ${
+                                  k3Count > 0
                                     ? "border-sky-800 text-sky-300 bg-sky-950/50 hover:bg-sky-900/50"
                                     : "border-zinc-600 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700"
                                 }`}
                               >
-                                {busy ? labels.k3_button_busy : k3 ? labels.k3_button_imported : `↑ ${labels.k3_import}`}
+                                {k3Count > 0
+                                  ? labels.k3_button_imported
+                                      .replace("{n}", String(k3Count))
+                                      .replace("{total}", String(sessionCount))
+                                  : `↑ ${labels.k3_import}`}
                               </button>
-                              {k3 && !busy && (
-                                <button
-                                  type="button"
-                                  onClick={() => removeK3(date)}
-                                  disabled={k3Busy !== null}
-                                  title={labels.k3_remove}
-                                  aria-label={`${labels.k3_remove} ${date}`}
-                                  className="px-1 py-0.5 rounded text-[9px] text-zinc-500 hover:text-red-400 hover:bg-zinc-700 disabled:opacity-50"
-                                >
-                                  ✕
-                                </button>
-                              )}
                             </span>
                           </div>
                         </th>
@@ -1105,7 +1024,7 @@ export default function StockOpnameSummaryPanel() {
                         <th className={subHead}>{labels.summary_delta}</th>
                       </Fragment>
                     ))}
-                    {data.k3?.[date] && (
+                    {hasK3(date) && (
                       <>
                         <th className={`${subHead} text-sky-300 border-l border-l-zinc-700`} title={labels.k3_stock_title}>
                           {k3Label}
@@ -1258,28 +1177,39 @@ export default function StockOpnameSummaryPanel() {
                                     </Fragment>
                                   );
                                 })}
-                                {data.k3?.[date] &&
+                                {hasK3(date) &&
                                   (() => {
-                                    const k3 = item.k3?.[date];
-                                    const k3Qty = k3 ?? 0;
+                                    const k3 = k3Of(data, item, cell.opnameNumber);
+                                    if (!k3) {
+                                      // This session has no K3 data.
+                                      return (
+                                        <>
+                                          <td
+                                            title={labels.k3_no_import}
+                                            className={`${dataCell} ${rowBorder} border-l border-l-zinc-700 text-zinc-700`}
+                                          >
+                                            —
+                                          </td>
+                                          <td title={labels.k3_no_import} className={`${dataCell} ${rowBorder} text-zinc-700`}>
+                                            —
+                                          </td>
+                                        </>
+                                      );
+                                    }
                                     const totalSo = shownFigures(cell, "total", excludedKeys).counted;
-                                    const k3Delta = round3(totalSo - k3Qty);
+                                    const k3Delta = round3(totalSo - k3.qty);
                                     return (
                                       <>
                                         <td
-                                          title={
-                                            k3 === undefined
-                                              ? labels.k3_not_in_file
-                                              : labels.k3_stock_title
-                                          }
+                                          title={k3.inFile ? labels.k3_stock_title : labels.k3_not_in_file}
                                           className={`${dataCell} ${rowBorder} border-l border-l-zinc-700 ${
-                                            k3 === undefined ? "text-zinc-600" : "text-sky-300"
+                                            k3.inFile ? "text-sky-300" : "text-zinc-600"
                                           }`}
                                         >
-                                          {fmtQty(k3Qty)}
+                                          {fmtQty(k3.qty)}
                                         </td>
                                         <td
-                                          title={`${k3DeltaTitle}: ${fmtQty(totalSo)} − ${fmtQty(k3Qty)}`}
+                                          title={`${k3DeltaTitle}: ${fmtQty(totalSo)} − ${fmtQty(k3.qty)}`}
                                           className={`${dataCell} ${rowBorder}`}
                                         >
                                           <Delta value={k3Delta} />
@@ -1338,6 +1268,18 @@ export default function StockOpnameSummaryPanel() {
         </div>
       )}
 
+      {k3Date !== null && data && (
+        <K3ImportDialog
+          date={k3Date}
+          data={data}
+          sessions={dateSessions.get(k3Date) ?? []}
+          labels={labels}
+          locale={locale}
+          onImported={() => setReloadKey((k) => k + 1)}
+          onClose={() => setK3Date(null)}
+        />
+      )}
+
       {reportDate !== null && data && (
         <DateReportModal
           date={reportDate}
@@ -1364,6 +1306,305 @@ export default function StockOpnameSummaryPanel() {
           onClose={() => setDetail(null)}
         />
       )}
+    </div>
+  );
+}
+
+// Import K3 for one date: several PICs opname on the same day and each pulls
+// their own Real-time Inventory export from K3, so the file is imported for
+// the SOSKU sessions ticked here. Lists every session of the date with the K3
+// data it has (file, when, by whom), which can be removed per session.
+function K3ImportDialog({
+  date,
+  data,
+  sessions,
+  labels,
+  locale,
+  onImported,
+  onClose,
+}: {
+  date: string;
+  data: SummaryResponse;
+  sessions: DateSession[];
+  labels: Record<string, string>;
+  locale: string;
+  onImported: () => void;
+  onClose: () => void;
+}) {
+  const [chosen, setChosen] = useState<string[]>(() => (sessions.length === 1 ? [sessions[0].opnameNumber] : []));
+  const [file, setFile] = useState<File | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<string | null>(null); // "import" or the session being cleared
+  const [notice, setNotice] = useState<
+    { kind: "ok"; result: K3Import } | { kind: "error"; message: string } | null
+  >(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, busy]);
+
+  const { day, weekday } = formatDay(date, locale);
+  const importOf = (opnameNumber: string): K3Import | null => {
+    const id = data.k3Sessions?.[opnameNumber];
+    return id === undefined ? null : data.k3Imports?.[id] ?? null;
+  };
+  const statusLabel = (st: Status) =>
+    st === "CONFIRMED" ? labels.status_confirmed : st === "DONE" ? labels.status_done : labels.status_in_progress;
+  const toggle = (n: string) => setChosen((c) => (c.includes(n) ? c.filter((x) => x !== n) : [...c, n]));
+  const replacing = chosen.filter((n) => importOf(n)).length;
+
+  async function runImport() {
+    if (!file || chosen.length === 0) return;
+    setBusy("import");
+    setNotice(null);
+    try {
+      const rows = await readK3File(file, labels);
+      const res = await fetch("/api/stock-opname/summary/k3", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ warehouseId: data.warehouse.id, date, fileName: file.name, opnameNumbers: chosen, rows }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? `${labels.k3_err_import} (${res.status})`);
+      setNotice({ kind: "ok", result: json.import as K3Import });
+      setChosen([]);
+      setFile(null);
+      if (fileInput.current) fileInput.current.value = "";
+      onImported();
+    } catch (err) {
+      setNotice({ kind: "error", message: err instanceof Error ? err.message : labels.k3_err_import });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function remove(opnameNumber: string) {
+    if (!window.confirm(labels.k3_remove_confirm.replace("{sosku}", opnameNumber))) return;
+    setBusy(opnameNumber);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/stock-opname/summary/k3?opnameNumber=${encodeURIComponent(opnameNumber)}`, {
+        method: "DELETE",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error ?? `${labels.k3_err_remove} (${res.status})`);
+      onImported();
+    } catch (err) {
+      setNotice({ kind: "error", message: err instanceof Error ? err.message : labels.k3_err_remove });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const th = "px-2 py-1.5 font-medium text-left border-b border-zinc-800 bg-zinc-900 break-keep";
+  const td = "px-2 py-1.5 border-t border-zinc-800/70 align-top";
+  const linkBtn = "text-xs text-zinc-400 hover:text-zinc-100 underline-offset-2 hover:underline disabled:opacity-40";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+      onClick={(e) => e.target === e.currentTarget && !busy && onClose()}
+    >
+      <div className="w-full max-w-4xl max-h-[90vh] bg-zinc-950 border border-zinc-800 rounded-lg flex flex-col overflow-hidden">
+        <div className="px-5 py-3 border-b border-zinc-800 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">
+              {labels.k3_dialog_title}{" "}
+              <span className="text-zinc-400 font-normal">
+                · {day} {weekday} · {data.warehouse.name}
+              </span>
+            </h2>
+            <p className="text-xs text-zinc-500 mt-1 max-w-2xl">{labels.k3_dialog_intro}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={!!busy}
+            className="px-3 py-1.5 rounded-md border border-zinc-800 text-sm text-zinc-400 hover:text-zinc-100 disabled:opacity-40"
+          >
+            {labels.detail_close}
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-xs border-separate border-spacing-0">
+            <thead className="sticky top-0">
+              <tr className="text-zinc-400">
+                <th className={`${th} w-8`} />
+                <th className={th}>{labels.summary_th_sosku}</th>
+                <th className={th}>{labels.k3_dialog_th_pic}</th>
+                <th className={`${th} text-right`}>{labels.k3_dialog_th_skus}</th>
+                <th className={th}>{labels.k3_dialog_th_locked}</th>
+                <th className={th}>{labels.k3_dialog_th_data}</th>
+                <th className={`${th} w-8`} />
+              </tr>
+            </thead>
+            <tbody>
+              {sessions.map((s) => {
+                const imp = importOf(s.opnameNumber);
+                const others = imp ? imp.sessions.filter((n) => n !== s.opnameNumber) : [];
+                const checked = chosen.includes(s.opnameNumber);
+                return (
+                  <tr
+                    key={s.opnameNumber}
+                    className={`cursor-pointer ${checked ? "bg-amber-500/10" : "hover:bg-zinc-900/60"}`}
+                    onClick={() => !busy && toggle(s.opnameNumber)}
+                  >
+                    <td className={td}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={!!busy}
+                        onChange={() => toggle(s.opnameNumber)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={s.opnameNumber}
+                        className="accent-amber-500"
+                      />
+                    </td>
+                    <td className={`${td} whitespace-nowrap`}>
+                      <div className="font-mono text-amber-500">{s.opnameNumber}</div>
+                      <div
+                        className={`text-[10px] ${
+                          s.status === "IN_PROGRESS" ? "text-amber-400" : s.status === "CONFIRMED" ? "text-sky-400" : "text-emerald-400"
+                        }`}
+                      >
+                        {statusLabel(s.status)}
+                      </div>
+                    </td>
+                    <td className={`${td} text-zinc-300`}>{s.by ?? "—"}</td>
+                    <td className={`${td} text-right tabular-nums text-zinc-300`}>{s.skus.toLocaleString()}</td>
+                    <td className={`${td} font-mono text-zinc-500 whitespace-nowrap`}>
+                      {s.firstAt === s.lastAt ? s.firstAt : `${s.firstAt} – ${s.lastAt.slice(11)}`}
+                    </td>
+                    <td className={td}>
+                      {imp ? (
+                        <div className="text-sky-300">
+                          <div className="break-all">{imp.fileName ?? "—"}</div>
+                          <div className="text-[10px] text-zinc-500">
+                            {imp.importedAt}
+                            {imp.by ? ` · ${imp.by}` : ""} ·{" "}
+                            {labels.k3_dialog_matched
+                              .replace("{skus}", imp.matchedSkus.toLocaleString())
+                              .replace("{qty}", fmtQty(imp.totalQuantity))}
+                          </div>
+                          {others.length > 0 && (
+                            <div className="text-[10px] text-zinc-500">
+                              {labels.k3_dialog_shared.replace("{list}", others.join(", "))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-zinc-600">{labels.k3_dialog_none}</span>
+                      )}
+                    </td>
+                    <td className={td}>
+                      {imp && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            remove(s.opnameNumber);
+                          }}
+                          disabled={!!busy}
+                          title={labels.k3_remove}
+                          aria-label={`${labels.k3_remove} ${s.opnameNumber}`}
+                          className="px-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 disabled:opacity-40"
+                        >
+                          {busy === s.opnameNumber ? "…" : "✕"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="px-5 py-3 border-t border-zinc-800 space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={linkBtn} disabled={!!busy} onClick={() => setChosen(sessions.map((s) => s.opnameNumber))}>
+              {labels.k3_dialog_select_all}
+            </button>
+            <button
+              type="button"
+              className={linkBtn}
+              disabled={!!busy}
+              onClick={() => setChosen(sessions.filter((s) => !importOf(s.opnameNumber)).map((s) => s.opnameNumber))}
+            >
+              {labels.k3_dialog_select_missing}
+            </button>
+            <button type="button" className={linkBtn} disabled={!!busy} onClick={() => setChosen([])}>
+              {labels.k3_dialog_clear}
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-xs text-zinc-400">{labels.k3_dialog_file}</label>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              disabled={!!busy}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              className="text-xs text-zinc-300 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border file:border-zinc-700 file:bg-zinc-900 file:text-zinc-200 hover:file:bg-zinc-800"
+            />
+            <button
+              type="button"
+              onClick={runImport}
+              disabled={!!busy || chosen.length === 0 || !file}
+              title={chosen.length === 0 ? labels.k3_dialog_pick_session : !file ? labels.k3_dialog_pick_file : undefined}
+              className="ml-auto px-3 py-1.5 rounded-md bg-sky-600 text-sm text-white hover:bg-sky-500 disabled:opacity-40 disabled:hover:bg-sky-600"
+            >
+              {busy === "import"
+                ? labels.k3_button_busy
+                : labels.k3_dialog_import_button.replace("{n}", String(chosen.length))}
+            </button>
+          </div>
+          {replacing > 0 && !busy && (
+            <p className="text-xs text-amber-400">{labels.k3_replace_confirm.replace("{n}", String(replacing))}</p>
+          )}
+          {notice && (
+            <div
+              className={`rounded-md border px-3 py-2 text-xs ${
+                notice.kind === "ok" ? "border-sky-900 bg-sky-950/30 text-sky-200" : "border-red-900 bg-red-950/30 text-red-300"
+              }`}
+            >
+              {notice.kind === "error" ? (
+                labels.k3_error.replace("{date}", day).replace("{message}", notice.message)
+              ) : (
+                <>
+                  {labels.k3_import_done
+                    .replace("{sessions}", notice.result.sessions.join(", "))
+                    .replace("{warehouse}", notice.result.k3Warehouse ?? "")
+                    .replace("{skus}", notice.result.matchedSkus.toLocaleString())
+                    .replace("{qty}", fmtQty(notice.result.totalQuantity))}
+                  {notice.result.unmatched.length > 0 && (
+                    <details className="mt-1.5">
+                      <summary className="cursor-pointer text-amber-400 hover:text-amber-200">
+                        {labels.k3_unmatched.replace("{n}", notice.result.unmatched.length.toLocaleString())} ·{" "}
+                        {labels.k3_show_unmatched}
+                      </summary>
+                      <table className="mt-1 text-[10px]">
+                        <tbody>
+                          {notice.result.unmatched.map((u) => (
+                            <tr key={u.code}>
+                              <td className="pr-3 font-mono text-amber-400">{u.code}</td>
+                              <td className="pr-3 text-zinc-400">{u.name ?? ""}</td>
+                              <td className="text-right tabular-nums text-zinc-300">{fmtQty(u.quantity)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1549,7 +1790,11 @@ function DateReportModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const k3 = data.k3?.[date];
+  // K3 columns when any of the date's sessions has K3 data; per line only
+  // for sessions that have it.
+  const daySessions = sessionsByDate(data).get(date) ?? [];
+  const k3Sessions = daySessions.filter((s) => data.k3Sessions?.[s.opnameNumber] !== undefined).length;
+  const k3 = k3Sessions > 0;
   const { day, weekday } = formatDay(date, locale);
   const statusLabel = (st: Status) =>
     st === "CONFIRMED" ? labels.status_confirmed : st === "DONE" ? labels.status_done : labels.status_in_progress;
@@ -1559,10 +1804,11 @@ function DateReportModal({
     (item.cells[date] ?? []).map((cell) => {
       const figs = buckets.map((b) => shownFigures(cell, b.key, excludedKeys));
       const totalSo = shownFigures(cell, "total", excludedKeys).counted;
-      const k3Qty = k3 ? item.k3?.[date] ?? 0 : null;
+      const k3Line = k3Of(data, item, cell.opnameNumber);
+      const k3Qty = k3Line ? k3Line.qty : null;
       const k3Delta = k3Qty === null ? null : round3(totalSo - k3Qty);
       const hasDiff = figs.some((f) => f.counted !== f.system) || (k3Delta !== null && k3Delta !== 0);
-      return { item, cell, figs, k3Qty, k3Delta, hasDiff };
+      return { item, cell, figs, k3Qty, k3Delta, k3InFile: k3Line?.inFile ?? false, hasDiff };
     })
   );
 
@@ -1619,7 +1865,7 @@ function DateReportModal({
     const body = lines.map((l, i) => {
       const r: (string | number)[] = [i + 1, l.item.sku, l.item.name];
       for (const f of l.figs) r.push(f.system, f.counted, f.counted - f.system);
-      if (k3) r.push(l.k3Qty ?? 0, l.k3Delta ?? 0);
+      if (k3) r.push(l.k3Qty ?? "", l.k3Delta ?? "");
       r.push(statusLabel(l.cell.status), l.cell.opnameNumber, l.cell.by ?? "", l.cell.lockedAt, l.cell.adjustment?.note ?? "");
       return r;
     });
@@ -1692,9 +1938,8 @@ function DateReportModal({
               {k3 && (
                 <span className="text-sky-300">
                   {labels.report_k3_info
-                    .replace("{file}", k3.fileName ?? "—")
-                    .replace("{at}", k3.importedAt)
-                    .replace("{by}", k3.by ?? "—")}
+                    .replace("{n}", String(k3Sessions))
+                    .replace("{total}", String(daySessions.length))}
                 </span>
               )}
               {excludedNames.length > 0 && (
@@ -1829,19 +2074,29 @@ function DateReportModal({
                         </td>
                       </Fragment>
                     ))}
-                    {k3 && (
-                      <>
-                        <td
-                          className={`${td} border-l border-l-zinc-800 ${l.item.k3?.[date] === undefined ? "text-zinc-600" : "text-sky-300"}`}
-                          title={l.item.k3?.[date] === undefined ? labels.k3_not_in_file : labels.k3_stock_title}
-                        >
-                          {fmtQty(l.k3Qty ?? 0)}
-                        </td>
-                        <td className={td}>
-                          <Delta value={l.k3Delta ?? 0} />
-                        </td>
-                      </>
-                    )}
+                    {k3 &&
+                      (l.k3Qty === null ? (
+                        <>
+                          <td className={`${td} border-l border-l-zinc-800 text-zinc-700`} title={labels.k3_no_import}>
+                            —
+                          </td>
+                          <td className={`${td} text-zinc-700`} title={labels.k3_no_import}>
+                            —
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td
+                            className={`${td} border-l border-l-zinc-800 ${l.k3InFile ? "text-sky-300" : "text-zinc-600"}`}
+                            title={l.k3InFile ? labels.k3_stock_title : labels.k3_not_in_file}
+                          >
+                            {fmtQty(l.k3Qty)}
+                          </td>
+                          <td className={td}>
+                            <Delta value={l.k3Delta ?? 0} />
+                          </td>
+                        </>
+                      ))}
                     <td className={`${tdBase} text-left whitespace-nowrap border-l border-l-zinc-800`}>
                       <span
                         className={

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { items, k3StockImports, k3StockLines, users } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { items, k3StockImportSessions, k3StockImports, k3StockLines, stockOpname, users } from "@/db/schema";
+import { eq, inArray, notExists, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { resolveWarehouse } from "@/lib/warehouses";
 import { cleanDate } from "@/lib/skuOpnameSummary";
@@ -30,18 +30,22 @@ function toQuantity(v: unknown): number | null {
 }
 
 // POST /api/stock-opname/summary/k3
-// body: { warehouseId, date: "YYYY-MM-DD", fileName, rows: [{ code, name, warehouse, status, quantity }] }
+// body: { warehouseId, date: "YYYY-MM-DD", fileName, opnameNumbers: ["SOSKU-..."],
+//         rows: [{ code, name, warehouse, status, quantity }] }
 //
-// Imports K3's "Real-time Inventory" export (read in the browser) for one
-// date column of the Stock Opname Summary. Only rows whose Warehouse Name is
-// MCI Warehouse and whose Inventory Status is Good Stock count; their
-// Inventory Qty (CUoM) is summed per Material
-// Code, which is matched to items.sku (then items.legacySku, then either of
-// them ignoring leading zeros, for codes Excel stored as numbers). Replaces
-// any earlier import for the same warehouse + date.
+// Imports K3's "Real-time Inventory" export (read in the browser) for the
+// chosen SOSKU sessions of one date column of the Stock Opname Summary —
+// several users opname on the same day, each pulling their own K3 data, so
+// every session gets the file its PIC pulled. Only rows whose Warehouse Name
+// is MCI Warehouse and whose Inventory Status is Good Stock count; their
+// Inventory Qty (CUoM) is summed per Material Code, which is matched to
+// items.sku (then items.legacySku, then either of them ignoring leading
+// zeros, for codes Excel stored as numbers). A chosen session that already
+// had a K3 import is moved to this one; imports no session uses any more are
+// deleted.
 //
-// Returns { import: { date, fileName, importedAt, by, k3Warehouse, goodStockRows,
-//   matchedSkus, totalQuantity, unmatched: [{ code, name, quantity }] } }
+// Returns { import: { id, date, fileName, importedAt, by, k3Warehouse, goodStockRows,
+//   matchedSkus, totalQuantity, unmatched: [{ code, name, quantity }], sessions: [...] } }
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -59,6 +63,21 @@ export async function POST(req: NextRequest) {
   }
   const { warehouse } = resolved;
   const fileName = clean(body.fileName).slice(0, 255) || null;
+
+  const opnameNumbers = [
+    ...new Set((Array.isArray(body.opnameNumbers) ? body.opnameNumbers : []).map(clean).filter(Boolean)),
+  ] as string[];
+  if (opnameNumbers.length === 0) {
+    return NextResponse.json({ error: "Choose at least one SOSKU session" }, { status: 400 });
+  }
+  const found = await db
+    .select({ opnameNumber: stockOpname.opnameNumber })
+    .from(stockOpname)
+    .where(inArray(stockOpname.opnameNumber, opnameNumbers));
+  const missing = opnameNumbers.filter((n) => !found.some((f) => f.opnameNumber === n));
+  if (missing.length > 0) {
+    return NextResponse.json({ error: `Unknown SOSKU session: ${missing.join(", ")}` }, { status: 400 });
+  }
 
   const rows: IncomingRow[] = Array.isArray(body.rows) ? body.rows : [];
   if (rows.length === 0) {
@@ -126,10 +145,9 @@ export async function POST(req: NextRequest) {
   unmatched.sort((a, b) => a.code.localeCompare(b.code));
 
   const importedAt = new Date();
-  await db.transaction(async (tx) => {
-    await tx
-      .delete(k3StockImports)
-      .where(and(eq(k3StockImports.warehouseId, warehouse.id), eq(k3StockImports.stockDate, date)));
+  const importId = await db.transaction(async (tx) => {
+    // The chosen sessions leave whatever import they had.
+    await tx.delete(k3StockImportSessions).where(inArray(k3StockImportSessions.opnameNumber, opnameNumbers));
     const [created] = await tx
       .insert(k3StockImports)
       .values({
@@ -150,12 +168,16 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < lines.length; i += 1000) {
       await tx.insert(k3StockLines).values(lines.slice(i, i + 1000));
     }
+    await tx.insert(k3StockImportSessions).values(opnameNumbers.map((opnameNumber) => ({ importId: created.id, opnameNumber })));
+    await deleteUnusedImports(tx);
+    return created.id;
   });
 
   const [user] = await db.select({ username: users.username }).from(users).where(eq(users.id, session.userId));
 
   return NextResponse.json({
     import: {
+      id: importId,
       date,
       fileName,
       importedAt: formatJakarta(importedAt),
@@ -165,33 +187,45 @@ export async function POST(req: NextRequest) {
       matchedSkus: qtyByItem.size,
       totalQuantity: round3([...qtyByItem.values()].reduce((a, b) => a + b, 0)),
       unmatched,
+      sessions: opnameNumbers,
     },
   });
 }
 
-// DELETE /api/stock-opname/summary/k3?warehouseId=N&date=YYYY-MM-DD
-// Removes that date's K3 import (the K3 columns disappear from it).
+// DELETE /api/stock-opname/summary/k3?opnameNumber=SOSKU-...
+// Takes that SOSKU session's K3 import off it (its K3 cells go blank). The
+// import itself is deleted once no session uses it.
 export async function DELETE(req: NextRequest) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "Not logged in" }, { status: 401 });
   }
 
-  const params = req.nextUrl.searchParams;
-  const date = cleanDate(params.get("date"));
-  if (!date) {
-    return NextResponse.json({ error: "date (YYYY-MM-DD) is required" }, { status: 400 });
-  }
-  const resolved = await resolveWarehouse(db, params.get("warehouseId"));
-  if ("error" in resolved) {
-    return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+  const opnameNumber = clean(req.nextUrl.searchParams.get("opnameNumber"));
+  if (!opnameNumber) {
+    return NextResponse.json({ error: "opnameNumber is required" }, { status: 400 });
   }
 
-  await db
-    .delete(k3StockImports)
-    .where(and(eq(k3StockImports.warehouseId, resolved.warehouse.id), eq(k3StockImports.stockDate, date)));
+  await db.transaction(async (tx) => {
+    await tx.delete(k3StockImportSessions).where(eq(k3StockImportSessions.opnameNumber, opnameNumber));
+    await deleteUnusedImports(tx);
+  });
 
   return NextResponse.json({ ok: true });
+}
+
+// Imports no SOSKU session uses any more (their lines go with them).
+async function deleteUnusedImports(tx: Pick<typeof db, "delete">) {
+  await tx
+    .delete(k3StockImports)
+    .where(
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(k3StockImportSessions)
+          .where(eq(k3StockImportSessions.importId, k3StockImports.id))
+      )
+    );
 }
 
 // Same display format as the summary (24-hour, Asia/Jakarta).
