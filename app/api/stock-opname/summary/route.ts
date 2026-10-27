@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStock, locations } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { k3StockImports, k3StockLines, locationStock, locations, users } from "@/db/schema";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { getWarehouses, resolveWarehouse } from "@/lib/warehouses";
 import {
@@ -14,6 +14,16 @@ import {
 
 export const dynamic = "force-dynamic";
 
+type K3ImportSummary = {
+  fileName: string | null;
+  importedAt: string;
+  by: string | null;
+  goodStockRows: number;
+  matchedSkus: number;
+  totalQuantity: number;
+  unmatched: { code: string; name: string | null; quantity: number }[];
+};
+
 // GET /api/stock-opname/summary?from=YYYY-MM-DD&to=YYYY-MM-DD&warehouseId=N
 // The Stock Opname Summary tab: every product, and for each day it had a
 // per-SKU (SOSKU-) opname, the system and counted (SO) quantity per Total
@@ -23,13 +33,18 @@ export const dynamic = "force-dynamic";
 // currentStock is the product's live Total Stock in the warehouse right now
 // (same rule as the Total Stock page: locations ticked "Counts in Total
 // Stock"), independent of the date filter.
+// k3 is the K3 (main system) Good Stock imported for a date column, if any
+// (POST /api/stock-opname/summary/k3); items[].k3[date] is that product's
+// quantity in it — missing means it wasn't in the file (0 in K3).
 //   {
 //     warehouse: { id, name }, warehouses: [{ id, name, isActive }],
 //     buckets: [{ key, name }],      // "col:<id>" per column, "other", "total"
 //     dates: ["2026-10-20", ...],    // oldest first
 //     items: [{ itemId, sku, name, currentStock, cells: { [date]: [{ opnameNumber,
 //               lockedAt, status, by, buckets: { [key]: { system, counted } },
-//               unaccounted, adjustment }, ...] } }]
+//               unaccounted, adjustment }, ...] }, k3: { [date]: qty } }],
+//     k3: { [date]: { fileName, importedAt, by, goodStockRows, matchedSkus,
+//               totalQuantity, unmatched: [{ code, name, quantity }] } }
 //   }
 export async function GET(req: NextRequest) {
   const session = await getSession();
@@ -75,15 +90,66 @@ export async function GET(req: NextRequest) {
 
   const dates = [...new Set(entries.map((e) => e.date))].sort();
 
+  // K3 imports for this warehouse's date columns, and their lines.
+  const imports =
+    dates.length === 0
+      ? []
+      : await db
+          .select({
+            id: k3StockImports.id,
+            date: k3StockImports.stockDate,
+            fileName: k3StockImports.fileName,
+            goodStockRows: k3StockImports.goodStockRows,
+            unmatched: k3StockImports.unmatched,
+            importedAt: sql<string>`to_char(${k3StockImports.importedAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI')`,
+            by: users.username,
+          })
+          .from(k3StockImports)
+          .leftJoin(users, eq(users.id, k3StockImports.importedBy))
+          .where(and(eq(k3StockImports.warehouseId, warehouse.id), inArray(k3StockImports.stockDate, dates)));
+  const k3Lines =
+    imports.length === 0
+      ? []
+      : await db
+          .select({ importId: k3StockLines.importId, itemId: k3StockLines.itemId, quantity: k3StockLines.quantity })
+          .from(k3StockLines)
+          .where(inArray(k3StockLines.importId, imports.map((i) => i.id)));
+
+  const dateByImport = new Map(imports.map((i) => [i.id, i.date]));
+  const k3ByItem = new Map<number, Record<string, number>>();
+  const k3Meta: Record<string, K3ImportSummary> = {};
+  for (const imp of imports) {
+    k3Meta[imp.date] = {
+      fileName: imp.fileName,
+      importedAt: imp.importedAt,
+      by: imp.by,
+      goodStockRows: imp.goodStockRows,
+      matchedSkus: 0,
+      totalQuantity: 0,
+      unmatched: imp.unmatched,
+    };
+  }
+  for (const line of k3Lines) {
+    const date = dateByImport.get(line.importId)!;
+    const byDate = k3ByItem.get(line.itemId) ?? {};
+    byDate[date] = line.quantity;
+    k3ByItem.set(line.itemId, byDate);
+    const meta = k3Meta[date];
+    meta.matchedSkus++;
+    meta.totalQuantity = Math.round((meta.totalQuantity + line.quantity) * 1000) / 1000;
+  }
+
   return NextResponse.json({
     warehouse: { id: warehouse.id, name: warehouse.name },
     warehouses: warehouses.map(({ id, name, isActive }) => ({ id, name, isActive })),
     buckets,
     dates,
+    k3: k3Meta,
     items: products.map((p) => ({
       ...p,
       currentStock: stockByItem.get(p.itemId) ?? 0,
       cells: cells.get(p.itemId) ?? {},
+      k3: k3ByItem.get(p.itemId) ?? {},
     })),
   });
 }

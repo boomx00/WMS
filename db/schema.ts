@@ -12,6 +12,8 @@ import {
   unique,
   check,
   jsonb,
+  numeric,
+  date,
   type AnyPgColumn
 } from "drizzle-orm/pg-core";
 import { relations, desc, sql } from "drizzle-orm";
@@ -626,6 +628,52 @@ export const stockOpname = pgTable("stock_opname", {
   confirmedBulkAdjustmentId: integer("confirmed_bulk_adjustment_id"), // ADD — no .references() here to avoid a same-file circular type issue; FK is enforced at the DB level by the migration above
 
 });
+
+// ============================================================
+// K3 stock (Stock Opname Summary → Import K3)
+// ============================================================
+
+// The main system's (K3) stock of every product on one date, imported from
+// its "Real-time Inventory" export on the Stock Opname Summary: Inventory
+// Qty (CUoM) of the rows whose Inventory Status is Good Stock, summed per
+// Material Code (= items.sku). One import per WMS warehouse per date;
+// importing again for the same date replaces it.
+export const k3StockImports = pgTable(
+  "k3_stock_imports",
+  {
+    id: serial("id").primaryKey(),
+    warehouseId: integer("warehouse_id")
+      .notNull()
+      .references(() => warehouses.id, { onDelete: "cascade" }),
+    stockDate: date("stock_date", { mode: "string" }).notNull(), // YYYY-MM-DD, the summary's date column
+    fileName: text("file_name"),
+    goodStockRows: integer("good_stock_rows").notNull().default(0), // Good Stock rows read from the file
+    // Material codes in the file that match no WMS item (left out of the lines).
+    unmatched: jsonb("unmatched")
+      .$type<{ code: string; name: string | null; quantity: number }[]>()
+      .notNull()
+      .default([]),
+    importedBy: integer("imported_by").references(() => users.id),
+    importedAt: timestamp("imported_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("k3_stock_imports_warehouse_date_idx").on(table.warehouseId, table.stockDate)]
+);
+
+export const k3StockLines = pgTable(
+  "k3_stock_lines",
+  {
+    id: serial("id").primaryKey(),
+    importId: integer("import_id")
+      .notNull()
+      .references(() => k3StockImports.id, { onDelete: "cascade" }),
+    itemId: integer("item_id")
+      .notNull()
+      .references(() => items.id),
+    // K3 counts in its own unit (CUoM) and can hold fractions, e.g. 0.5 box.
+    quantity: numeric("quantity", { precision: 14, scale: 3, mode: "number" }).notNull(),
+  },
+  (table) => [uniqueIndex("k3_stock_lines_import_item_idx").on(table.importId, table.itemId)]
+);
 export const stockOpnameSkus = pgTable(
   "stock_opname_skus",
   {
