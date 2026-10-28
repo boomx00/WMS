@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getProductionSupplierId } from "@/lib/suppliers";
 import { pallets, palletEvents, locations, items, settings } from "@/db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
@@ -350,6 +351,8 @@ await tx.insert(palletEvents).values({
           quantity,
           userId: session.userId,
           workOrderNumber: parsed.workOrderNumber,
+          // Production inbound always comes from the Production supplier.
+          supplierId: await getProductionSupplierId(tx),
         });
 
         const [moved] = await tx

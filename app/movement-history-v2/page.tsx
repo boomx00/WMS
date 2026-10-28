@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { locationStockEvents, items, locations, users, salesOrders } from "@/db/schema";
+import { locationStockEvents, items, locations, users, salesOrders, suppliers } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { finalStockAtDestinationSql } from "@/lib/finalStock";
@@ -48,8 +48,13 @@ async function getEventsForPage(page: number) {
       itemName: items.name,
       sourceCode: sourceLoc.code,
       destinationCode: destLoc.code,
-      soNumber: salesOrders.soNumber,
+      // A deleted SO's events keep its number in deleted_so_number.
+      soNumber: sql<string | null>`coalesce(${salesOrders.soNumber}, ${locationStockEvents.deletedSoNumber})`,
       tambahanNumber: tambahanOrders.tambahanNumber,
+      // MO number of an inbound (shown in the No Doc column).
+      workOrderNumber: locationStockEvents.workOrderNumber,
+      // The movement's supplier: its own (production inbound), else the product's.
+      supplierName: suppliers.name,
       quantity: locationStockEvents.quantity,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
@@ -65,6 +70,7 @@ async function getEventsForPage(page: number) {
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
     .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
+    .leftJoin(suppliers, sql`${suppliers.id} = coalesce(${locationStockEvents.supplierId}, ${items.supplierId})`)
     // Same tiebreak as pageIds — several events can share the exact same
     // createdAt (e.g. a tagged/untagged pick pair inserted in one
     // transaction), so ordering by createdAt alone isn't deterministic.

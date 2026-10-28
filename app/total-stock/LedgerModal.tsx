@@ -112,6 +112,7 @@ function describeEvent(entry: BucketEntry): string {
     const where = entry.direction === "IN" ? `from ${entry.otherLocationCode ?? "?"}` : `to ${entry.otherLocationCode ?? "?"}`;
     return order ? `Un-picked · ${order} · ${where}` : `Un-picked · ${where}`;
   }
+  if (entry.type === "DELETE_SO") return `Deleted SO ${entry.soNumber ?? ""}`.trim();
   if (entry.soNumber) return `SO ${entry.soNumber}`;
   if (entry.tambahanNumber) return `Tambahan ${entry.tambahanNumber}`;
   if (entry.workOrderNumber) return `MO ${entry.workOrderNumber}`;

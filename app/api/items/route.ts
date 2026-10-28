@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { items } from "@/db/schema";
 import { getSession, isSuperUser } from "@/lib/auth";
+import { cleanAttribute, cleanSupplierId, cleanTags } from "@/lib/itemAttributes";
 
 export async function GET() {
   const rows = await db.select().from(items).orderBy(items.sku);
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { sku, name, cartonBagQty, palletCartonQty, legacySku, cartonBarcode } = body;
+  const { sku, name, cartonBagQty, palletCartonQty, legacySku, cartonBarcode, productType, brand, tags, supplierId } = body;
 
   if (!sku || !name || cartonBagQty === undefined || palletCartonQty === undefined) {
     return NextResponse.json(
@@ -39,6 +40,10 @@ export async function POST(req: NextRequest) {
       defaultCode: `${sku}*default`,
       legacySku: legacySku && legacySku.trim() ? legacySku.trim() : null,
       cartonBarcode: cartonBarcode && cartonBarcode.trim() ? cartonBarcode.trim() : null,
+      productType: cleanAttribute(productType),
+      brand: cleanAttribute(brand),
+      tags: cleanTags(tags),
+      supplierId: cleanSupplierId(supplierId) ?? null,
     })
     .returning();
 

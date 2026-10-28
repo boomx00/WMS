@@ -118,7 +118,7 @@ export async function GET(
       destinationCounted: destLoc.countsInTotalStock,
       destinationColumnId: destLoc.stockColumnId,
       destinationWarehouseId: destLoc.warehouseId,
-      soNumber: salesOrders.soNumber,
+      soNumber: sql<string | null>`coalesce(${salesOrders.soNumber}, ${locationStockEvents.deletedSoNumber})`,
       tambahanNumber: tambahanOrders.tambahanNumber,
       workOrderNumber: locationStockEvents.workOrderNumber,
       username: users.username,

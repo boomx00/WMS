@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { items } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession, isSuperUser } from "@/lib/auth";
+import { cleanAttribute, cleanSupplierId, cleanTags } from "@/lib/itemAttributes";
 
 // PATCH /api/items/:id — Manager only. Any subset of fields can be updated.
 export async function PATCH(
@@ -23,7 +24,7 @@ export async function PATCH(
   const itemId = Number(id);
 
   const body = await req.json();
-  const { sku, name, cartonBagQty, palletCartonQty, legacySku, cartonBarcode } = body;
+  const { sku, name, cartonBagQty, palletCartonQty, legacySku, cartonBarcode, productType, brand, tags, supplierId } = body;
 
   const updates: Record<string, unknown> = {};
   if (sku !== undefined) updates.sku = sku;
@@ -33,6 +34,11 @@ export async function PATCH(
   if (legacySku !== undefined) updates.legacySku = legacySku && legacySku.trim() ? legacySku.trim() : null;
   if (cartonBarcode !== undefined)
     updates.cartonBarcode = cartonBarcode && cartonBarcode.trim() ? cartonBarcode.trim() : null;
+  // Type / Brand: "" clears; tags: an array or "XL, 34+6" (replaces them all).
+  if (productType !== undefined) updates.productType = cleanAttribute(productType);
+  if (brand !== undefined) updates.brand = cleanAttribute(brand);
+  if (tags !== undefined) updates.tags = cleanTags(tags);
+  if (supplierId !== undefined) updates.supplierId = cleanSupplierId(supplierId);
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields provided to update" }, { status: 400 });

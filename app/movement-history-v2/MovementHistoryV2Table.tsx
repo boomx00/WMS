@@ -17,6 +17,8 @@ type Row = {
   destinationCode: string | null;
   soNumber: string | null;
   tambahanNumber: string | null;
+  workOrderNumber: string | null; // MO number, on inbound events
+  supplierName?: string | null; // its own supplier (production inbound), else the product's
   quantity: number;
   username: string;
   createdAt: string | Date;
@@ -33,7 +35,14 @@ const TYPE_STYLES: Record<string, string> = {
   DEFAULT_MOVE: "bg-fuchsia-950 text-fuchsia-300",
   SHIP: "bg-red-950 text-red-300",
   ADJUSTMENT: "bg-teal-950 text-teal-300",
+  OTHER_INBOUND: "bg-sky-950 text-sky-300",
+  OTHER_OUTBOUND: "bg-rose-950 text-rose-300",
+  DELETE_SO: "bg-red-900 text-red-100",
 };
+
+// The document an event belongs to: its SO (or Tambahan), or for an inbound
+// its MO number.
+const docNumber = (row: Row) => row.soNumber ?? row.tambahanNumber ?? row.workOrderNumber ?? null;
 
 
 
@@ -61,6 +70,17 @@ export default function MovementHistoryV2Table({
   const [userFilter, setUserFilter] = useState("");
   const [soFilter, setSoFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("ALL");
+  // The product's Type / Brand / Tags (Items page).
+  const [itemTypeFilter, setItemTypeFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [attributeOptions, setAttributeOptions] = useState<{
+    types: string[];
+    brands: string[];
+    tags: string[];
+    suppliers: { id: number; name: string }[];
+  } | null>(null);
 
   const [searchResults, setSearchResults] = useState<Row[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -80,6 +100,9 @@ export default function MovementHistoryV2Table({
   DEFAULT_MOVE:  labels.default_move,
   SHIP: labels.ship,
   ADJUSTMENT:  labels.adjustment,
+  OTHER_INBOUND: labels.other_inbound,
+  OTHER_OUTBOUND: labels.other_outbound,
+  DELETE_SO: labels.delete_so,
 };
   // Quick search stays debounced-as-you-type, only active in simple mode.
   useEffect(() => {
@@ -99,6 +122,22 @@ export default function MovementHistoryV2Table({
 
     return () => clearTimeout(handle);
   }, [search, advancedMode]);
+
+  // Product Type / Brand / Tag choices, loaded the first time Advanced
+  // Search is opened.
+  useEffect(() => {
+    if (!advancedMode || attributeOptions) return;
+    let cancelled = false;
+    fetch("/api/items/attributes")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setAttributeOptions(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [advancedMode, attributeOptions]);
 
   // Abort any pending quick search on unmount
   useEffect(() => {
@@ -140,6 +179,10 @@ export default function MovementHistoryV2Table({
     if (userFilter.trim()) params.set("user", userFilter.trim());
     if (soFilter.trim()) params.set("so", soFilter.trim());
     if (typeFilter !== "ALL") params.set("type", typeFilter);
+    if (itemTypeFilter) params.set("itemType", itemTypeFilter);
+    if (brandFilter) params.set("brand", brandFilter);
+    if (tagFilter.length > 0) params.set("tags", tagFilter.join(","));
+    if (supplierFilter) params.set("supplierId", supplierFilter);
 
     if ([...params.keys()].length === 0) {
       setSearchResults(null);
@@ -173,6 +216,10 @@ export default function MovementHistoryV2Table({
     setUserFilter("");
     setSoFilter("");
     setTypeFilter("ALL");
+    setItemTypeFilter("");
+    setBrandFilter("");
+    setTagFilter([]);
+    setSupplierFilter("");
     setSearchResults(null);
   }
 
@@ -228,7 +275,7 @@ export default function MovementHistoryV2Table({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
             <div>
               <label className="block text-[11px] text-zinc-500 mb-1">{labels.sku_product}</label>
               <input
@@ -263,13 +310,13 @@ export default function MovementHistoryV2Table({
               />
             </div>
             <div>
-              <label className="block text-[11px] text-zinc-500 mb-1">{labels.so_number}</label>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.doc_number}</label>
               <input
                 type="text"
                 value={soFilter}
                 onChange={(e) => setSoFilter(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && runAdvancedSearch()}
-                placeholder="e.g. SO-202608"
+                placeholder="SO / MO, e.g. SO-202608"
                 className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
               />
             </div>
@@ -290,9 +337,79 @@ export default function MovementHistoryV2Table({
                 <option className="text-sm" value="DEFAULT_MOVE">{labels.default_move}</option>
                 <option className="text-sm" value="SHIP">{labels.ship}</option>
                 <option className="text-sm" value="ADJUSTMENT">{labels.adjustment}</option>
+                <option className="text-sm" value="OTHER_INBOUND">{labels.other_inbound}</option>
+                <option className="text-sm" value="OTHER_OUTBOUND">{labels.other_outbound}</option>
+                <option className="text-sm" value="DELETE_SO">{labels.delete_so}</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.item_type}</label>
+              <select
+                value={itemTypeFilter}
+                onChange={(e) => setItemTypeFilter(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+              >
+                <option className="text-sm" value="">{labels.all_item_types}</option>
+                {(attributeOptions?.types ?? []).map((t) => (
+                  <option key={t} className="text-sm" value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.brand}</label>
+              <select
+                value={brandFilter}
+                onChange={(e) => setBrandFilter(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+              >
+                <option className="text-sm" value="">{labels.all_brands}</option>
+                {(attributeOptions?.brands ?? []).map((b) => (
+                  <option key={b} className="text-sm" value={b}>{b}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] text-zinc-500 mb-1">{labels.supplier}</label>
+              <select
+                value={supplierFilter}
+                onChange={(e) => setSupplierFilter(e.target.value)}
+                className="w-full px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
+              >
+                <option className="text-sm" value="">{labels.all_suppliers}</option>
+                {(attributeOptions?.suppliers ?? []).map((sup) => (
+                  <option key={sup.id} className="text-sm" value={String(sup.id)}>{sup.name}</option>
+                ))}
+                <option className="text-sm" value="none">{labels.no_supplier}</option>
               </select>
             </div>
           </div>
+
+          {(attributeOptions?.tags.length ?? 0) > 0 && (
+            <div className="mb-3">
+              <span className="block text-[11px] text-zinc-500 mb-1">
+                {labels.tags} <span className="text-zinc-600">· {labels.tags_hint}</span>
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {attributeOptions!.tags.map((tag) => {
+                  const on = tagFilter.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setTagFilter((cur) => (on ? cur.filter((t) => t !== tag) : [...cur, tag]))}
+                      className={`px-2 py-0.5 rounded-full border text-xs font-mono transition-colors ${
+                        on
+                          ? "border-amber-500 bg-amber-500/15 text-amber-300"
+                          : "border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:border-zinc-500"
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <button
@@ -328,7 +445,7 @@ export default function MovementHistoryV2Table({
               <th className="px-4 py-3 font-medium">{labels.product}</th>
               <th className="px-4 py-3 font-medium">{labels.from}</th>
               <th className="px-4 py-3 font-medium">{labels.to}</th>
-              <th className="px-4 py-3 font-medium">{labels.so}</th>
+              <th className="px-4 py-3 font-medium">{labels.doc}</th>
               <th className="px-4 py-3 font-medium text-right">{labels.qty}</th>
               <th className="px-4 py-3 font-medium text-right">{labels.final_stock_to}</th>
               <th className="px-4 py-3 font-medium">{labels.user}</th>
@@ -363,7 +480,10 @@ export default function MovementHistoryV2Table({
                     {row.type === "SHIP" ? (row.soNumber ?? row.tambahanNumber ?? "—") : (row.destinationCode ?? "—")}
                   </td>
                   <td className="px-4 py-3 font-mono text-zinc-300">
-                    {row.soNumber ?? row.tambahanNumber ?? "—"}
+                    {docNumber(row) ?? "—"}
+                    {row.supplierName && (
+                      <div className="font-sans text-[11px] text-zinc-500">{row.supplierName}</div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right font-mono">{row.quantity.toLocaleString()}</td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-400">

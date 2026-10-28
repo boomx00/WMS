@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
       destinationLocationId: locationStockEvents.destinationLocationId,
       sourceCode: sourceLoc.code,
       destinationCode: destLoc.code,
-      soNumber: salesOrders.soNumber,
+      soNumber: sql<string | null>`coalesce(${salesOrders.soNumber}, ${locationStockEvents.deletedSoNumber})`,
       tambahanNumber: tambahanOrders.tambahanNumber,
       username: users.username,
       createdAtRaw: locationStockEvents.createdAt,

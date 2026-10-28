@@ -1,8 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameSkus, items, locationStock, locations } from "@/db/schema";
+import {
+  stockOpname,
+  stockOpnameSkus,
+  stockOpnameItems,
+  stockOpnameCountEvents,
+  items,
+  locationStock,
+  locations,
+} from "@/db/schema";
 import { eq, and, or, ne } from "drizzle-orm";
-import { getSession } from "@/lib/auth";
+import { getSession, hasRole } from "@/lib/auth";
+import { SUPER_ROLE_NAME } from "@/lib/roles";
 import { normalizeLabel } from "@/lib/labelNormalize";
 import { isSkuOpname } from "@/lib/skuOpname";
 
@@ -101,4 +110,64 @@ export async function POST(
     },
     { status: 201 }
   );
+}
+
+// DELETE /api/stock-opname/sku/:opnameNumber/skus?itemId=N
+// Takes one SKU out of a per-SKU session, with everything counted for it
+// in that session (its counted lines and count history) and its Adj note.
+// Allowed until the session is confirmed (its bulk adjustment is made from
+// these counts), for a Manager or the session's PIC (who created it or is
+// assigned to it).
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ opnameNumber: string }> }
+) {
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.json({ error: "Not logged in" }, { status: 401 });
+  }
+
+  const { opnameNumber } = await params;
+  const itemId = Number(req.nextUrl.searchParams.get("itemId"));
+  if (!Number.isInteger(itemId) || itemId <= 0) {
+    return NextResponse.json({ error: "itemId is required" }, { status: 400 });
+  }
+
+  const [opname] = await db.select().from(stockOpname).where(eq(stockOpname.opnameNumber, opnameNumber));
+  if (!opname || !isSkuOpname(opnameNumber)) {
+    return NextResponse.json({ error: "SKU opname session not found" }, { status: 404 });
+  }
+  if (opname.confirmedAt) {
+    return NextResponse.json(
+      { error: "This session is already confirmed, so its SKUs can't be deleted" },
+      { status: 409 }
+    );
+  }
+  const isPic = opname.createdBy === session.userId || opname.assignedTo === session.userId;
+  if (!isPic && !(await hasRole(session.userId, [SUPER_ROLE_NAME]))) {
+    return NextResponse.json(
+      { error: "Only the session's PIC or a Manager can delete its SKUs" },
+      { status: 403 }
+    );
+  }
+
+  const deleted = await db.transaction(async (tx) => {
+    const removed = await tx
+      .delete(stockOpnameSkus)
+      .where(and(eq(stockOpnameSkus.opnameNumber, opnameNumber), eq(stockOpnameSkus.itemId, itemId)))
+      .returning({ id: stockOpnameSkus.id });
+    if (removed.length === 0) return false;
+    await tx
+      .delete(stockOpnameItems)
+      .where(and(eq(stockOpnameItems.opnameNumber, opnameNumber), eq(stockOpnameItems.itemId, itemId)));
+    await tx
+      .delete(stockOpnameCountEvents)
+      .where(and(eq(stockOpnameCountEvents.opnameNumber, opnameNumber), eq(stockOpnameCountEvents.itemId, itemId)));
+    return true;
+  });
+  if (!deleted) {
+    return NextResponse.json({ error: "That SKU isn't in this session" }, { status: 404 });
+  }
+
+  return NextResponse.json({ opnameNumber, itemId, deleted: true });
 }

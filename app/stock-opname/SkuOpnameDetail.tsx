@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { formatDateTime } from "@/lib/formatDateTime";
 
 export type SkuDetailLine = {
@@ -42,7 +43,30 @@ function MatchBadge({ difference }: { difference: number }) {
 // Expanded view of a per-SKU (SOSKU-) session: one block per SKU showing its
 // locked system quantity against the total counted, then each location that
 // was counted with its system qty, counted qty, and whether they match.
-export default function SkuOpnameDetail({ detail }: { detail: SkuDetailResponse }) {
+// With onDelete (session not confirmed yet), each SKU has a Delete button
+// that takes it out of the session with its counts; onDelete returns an
+// error message when that fails.
+export default function SkuOpnameDetail({
+  detail,
+  onDelete,
+}: {
+  detail: SkuDetailResponse;
+  onDelete?: (sku: SkuDetailEntry) => Promise<string | null>;
+}) {
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [error, setError] = useState<{ itemId: number; message: string } | null>(null);
+
+  async function remove(sku: SkuDetailEntry) {
+    if (!onDelete) return;
+    const counted = sku.lines.length > 0 ? ` and its ${sku.lines.length} counted location(s)` : "";
+    if (!window.confirm(`Delete SKU ${sku.skuCode}${counted} from ${detail.opnameNumber}?`)) return;
+    setDeleting(sku.itemId);
+    setError(null);
+    const message = await onDelete(sku);
+    setDeleting(null);
+    if (message) setError({ itemId: sku.itemId, message });
+  }
+
   if (detail.skus.length === 0) {
     return <p className="text-xs text-zinc-600">No SKU has been added to this session yet.</p>;
   }
@@ -64,8 +88,19 @@ export default function SkuOpnameDetail({ detail }: { detail: SkuDetailResponse 
                 Stock opname qty: <span className="font-mono text-zinc-300">{sku.countedQty.toLocaleString()}</span>
               </span>
               <MatchBadge difference={sku.difference} />
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={() => remove(sku)}
+                  disabled={deleting !== null}
+                  className="text-red-400 hover:underline disabled:opacity-50"
+                >
+                  {deleting === sku.itemId ? "Deleting…" : "Delete"}
+                </button>
+              )}
             </div>
           </div>
+          {error?.itemId === sku.itemId && <p className="px-3 py-1 text-xs text-red-400">{error.message}</p>}
 
           {sku.lines.length === 0 ? (
             <p className="px-3 py-2 text-xs text-zinc-600">No locations counted yet.</p>

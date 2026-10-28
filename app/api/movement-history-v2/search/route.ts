@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStockEvents, items, locations, users, salesOrders } from "@/db/schema";
-import { eq, desc, or, and, ilike, gte, lt, inArray } from "drizzle-orm";
+import { locationStockEvents, items, locations, users, salesOrders, suppliers } from "@/db/schema";
+import { eq, desc, or, and, ilike, gte, lt, inArray, sql } from "drizzle-orm";
 import { asPhysicalMove, UNPICK_TYPE } from "@/lib/unpick";
 import { alias } from "drizzle-orm/pg-core";
 import { finalStockAtDestinationSql } from "@/lib/finalStock";
 import { tambahanOrders } from "@/db/schema";
+import { cleanTags, itemHasTag, sameText } from "@/lib/itemAttributes";
 const sourceLoc = alias(locations, "source_loc");
+// A movement's supplier: its own (production inbound = Production), else
+// the product's.
+const eventSupplierId = sql`coalesce(${locationStockEvents.supplierId}, ${items.supplierId})`;
 const destLoc = alias(locations, "dest_loc");
 
 // Mirrors the locationStockEvents.type pgEnum in the schema. Query params
@@ -24,6 +28,9 @@ const VALID_EVENT_TYPES = [
   "DEFAULT_MOVE",
   "RELEASE",
   "CLAIM",
+  "OTHER_INBOUND",
+  "OTHER_OUTBOUND",
+  "DELETE_SO",
 ] as const;
 type EventType = (typeof VALID_EVENT_TYPES)[number];
 
@@ -35,10 +42,15 @@ function asEventType(value: string): EventType | null {
 //
 // Two modes:
 //   - Simple: ?q=... — one term, OR-matched across SKU/product/location/
-//     SO/user (the original quick-search behavior).
-//   - Advanced: any of ?sku=&location=&user=&so=&type= — each provided
-//     field is ANDed together, so "sku=ABC&user=john" finds events that
-//     match BOTH, not either.
+//     document number (SO, Tambahan, MO)/user (the original quick-search behavior).
+//   - Advanced: any of ?sku=&location=&user=&so=&type=&itemType=&brand=&tags=&supplierId=
+//     — each provided field is ANDed together, so "sku=ABC&user=john" finds
+//     events that match BOTH, not either. itemType / brand are the
+//     product's Type / Brand (exact, ignoring case); tags is a
+//     comma-separated list and the product must have every one of them.
+//     supplierId: the event's own supplier (production inbound = Production),
+//     otherwise the product's supplier.
+//   Quick search also matches the product's Type, Brand and tags, and the supplier's name.
 // If any advanced param is present, it takes priority over `q`.
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
@@ -48,6 +60,12 @@ export async function GET(req: NextRequest) {
   const user = params.get("user")?.trim() ?? "";
   const so = params.get("so")?.trim() ?? "";
   const type = params.get("type")?.trim() ?? "";
+  const itemType = params.get("itemType")?.trim() ?? "";
+  const brand = params.get("brand")?.trim() ?? "";
+  const tags = cleanTags(params.get("tags") ?? "");
+  const supplierParam = params.get("supplierId")?.trim() ?? "";
+  // "none" = movements with no supplier at all.
+  const supplierId = supplierParam === "none" ? "none" : Number(supplierParam) > 0 ? Number(supplierParam) : null;
   // "UNPICK" isn't stored as its own type: it's a negative PICKING /
   // DEFAULT_PICKING (lib/unpick.ts). Picking filters leave un-picks out.
   const wantsUnpick = type === UNPICK_TYPE;
@@ -60,7 +78,9 @@ export async function GET(req: NextRequest) {
         ? eq(locationStockEvents.type, validatedType)
         : undefined;
 
-  const isAdvanced = Boolean(sku || location || user || so || typeCondition);
+  const isAdvanced = Boolean(
+    sku || location || user || so || typeCondition || itemType || brand || tags.length > 0 || supplierId !== null
+  );
 
   if (!q && !isAdvanced) {
     return NextResponse.json([]);
@@ -77,11 +97,21 @@ export async function GET(req: NextRequest) {
                     so
             ? or(
                 ilike(salesOrders.soNumber, `%${so}%`),
+                ilike(locationStockEvents.deletedSoNumber, `%${so}%`),
                 ilike(tambahanOrders.tambahanNumber, `%${so}%`),
-                ilike(tambahanOrders.convertedSoNumber, `%${so}%`)
+                ilike(tambahanOrders.convertedSoNumber, `%${so}%`),
+                ilike(locationStockEvents.workOrderNumber, `%${so}%`)
               )
             : undefined,
           typeCondition,
+          itemType ? sameText(items.productType, itemType) : undefined,
+          brand ? sameText(items.brand, brand) : undefined,
+          ...tags.map((tag) => itemHasTag(tag)),
+          supplierId === "none"
+            ? sql`${eventSupplierId} is null`
+            : supplierId !== null
+              ? sql`${eventSupplierId} = ${supplierId}`
+              : undefined,
         ].filter((c): c is NonNullable<typeof c> => c !== undefined)
       )
     : (() => {
@@ -92,9 +122,15 @@ export async function GET(req: NextRequest) {
           ilike(sourceLoc.code, pattern),
           ilike(destLoc.code, pattern),
           ilike(salesOrders.soNumber, pattern),
+          ilike(locationStockEvents.deletedSoNumber, pattern),
+          ilike(locationStockEvents.workOrderNumber, pattern),
           ilike(tambahanOrders.tambahanNumber, pattern),
           ilike(tambahanOrders.convertedSoNumber, pattern),
-          ilike(users.username, pattern)
+          ilike(users.username, pattern),
+          ilike(items.productType, pattern),
+          ilike(items.brand, pattern),
+          ilike(suppliers.name, pattern),
+          itemHasTag(q)
         );
       })();
 
@@ -106,8 +142,10 @@ export async function GET(req: NextRequest) {
       itemName: items.name,
       sourceCode: sourceLoc.code,
       destinationCode: destLoc.code,
-      soNumber: salesOrders.soNumber,
-            tambahanNumber: tambahanOrders.tambahanNumber,
+      soNumber: sql<string | null>`coalesce(${salesOrders.soNumber}, ${locationStockEvents.deletedSoNumber})`,
+      tambahanNumber: tambahanOrders.tambahanNumber,
+      workOrderNumber: locationStockEvents.workOrderNumber,
+      supplierName: suppliers.name,
       quantity: locationStockEvents.quantity,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
@@ -120,6 +158,7 @@ export async function GET(req: NextRequest) {
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
         .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
+    .leftJoin(suppliers, sql`${suppliers.id} = ${eventSupplierId}`)
     .where(whereClause)
     .orderBy(desc(locationStockEvents.createdAt))
     .limit(200);

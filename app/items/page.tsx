@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { items } from "@/db/schema";
 import { sessionIsSuper } from "@/lib/auth";
 import ItemsClient from "./ItemsClient";
+import { getItemAttributeOptions } from "@/lib/itemAttributes";
 
 export const dynamic = "force-dynamic";
 
@@ -11,10 +12,10 @@ async function getItems() {
 
 
 export default async function ItemsPage() {
-  const [itemRows, isAdmin] = await Promise.all([getItems(), sessionIsSuper()]);
+  const [itemRows, isAdmin, options] = await Promise.all([getItems(), sessionIsSuper(), getItemAttributeOptions(db)]);
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-8 max-w-7xl">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold">Items</h1>
         <p className="text-zinc-500 text-sm mt-1">
@@ -23,7 +24,7 @@ export default async function ItemsPage() {
         </p>
       </header>
 
-      <ItemsClient items={itemRows} isAdmin={isAdmin} />
+      <ItemsClient items={itemRows} isAdmin={isAdmin} options={options} />
     </div>
   );
 }

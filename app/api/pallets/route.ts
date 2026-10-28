@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { getProductionSupplierId } from "@/lib/suppliers";
 import { pallets, palletEvents, locations, items } from "@/db/schema";
 import { eq, and, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
@@ -174,6 +175,8 @@ export async function POST(req: NextRequest) {
       quantity,
       userId: session.userId,
       workOrderNumber,
+      // Production inbound always comes from the Production supplier.
+      supplierId: await getProductionSupplierId(tx),
     });
     return pallet;
   });

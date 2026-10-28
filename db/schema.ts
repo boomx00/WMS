@@ -300,6 +300,26 @@ export const shipmentRevisions = pgTable("shipment_revisions", {
     .references(() => users.id),
   revisedAt: timestamp("revised_at").defaultNow().notNull(),
 });
+// ============================================================
+// Suppliers (Items page → Suppliers)
+// ============================================================
+
+// Where products come from: PRODUCTION (made in-house — production inbound
+// from the PDA is recorded against it) or EXTERNAL (bought from outside).
+export const supplierKindEnum = pgEnum("supplier_kind", ["PRODUCTION", "EXTERNAL"]);
+
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: serial("id").primaryKey(),
+    name: text("name").notNull(),
+    kind: supplierKindEnum("kind").notNull().default("EXTERNAL"),
+    createdBy: integer("created_by").references(() => users.id),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("suppliers_name_idx").on(sql`lower(${table.name})`)]
+);
+
 export const items = pgTable(
   "items",
   {
@@ -311,6 +331,13 @@ export const items = pgTable(
     defaultCode: text("default_code").notNull(),
     cartonBagQty: integer("carton_bag_qty").notNull(),
     palletCartonQty: integer("pallet_carton_qty").notNull(),
+    // Product classification, for searching (Items page, Movement History):
+    // type e.g. "Diapers", brand e.g. "MAKUKU", tags e.g. ["XL", "34+6"].
+    productType: text("product_type"),
+    brand: text("brand"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    // The product's supplier (Production or an outside one), if set.
+    supplierId: integer("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
@@ -570,6 +597,10 @@ export const locationStockEventTypeEnum = pgEnum("location_stock_event_type", [
   "CLAIM",
     "OTHER_INBOUND",
   "OTHER_OUTBOUND",
+  // A deleted sales order's stock put back on FLOOR: from the staging
+  // location it was marked in, or (for what had already shipped) from
+  // nowhere. Its SO number is kept in deleted_so_number.
+  "DELETE_SO",
 ]);
 
 export const locationStockEvents = pgTable(
@@ -594,6 +625,12 @@ export const locationStockEvents = pgTable(
     otherTransactionId: integer("other_transaction_id").references(() => otherTransactions.id),
     bulkAdjustmentId: integer("bulk_adjustment_id").references(() => bulkAdjustments.id),
     workOrderNumber: text("work_order_number"), // MO number, set only on INBOUND/DEFAULT_INBOUND events
+    // The SO number of a sales order that was deleted: its events lose
+    // salesOrderId (the SO row is gone) but keep showing the number.
+    deletedSoNumber: text("deleted_so_number"),
+    // Who the stock came from: production inbound (INBOUND / DEFAULT_INBOUND
+    // from the PDA) is set to the Production supplier automatically.
+    supplierId: integer("supplier_id").references(() => suppliers.id),
   },
   (table) => [
     index("location_stock_events_item_created_idx").on(table.itemId, table.createdAt),

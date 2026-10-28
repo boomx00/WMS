@@ -7,6 +7,7 @@ import { useCan } from "@/lib/AccessContext";
 import CreateSalesOrderForm from "./components/CreateSalesOrderForm";
 import EditSalesOrderForm from "./components/EditSalesOrderForm";
 import ShippedCell from "./components/ShippedCell";
+import DeleteSalesOrderDialog from "./components/DeleteSalesOrderDialog";
 import type { ItemOption, Order } from "./components/types";
 import { formatTruckTime } from "./components/helpers";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
@@ -47,6 +48,8 @@ export default function SalesOrdersClient({
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<Order[] | null>(null);
   const [searching, setSearching] = useState(false);
+  // The SO whose Delete window is open (Manager only).
+  const [deletingSo, setDeletingSo] = useState<string | null>(null);
     const labels = usePageLabels("sales_page");
   useEffect(() => {
     if (!search.trim()) {
@@ -142,7 +145,7 @@ export default function SalesOrdersClient({
               <th className="px-4 py-3 font-medium">{labels.th_status}</th>
               <th className="px-4 py-3 font-medium">{labels.th_picked_by}</th>
               <th className="px-4 py-3 font-medium text-right">{labels.th_items}</th>
-              <th className="px-4 py-3 font-medium w-16"></th>
+              <th className="px-4 py-3 font-medium w-24"></th>
             </tr>
           </thead>
           <tbody>
@@ -187,7 +190,7 @@ export default function SalesOrdersClient({
                         {order.pickedByUsers.length === 0 ? "—" : order.pickedByUsers.join(", ")}
                       </td>
                       <td className="px-4 py-3 text-right text-zinc-400">{order.items.length}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
                         {canEdit && (
                           <button
                             onClick={(e) => {
@@ -198,6 +201,17 @@ export default function SalesOrdersClient({
                             className="text-xs text-amber-500 hover:underline"
                           >
                             {isEditing ? labels.cancel : labels.edit}
+                          </button>
+                        )}
+                        {isAdmin && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingSo(order.soNumber);
+                            }}
+                            className="ml-3 text-xs text-red-400 hover:underline"
+                          >
+                            {labels.delete}
                           </button>
                         )}
                       </td>
@@ -311,6 +325,20 @@ export default function SalesOrdersClient({
           </tbody>
         </table>
       </div>
+
+      {deletingSo !== null && (
+        <DeleteSalesOrderDialog
+          soNumber={deletingSo}
+          labels={labels}
+          onClose={() => setDeletingSo(null)}
+          onDeleted={() => {
+            const gone = deletingSo;
+            setDeletingSo(null);
+            setSearchResults((current) => current && current.filter((o) => o.soNumber !== gone));
+            router.refresh();
+          }}
+        />
+      )}
 
       {searchResults === null && totalPages > 1 && (
         <div className="flex items-center justify-between">

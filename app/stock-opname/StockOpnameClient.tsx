@@ -427,7 +427,26 @@ function OpnameSessionRow({ session, labels }: { session: Session; labels: Recor
             <p className="text-xs text-zinc-600">Loading...</p>
           ) : isSku ? (
             skuDetail ? (
-              <SkuOpnameDetail detail={skuDetail} />
+              <SkuOpnameDetail
+                detail={skuDetail}
+                onDelete={
+                  session.status === "CONFIRMED"
+                    ? undefined
+                    : async (sku) => {
+                        const res = await fetch(
+                          `/api/stock-opname/sku/${session.opnameNumber}/skus?itemId=${sku.itemId}`,
+                          { method: "DELETE" }
+                        );
+                        if (!res.ok) {
+                          const data = await res.json().catch(() => ({}));
+                          return data.error ?? "Failed to delete the SKU";
+                        }
+                        await refetchReport();
+                        router.refresh();
+                        return null;
+                      }
+                }
+              />
             ) : (
               <p className="text-xs text-red-400">Failed to load report</p>
             )
