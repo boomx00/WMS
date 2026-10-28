@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locationStock, locations, locationTypes, items } from "@/db/schema";
-import { eq, and, gt } from "drizzle-orm";
+import { eq, and, gt, ne } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
 function sanitize(input: string): string {
@@ -34,6 +34,11 @@ function compareRackCodes(a: string, b: string): number {
 // whose type is ticked "Can be picked from" (today: RACK + FLOOR).
 // Locations with a rack position come first, sorted H.1.1 → A.x.x; the
 // rest (floor and other mixed areas) follow.
+//
+// GET /api/location-stock/by-sku?sku=XXXX&all=1
+// Every location holding the SKU, pickable or not (DEFECT, EXPOR, Outbound
+// WH...), with any non-zero quantity — the same rows the per-SKU stock
+// opname sums when it locks a SKU's system qty, so the list adds up to it.
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -45,6 +50,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "sku is required" }, { status: 400 });
   }
 
+  const allParam = req.nextUrl.searchParams.get("all");
+  const includeAll = allParam === "1" || allParam === "true";
+
+  const where = includeAll
+    ? and(eq(items.sku, sku), ne(locationStock.quantity, 0))
+    : and(
+        eq(items.sku, sku),
+        gt(locationStock.quantity, 0),
+        eq(locationTypes.pickable, true)
+      );
+
   const rows = await db
     .select({
       locationCode: locations.code,
@@ -54,15 +70,12 @@ export async function GET(req: NextRequest) {
     })
     .from(locationStock)
     .innerJoin(locations, eq(locationStock.locationId, locations.id))
-    .innerJoin(locationTypes, eq(locations.type, locationTypes.code))
+    // Left join so a location whose type row is missing still shows in
+    // all=1 mode (the opname lock doesn't need it either); in pickable mode
+    // the pickable = true filter excludes those rows as before.
+    .leftJoin(locationTypes, eq(locations.type, locationTypes.code))
     .innerJoin(items, eq(locationStock.itemId, items.id))
-    .where(
-      and(
-        eq(items.sku, sku),
-        gt(locationStock.quantity, 0),
-        eq(locationTypes.pickable, true)
-      )
-    );
+    .where(where);
 
   // Aggregate in case a location has more than one location_stock row
   // for the same item (same guard as the heatmap fix).
@@ -70,10 +83,11 @@ export async function GET(req: NextRequest) {
   for (const r of rows) {
     const existing = byCode.get(r.locationCode);
     if (existing) existing.quantity += r.quantity;
-    else byCode.set(r.locationCode, { ...r });
+    else byCode.set(r.locationCode, { ...r, hasPosition: r.hasPosition ?? false });
   }
 
-  const all = Array.from(byCode.values());
+  // Rows that net to zero after aggregation aren't really "there".
+  const all = Array.from(byCode.values()).filter((r) => r.quantity !== 0);
   const racks = all
     .filter((r) => r.hasPosition)
     .sort((a, b) => compareRackCodes(a.locationCode, b.locationCode));

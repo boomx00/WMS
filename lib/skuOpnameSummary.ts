@@ -57,7 +57,17 @@ export type SummaryEntry = {
   // What was typed in the summary's "Adj" field for this SKU's opname, or
   // null when it's empty.
   adjustment: SummaryAdjustment | null;
+  // Reconciliation typed in the report (+ / − on the Total SO), or null
+  // while both are 0.
+  reconciliation: SummaryReconciliation | null;
   lines?: SummaryLine[];
+};
+
+export type SummaryReconciliation = {
+  plus: number; // added to the Total SO
+  minus: number; // taken off the Total SO
+  at: string | null; // YYYY-MM-DD HH:MM, Asia/Jakarta — when it was saved
+  by: string | null; // who saved it
 };
 
 export type SummaryAdjustment = {
@@ -106,6 +116,7 @@ export async function getSkuOpnameEntries(
 ): Promise<SummaryEntry[]> {
   const counter = alias(users, "counter");
   const adjuster = alias(users, "adjuster");
+  const reconciler = alias(users, "reconciler");
   const lockedDate = localDate(stockOpnameSkus.addedAt);
 
   const conditions = [like(stockOpnameSkus.opnameNumber, `${SKU_OPNAME_PREFIX}%`)];
@@ -126,6 +137,10 @@ export async function getSkuOpnameEntries(
     adjustmentNote: string | null;
     adjustedAt: string | null;
     adjustedBy: string | null;
+    reconcilePlus: number;
+    reconcileMinus: number;
+    reconciledAt: string | null;
+    reconciledBy: string | null;
   }[] = await db
     .select({
       opnameNumber: stockOpnameSkus.opnameNumber,
@@ -140,11 +155,16 @@ export async function getSkuOpnameEntries(
       adjustmentNote: stockOpnameSkus.adjustmentNote,
       adjustedAt: localDateTime(stockOpnameSkus.adjustedAt),
       adjustedBy: adjuster.username,
+      reconcilePlus: stockOpnameSkus.reconcilePlus,
+      reconcileMinus: stockOpnameSkus.reconcileMinus,
+      reconciledAt: localDateTime(stockOpnameSkus.reconciledAt),
+      reconciledBy: reconciler.username,
     })
     .from(stockOpnameSkus)
     .innerJoin(stockOpname, eq(stockOpname.opnameNumber, stockOpnameSkus.opnameNumber))
     .leftJoin(users, eq(users.id, sql`coalesce(${stockOpname.assignedTo}, ${stockOpname.createdBy})`))
     .leftJoin(adjuster, eq(adjuster.id, stockOpnameSkus.adjustedBy))
+    .leftJoin(reconciler, eq(reconciler.id, stockOpnameSkus.reconciledBy))
     .where(and(...conditions))
     .orderBy(asc(stockOpnameSkus.addedAt), asc(stockOpnameSkus.id));
 
@@ -290,6 +310,10 @@ export async function getSkuOpnameEntries(
       adjustment: row.adjustmentNote
         ? { note: row.adjustmentNote, at: row.adjustedAt, by: row.adjustedBy }
         : null,
+      reconciliation:
+        row.reconcilePlus !== 0 || row.reconcileMinus !== 0
+          ? { plus: row.reconcilePlus, minus: row.reconcileMinus, at: row.reconciledAt, by: row.reconciledBy }
+          : null,
       ...(withLines
         ? { lines: lines.sort((a, b) => a.locationCode.localeCompare(b.locationCode, undefined, { numeric: true })) }
         : {}),

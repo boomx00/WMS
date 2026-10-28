@@ -747,6 +747,13 @@ export const stockOpnameSkus = pgTable(
     adjustmentNote: text("adjustment_note"),
     adjustedAt: timestamp("adjusted_at"),
     adjustedBy: integer("adjusted_by").references(() => users.id),
+    // Reconciliation typed in the Stock Opname Summary's report: quantity
+    // added to (+) and taken off (−) the counted Total SO, giving the
+    // Final SO (Total SO + plus − minus).
+    reconcilePlus: integer("reconcile_plus").notNull().default(0),
+    reconcileMinus: integer("reconcile_minus").notNull().default(0),
+    reconciledAt: timestamp("reconciled_at"),
+    reconciledBy: integer("reconciled_by").references(() => users.id),
     // Where the locked system stock was, location by location, with each
     // location's warehouse / Total Stock column AS THEY WERE at lock time —
     // so the Stock Opname Summary keeps showing past opnames the same way

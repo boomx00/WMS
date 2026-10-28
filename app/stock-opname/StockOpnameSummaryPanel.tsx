@@ -26,7 +26,11 @@ type Cell = {
   unaccounted: number;
   // Set with the "Adj" checkbox: the bulk adjustment made for this opname.
   adjustment: Adjustment | null;
+  // The report's Reconciliation (+ / − on the Total SO); null while both are 0.
+  reconciliation?: Reconciliation | null;
 };
+
+type Reconciliation = { plus: number; minus: number; at: string | null; by: string | null };
 
 // Free text typed in the Adj field (not linked to a bulk adjustment).
 type Adjustment = { note: string; at: string | null; by: string | null };
@@ -117,6 +121,13 @@ function shownFigures(
     counted -= x.counted;
   }
   return { system, counted };
+}
+
+// The Final SO of one SOSKU line: the Total SO shown (unticked columns taken
+// off) plus its Reconciliation + and minus its −. Δ K3 = Final SO − K3.
+function finalSoOf(cell: Cell, excludedKeys: string[]): number {
+  const r = cell.reconciliation;
+  return shownFigures(cell, "total", excludedKeys).counted + (r?.plus ?? 0) - (r?.minus ?? 0);
 }
 
 // The columns (not Total) that aren't in `selectedKeys`.
@@ -635,10 +646,10 @@ export default function StockOpnameSummaryPanel() {
                 const f = shownFigures(c, b.key, excludedKeys);
                 return f.counted !== f.system;
               }) ||
-              // or Total SO doesn't match K3, for a session with K3 data
+              // or Final SO doesn't match K3, for a session with K3 data
               (() => {
                 const k3 = k3Of(data, item, c.opnameNumber);
-                return !!k3 && round3(shownFigures(c, "total", excludedKeys).counted - k3.qty) !== 0;
+                return !!k3 && round3(finalSoOf(c, excludedKeys) - k3.qty) !== 0;
               })()
           )
         );
@@ -698,6 +709,38 @@ export default function StockOpnameSummaryPanel() {
       return { error: labels.summary_err_save };
     }
   }
+  // Save a report line's Reconciliation + or − (the other stays as it is).
+  async function saveReconciliation(
+    target: AdjustTarget,
+    change: { plus?: number; minus?: number }
+  ): Promise<{ error?: string }> {
+    try {
+      const res = await fetch("/api/stock-opname/summary/reconciliation", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ opnameNumber: target.opnameNumber, itemId: target.itemId, ...change }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) return { error: json.error ?? `${labels.summary_err_save} (${res.status})` };
+      const reconciliation: Reconciliation | null = json.reconciliation ?? null;
+      setData((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          items: current.items.map((item) => {
+            const list = item.itemId === target.itemId ? item.cells[target.date] : undefined;
+            if (!list?.some((c) => c.opnameNumber === target.opnameNumber)) return item;
+            const next = list.map((c) => (c.opnameNumber === target.opnameNumber ? { ...c, reconciliation } : c));
+            return { ...item, cells: { ...item.cells, [target.date]: next } };
+          }),
+        };
+      });
+      return {};
+    } catch {
+      return { error: labels.summary_err_save };
+    }
+  }
+
 
   function changeWarehouse(id: number) {
     setSelected(null);
@@ -723,11 +766,16 @@ export default function StockOpnameSummaryPanel() {
     if (buckets.length > 0) {
       for (const date of data.dates) {
         const start = header1.length;
-        const width = buckets.length * 3 + (hasK3(date) ? 2 : 0) + 2;
+        const width = buckets.length * 3 + 3 + (hasK3(date) ? 2 : 0) + 2;
         header1.push(date, ...Array(width - 1).fill(""));
         for (const b of buckets) {
           header2.push(`${b.name} ${labels.summary_system}`, `${b.name} ${labels.summary_so}`, labels.summary_delta);
         }
+        header2.push(
+          `${labels.report_th_reconciliation} ${labels.report_th_reconcile_plus}`,
+          `${labels.report_th_reconciliation} ${labels.report_th_reconcile_minus}`,
+          labels.report_th_final_so
+        );
         if (hasK3(date)) header2.push(k3Label, k3DeltaLabel);
         header2.push(adjLabel, soskuLabel);
         merges.push({ s: { r: 0, c: start }, e: { r: 0, c: start + width - 1 } });
@@ -749,13 +797,17 @@ export default function StockOpnameSummaryPanel() {
               row.push(f.system, f.counted, f.counted - f.system);
             }
           }
+          if (buckets.length > 0) {
+            if (!cell) row.push("", "", "");
+            else row.push(cell.reconciliation?.plus ?? 0, cell.reconciliation?.minus ?? 0, finalSoOf(cell, excludedKeys));
+          }
           if (buckets.length > 0 && hasK3(date)) {
             // Blank for a session without K3 data.
             const k3 = cell ? k3Of(data, item, cell.opnameNumber) : null;
             if (!cell || !k3) {
               row.push("", "");
             } else {
-              row.push(k3.qty, round3(shownFigures(cell, "total", excludedKeys).counted - k3.qty));
+              row.push(k3.qty, round3(finalSoOf(cell, excludedKeys) - k3.qty));
             }
           }
           if (buckets.length > 0) row.push(cell?.adjustment?.note ?? "", cell?.opnameNumber ?? "");
@@ -783,7 +835,8 @@ export default function StockOpnameSummaryPanel() {
   // columns plus its own Adj (checkbox) and Detail (pencil) columns. `gap`
   // is the empty column before every date block, which separates the dates
   // from each other.
-  const blockSpan = span + 2;
+  // Then Reconciliation + / − and Final SO, and Adj and SOSKU.
+  const blockSpan = span + 3 + 2;
   // A date where any session has K3 data has two more columns: K3 Stock and Δ K3.
   const spanOf = (date: string) => blockSpan + (hasK3(date) ? 2 : 0);
   // The cell's content is a fixed-width grid of three lanes — SKU / name,
@@ -1024,6 +1077,18 @@ export default function StockOpnameSummaryPanel() {
                         <th className={subHead}>{labels.summary_delta}</th>
                       </Fragment>
                     ))}
+                    <th
+                      className={`${subHead} text-emerald-400 border-l border-l-zinc-700`}
+                      title={`${labels.report_th_reconciliation} +: ${labels.report_reconcile_plus_title}`}
+                    >
+                      {labels.summary_th_rec_plus}
+                    </th>
+                    <th className={`${subHead} text-red-400`} title={`${labels.report_th_reconciliation} −: ${labels.report_reconcile_minus_title}`}>
+                      {labels.summary_th_rec_minus}
+                    </th>
+                    <th className={`${subHead} text-zinc-100`} title={labels.report_final_so_title}>
+                      {labels.report_th_final_so}
+                    </th>
                     {hasK3(date) && (
                       <>
                         <th className={`${subHead} text-sky-300 border-l border-l-zinc-700`} title={labels.k3_stock_title}>
@@ -1177,6 +1242,49 @@ export default function StockOpnameSummaryPanel() {
                                     </Fragment>
                                   );
                                 })}
+                                {(() => {
+                                  const target: AdjustTarget = {
+                                    itemId: item.itemId,
+                                    sku: item.sku,
+                                    name: item.name,
+                                    date,
+                                    opnameNumber: cell.opnameNumber,
+                                    current: cell.adjustment,
+                                  };
+                                  const r = cell.reconciliation;
+                                  const totalSo = shownFigures(cell, "total", excludedKeys).counted;
+                                  const finalSo = finalSoOf(cell, excludedKeys);
+                                  return (
+                                    <>
+                                      <td className={`${dataCell} ${rowBorder} border-l border-l-zinc-700`}>
+                                        <ReconcileInput
+                                          compact
+                                          value={r?.plus ?? 0}
+                                          tone="plus"
+                                          title={reconcileTitle(r, labels.report_reconcile_plus_title)}
+                                          ariaLabel={`${labels.report_th_reconciliation} ${labels.report_th_reconcile_plus} ${item.sku} ${cell.opnameNumber}`}
+                                          onSave={(plus) => saveReconciliation(target, { plus })}
+                                        />
+                                      </td>
+                                      <td className={`${dataCell} ${rowBorder}`}>
+                                        <ReconcileInput
+                                          compact
+                                          value={r?.minus ?? 0}
+                                          tone="minus"
+                                          title={reconcileTitle(r, labels.report_reconcile_minus_title)}
+                                          ariaLabel={`${labels.report_th_reconciliation} ${labels.report_th_reconcile_minus} ${item.sku} ${cell.opnameNumber}`}
+                                          onSave={(minus) => saveReconciliation(target, { minus })}
+                                        />
+                                      </td>
+                                      <td
+                                        title={`${labels.report_final_so_title}: ${totalSo.toLocaleString()} + ${(r?.plus ?? 0).toLocaleString()} − ${(r?.minus ?? 0).toLocaleString()}`}
+                                        className={`${dataCell} ${rowBorder} font-semibold ${r ? "text-violet-200" : "text-zinc-100"}`}
+                                      >
+                                        {finalSo.toLocaleString()}
+                                      </td>
+                                    </>
+                                  );
+                                })()}
                                 {hasK3(date) &&
                                   (() => {
                                     const k3 = k3Of(data, item, cell.opnameNumber);
@@ -1196,8 +1304,8 @@ export default function StockOpnameSummaryPanel() {
                                         </>
                                       );
                                     }
-                                    const totalSo = shownFigures(cell, "total", excludedKeys).counted;
-                                    const k3Delta = round3(totalSo - k3.qty);
+                                    const finalSo = finalSoOf(cell, excludedKeys);
+                                    const k3Delta = round3(finalSo - k3.qty);
                                     return (
                                       <>
                                         <td
@@ -1209,7 +1317,7 @@ export default function StockOpnameSummaryPanel() {
                                           {fmtQty(k3.qty)}
                                         </td>
                                         <td
-                                          title={`${k3DeltaTitle}: ${fmtQty(totalSo)} − ${fmtQty(k3.qty)}`}
+                                          title={`${k3DeltaTitle}: ${fmtQty(finalSo)} − ${fmtQty(k3.qty)}`}
                                           className={`${dataCell} ${rowBorder}`}
                                         >
                                           <Delta value={k3Delta} />
@@ -1291,6 +1399,11 @@ export default function StockOpnameSummaryPanel() {
           labels={labels}
           locale={locale}
           onSaveNote={saveAdjustment}
+          onSaveReconciliation={saveReconciliation}
+          allBuckets={data.buckets}
+          selectedKeys={selected ?? []}
+          onToggleBucket={toggleBucket}
+          bucketLabel={bucketLabel}
           onClose={() => setReportDate(null)}
         />
       )}
@@ -1771,6 +1884,11 @@ function DateReportModal({
   labels,
   locale,
   onSaveNote,
+  onSaveReconciliation,
+  allBuckets,
+  selectedKeys,
+  onToggleBucket,
+  bucketLabel,
   onClose,
 }: {
   date: string;
@@ -1782,6 +1900,12 @@ function DateReportModal({
   labels: Record<string, string>;
   locale: string;
   onSaveNote: (target: AdjustTarget, note: string) => Promise<{ error?: string }>;
+  onSaveReconciliation: (target: AdjustTarget, change: { plus?: number; minus?: number }) => Promise<{ error?: string }>;
+  // The page's column checkboxes, also offered in the report (same choice).
+  allBuckets: Bucket[];
+  selectedKeys: string[];
+  onToggleBucket: (key: string) => void;
+  bucketLabel: (b: Bucket) => string;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -1804,11 +1928,16 @@ function DateReportModal({
     (item.cells[date] ?? []).map((cell) => {
       const figs = buckets.map((b) => shownFigures(cell, b.key, excludedKeys));
       const totalSo = shownFigures(cell, "total", excludedKeys).counted;
+      // Reconciliation: + and − on the Total SO give the Final SO, which K3
+      // is compared with (Δ K3 = Final SO − K3).
+      const plus = cell.reconciliation?.plus ?? 0;
+      const minus = cell.reconciliation?.minus ?? 0;
+      const finalSo = finalSoOf(cell, excludedKeys);
       const k3Line = k3Of(data, item, cell.opnameNumber);
       const k3Qty = k3Line ? k3Line.qty : null;
-      const k3Delta = k3Qty === null ? null : round3(totalSo - k3Qty);
+      const k3Delta = k3Qty === null ? null : round3(finalSo - k3Qty);
       const hasDiff = figs.some((f) => f.counted !== f.system) || (k3Delta !== null && k3Delta !== 0);
-      return { item, cell, figs, k3Qty, k3Delta, k3InFile: k3Line?.inFile ?? false, hasDiff };
+      return { item, cell, figs, k3Qty, k3Delta, k3InFile: k3Line?.inFile ?? false, hasDiff, totalSo, plus, minus, finalSo };
     })
   );
 
@@ -1851,6 +1980,17 @@ function DateReportModal({
       { system: 0, counted: 0 }
     )
   );
+  const targetOf = (l: (typeof allLines)[number]): AdjustTarget => ({
+    itemId: l.item.itemId,
+    sku: l.item.sku,
+    name: l.item.name,
+    date,
+    opnameNumber: l.cell.opnameNumber,
+    current: l.cell.adjustment,
+  });
+  const plusTotal = totalLines.reduce((n, l) => n + l.plus, 0);
+  const minusTotal = totalLines.reduce((n, l) => n + l.minus, 0);
+  const finalSoTotal = totalLines.reduce((n, l) => n + l.finalSo, 0);
   const k3Total = round3(totalLines.reduce((n, l) => n + (l.k3Qty ?? 0), 0));
   const k3DeltaTotal = round3(totalLines.reduce((n, l) => n + (l.k3Delta ?? 0), 0));
   const skuCount = new Set(lines.map((l) => l.item.itemId)).size;
@@ -1860,17 +2000,24 @@ function DateReportModal({
   function exportReport() {
     const header: (string | number)[] = ["#", labels.summary_th_sku, labels.summary_th_product];
     for (const b of buckets) header.push(`${b.name} ${labels.summary_system}`, `${b.name} ${labels.summary_so}`, labels.summary_delta);
+    header.push(
+      `${labels.report_th_reconciliation} ${labels.report_th_reconcile_plus}`,
+      `${labels.report_th_reconciliation} ${labels.report_th_reconcile_minus}`,
+      labels.report_th_final_so
+    );
     if (k3) header.push(labels.summary_th_k3, labels.summary_th_k3_delta);
     header.push(labels.detail_th_status, labels.summary_th_sosku, labels.report_th_pic, labels.detail_th_date, labels.report_th_note);
     const body = lines.map((l, i) => {
       const r: (string | number)[] = [i + 1, l.item.sku, l.item.name];
       for (const f of l.figs) r.push(f.system, f.counted, f.counted - f.system);
+      r.push(l.plus, l.minus, l.finalSo);
       if (k3) r.push(l.k3Qty ?? "", l.k3Delta ?? "");
       r.push(statusLabel(l.cell.status), l.cell.opnameNumber, l.cell.by ?? "", l.cell.lockedAt, l.cell.adjustment?.note ?? "");
       return r;
     });
     const totalRow: (string | number)[] = ["", labels.report_totals, ""];
     for (const tt of totals) totalRow.push(tt.system, tt.counted, tt.counted - tt.system);
+    totalRow.push(plusTotal, minusTotal, finalSoTotal);
     if (k3) totalRow.push(k3Total, k3DeltaTotal);
     const title = [`${labels.report_title} — ${day} ${weekday} — ${data.warehouse.name}`];
     const sheet = XLSX.utils.aoa_to_sheet([title, [], header, ...body, totalRow]);
@@ -1949,6 +2096,20 @@ function DateReportModal({
               )}
             </p>
             <p className="text-[10px] text-zinc-600 mt-0.5">{labels.report_filters_note}</p>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-xs">
+              <span className="text-zinc-500">{labels.summary_columns}:</span>
+              {allBuckets.map((b) => (
+                <label key={b.key} className="flex items-center gap-1.5 text-zinc-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedKeys.includes(b.key)}
+                    onChange={() => onToggleBucket(b.key)}
+                    className="h-3.5 w-3.5 accent-amber-500"
+                  />
+                  {bucketLabel(b)}
+                </label>
+              ))}
+            </div>
           </div>
           <div className="flex gap-2">
             <button
@@ -1976,8 +2137,8 @@ function DateReportModal({
             <table className="w-full text-xs border-separate border-spacing-0">
               <thead className="sticky top-0 z-10">
                 <tr className="text-zinc-400">
-                  <th className={`${thBase} text-left w-8`}>#</th>
-                  <th className={`${thBase} text-left`}>
+                  <th rowSpan={2} className={`${thBase} text-left w-8`}>#</th>
+                  <th rowSpan={2} className={`${thBase} text-left`}>
                     <ColumnFilter
                       label={labels.summary_th_sku}
                       options={optionsOf("sku")}
@@ -1987,7 +2148,7 @@ function DateReportModal({
                       labels={labels}
                     />
                   </th>
-                  <th className={`${thBase} text-left min-w-[11rem]`}>
+                  <th rowSpan={2} className={`${thBase} text-left min-w-[11rem]`}>
                     <ColumnFilter
                       label={labels.summary_th_product}
                       options={optionsOf("product")}
@@ -1999,30 +2160,36 @@ function DateReportModal({
                   </th>
                   {buckets.map((b) => (
                     <Fragment key={b.key}>
-                      <th className={`${th} border-l border-l-zinc-800`}>
+                      <th rowSpan={2} className={`${th} border-l border-l-zinc-800`}>
                         {b.name}
                         {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
                         <br />
                         {labels.summary_system}
                       </th>
-                      <th className={th}>
+                      <th rowSpan={2} className={th}>
                         {b.name}
                         {b.key === "total" && excludedNames.length > 0 && <span className="text-amber-500">*</span>}
                         <br />
                         {labels.summary_so}
                       </th>
-                      <th className={th}>{labels.summary_delta}</th>
+                      <th rowSpan={2} className={th}>{labels.summary_delta}</th>
                     </Fragment>
                   ))}
+                  <th colSpan={2} className={`${thBase} text-center text-violet-300 border-l border-l-zinc-800 pb-0.5`}>
+                    {labels.report_th_reconciliation}
+                  </th>
+                  <th rowSpan={2} className={`${th} text-zinc-100`} title={labels.report_final_so_title}>
+                    {labels.report_th_final_so}
+                  </th>
                   {k3 && (
                     <>
-                      <th className={`${th} text-sky-300 border-l border-l-zinc-800`}>{labels.summary_th_k3}</th>
-                      <th className={`${th} text-sky-300`} title={labels.summary_k3_delta_title}>
+                      <th rowSpan={2} className={`${th} text-sky-300 border-l border-l-zinc-800`}>{labels.summary_th_k3}</th>
+                      <th rowSpan={2} className={`${th} text-sky-300`} title={labels.summary_k3_delta_title}>
                         {labels.summary_th_k3_delta}
                       </th>
                     </>
                   )}
-                  <th className={`${thBase} text-left border-l border-l-zinc-800`}>
+                  <th rowSpan={2} className={`${thBase} text-left border-l border-l-zinc-800`}>
                     <ColumnFilter
                       label={labels.detail_th_status}
                       options={optionsOf("status")}
@@ -2032,7 +2199,7 @@ function DateReportModal({
                       labels={labels}
                     />
                   </th>
-                  <th className={`${thBase} text-left`}>
+                  <th rowSpan={2} className={`${thBase} text-left`}>
                     <ColumnFilter
                       label={labels.summary_th_sosku}
                       options={optionsOf("sosku")}
@@ -2045,7 +2212,15 @@ function DateReportModal({
                       {labels.report_th_pic} · {labels.detail_th_date}
                     </div>
                   </th>
-                  <th className={`${thBase} text-left min-w-[14rem]`}>{labels.report_th_note}</th>
+                  <th rowSpan={2} className={`${thBase} text-left min-w-[14rem]`}>{labels.report_th_note}</th>
+                </tr>
+                <tr className="text-zinc-400">
+                  <th className={`${th} border-l border-l-zinc-800 text-emerald-400 pt-0.5`} title={labels.report_reconcile_plus_title}>
+                    {labels.report_th_reconcile_plus}
+                  </th>
+                  <th className={`${th} text-red-400 pt-0.5`} title={labels.report_reconcile_minus_title}>
+                    {labels.report_th_reconcile_minus}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -2074,6 +2249,30 @@ function DateReportModal({
                         </td>
                       </Fragment>
                     ))}
+                    <td className={`${td} border-l border-l-zinc-800`}>
+                      <ReconcileInput
+                        value={l.plus}
+                        tone="plus"
+                        title={reconcileTitle(l.cell.reconciliation, labels.report_reconcile_plus_title)}
+                        ariaLabel={`${labels.report_th_reconciliation} ${labels.report_th_reconcile_plus} ${l.item.sku} ${l.cell.opnameNumber}`}
+                        onSave={(plus) => onSaveReconciliation(targetOf(l), { plus })}
+                      />
+                    </td>
+                    <td className={td}>
+                      <ReconcileInput
+                        value={l.minus}
+                        tone="minus"
+                        title={reconcileTitle(l.cell.reconciliation, labels.report_reconcile_minus_title)}
+                        ariaLabel={`${labels.report_th_reconciliation} ${labels.report_th_reconcile_minus} ${l.item.sku} ${l.cell.opnameNumber}`}
+                        onSave={(minus) => onSaveReconciliation(targetOf(l), { minus })}
+                      />
+                    </td>
+                    <td
+                      className={`${td} font-semibold ${l.plus !== 0 || l.minus !== 0 ? "text-violet-200" : "text-zinc-100"}`}
+                      title={`${labels.report_final_so_title}: ${l.totalSo.toLocaleString()} + ${l.plus.toLocaleString()} − ${l.minus.toLocaleString()}`}
+                    >
+                      {l.finalSo.toLocaleString()}
+                    </td>
                     {k3 &&
                       (l.k3Qty === null ? (
                         <>
@@ -2158,6 +2357,11 @@ function DateReportModal({
                       </td>
                     </Fragment>
                   ))}
+                  <td className={`${td} bg-zinc-900 border-t-zinc-700 border-l border-l-zinc-800 text-emerald-400`}>
+                    {plusTotal.toLocaleString()}
+                  </td>
+                  <td className={`${td} bg-zinc-900 border-t-zinc-700 text-red-400`}>{minusTotal.toLocaleString()}</td>
+                  <td className={`${td} bg-zinc-900 border-t-zinc-700 font-semibold`}>{finalSoTotal.toLocaleString()}</td>
                   {k3 && (
                     <>
                       <td className={`${td} bg-zinc-900 border-t-zinc-700 border-l border-l-zinc-800 text-sky-300`}>{fmtQty(k3Total)}</td>
@@ -2527,6 +2731,100 @@ function AdjustmentInput({
       type="text"
       {...shared}
       className={`w-[4.75rem] px-1 py-0.5 rounded bg-zinc-950 border font-mono text-[9px] placeholder:text-zinc-700 focus:outline-none focus:border-amber-500 disabled:opacity-50 ${tone}`}
+    />
+  );
+}
+
+// A Reconciliation box's tooltip: who saved it and when, after its meaning.
+function reconcileTitle(r: Reconciliation | null | undefined, meaning: string): string {
+  return r?.at ? `${meaning}\n${r.at}${r.by ? ` · ${r.by}` : ""}` : meaning;
+}
+
+// One Reconciliation box (+ or −) of a report line: a whole quantity of 0 or
+// more. Enter or clicking away saves; Escape puts the saved value back;
+// empty = 0. Red border = not saved (hover for the reason).
+function ReconcileInput({
+  value,
+  tone,
+  title,
+  ariaLabel,
+  onSave,
+  compact = false,
+}: {
+  value: number;
+  tone: "plus" | "minus";
+  // The summary table's version: small, to fit its narrow columns.
+  compact?: boolean;
+  title: string;
+  ariaLabel: string;
+  onSave: (qty: number) => Promise<{ error?: string }>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null); // null = showing the saved value
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function commit() {
+    if (draft === null) return;
+    const text = draft.trim();
+    const qty = text === "" ? 0 : Number(text);
+    if (!Number.isInteger(qty) || qty < 0) {
+      setError("0, 1, 2, …");
+      return;
+    }
+    if (qty === value) {
+      setDraft(null);
+      setError(null);
+      return;
+    }
+    setSaving(true);
+    const result = await onSave(qty);
+    setSaving(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setError(null);
+    setDraft(null);
+  }
+
+  const color = error
+    ? "border-red-700 text-red-300"
+    : value === 0
+      ? "border-zinc-800 text-zinc-500"
+      : tone === "plus"
+        ? "border-emerald-900 text-emerald-400"
+        : "border-red-900 text-red-400";
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={draft ?? (value === 0 ? "" : String(value))}
+      placeholder="0"
+      onFocus={() => setDraft((d) => d ?? (value === 0 ? "" : String(value)))}
+      onChange={(e) => {
+        setDraft(e.target.value.replace(/[^\d]/g, ""));
+        if (error) setError(null);
+      }}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+        if (e.key === "Escape") {
+          e.stopPropagation(); // undo the edit, don't close the report
+          setDraft(null);
+          setError(null);
+          const el = e.currentTarget;
+          requestAnimationFrame(() => el.blur());
+        }
+      }}
+      disabled={saving}
+      title={error ?? title}
+      aria-label={ariaLabel}
+      aria-invalid={error !== null}
+      className={`${compact ? "w-10 px-1 text-[9px]" : "w-16 px-1.5 text-xs"} py-0.5 rounded bg-zinc-950 border text-right tabular-nums placeholder:text-zinc-700 focus:outline-none focus:border-amber-500 disabled:opacity-50 ${color}`}
     />
   );
 }
