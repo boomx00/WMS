@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salesOrders, tambahanOrders } from "@/db/schema";
 import { inArray, ilike, or } from "drizzle-orm";
 import { getSoProgress } from "@/lib/soProgress";
+import { getSoDisplayLookup } from "@/lib/salesOrderTypes";
 
 // GET /api/sales-orders/search-any?q=...
 //
@@ -71,7 +72,10 @@ export async function GET(req: NextRequest) {
   // Picking and Shipping each show their own status (see lib/soProgress.ts).
   // This used to count every stock event — picks included — as shipped,
   // so a fully picked SO showed DONE in Shipping too.
-  const progress = await getSoProgress(allOrders.map((o) => o.id));
+  const [progress, soDisplayOf] = await Promise.all([
+    getSoProgress(allOrders.map((o) => o.id)),
+    getSoDisplayLookup(db),
+  ]);
 
   const result = allOrders
     .map((order) => {
@@ -79,6 +83,7 @@ export async function GET(req: NextRequest) {
       const matchNote = matchNoteByParentId.get(order.id);
       return {
         soNumber: order.soNumber,
+        ...soDisplayOf(order), // salesOrderTypeName, soDisplay ("SO - 202608000162")
         orderDate: order.orderDate,
         status: p.shipStatus, // kept for older PDA builds
         pickStatus: p.pickStatus,

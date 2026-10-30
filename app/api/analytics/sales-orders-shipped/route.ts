@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStockEvents, items, salesOrders } from "@/db/schema";
-import { eq, and, or, gte, lte, isNotNull, inArray } from "drizzle-orm";
+import { locationStockEvents, items, salesOrders, salesOrderTypes } from "@/db/schema";
+import { eq, and, inArray } from "drizzle-orm";
+import { getTruckTimesInWindow, NO_TRUCK_TIMES } from "@/lib/truckTimes";
 
 // GET /api/analytics/sales-orders-shipped?start=...&end=...
 //
-// Which sales orders were performed in a date range, and what left against
-// each one. "Performed in the range" is driven by the SO's own
-// truck_enter_time / truck_leave_time fields — not by SHIP event
-// timestamps — since those are the fields that actually record when the
-// order was worked (truck at the dock), independent of when individual
-// SHIP events happen to have been logged.
+// Which sales orders were worked in a date range, and what left against
+// each one. "Worked in the range" means the truck entered OR left inside
+// it, where (see lib/truckTimes.ts):
+//   truck enter = the first picking for the SO
+//   truck leave = the last shipping for the SO
+// so an order whose truck arrived before the range start but left inside
+// it (or vice versa) is still shown.
+//
+// Each order carries its document type (salesOrderTypeId / Name, null for
+// older untyped orders); the panel's type checkboxes filter on that.
 export async function GET(req: NextRequest) {
   const startParam = req.nextUrl.searchParams.get("start");
   const endParam = req.nextUrl.searchParams.get("end");
@@ -19,62 +24,50 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "start and end query params are required" }, { status: 400 });
   }
 
-  // truckEnterTime/truckLeaveTime are timezone-less timestamps holding the
-  // local wall-clock time (what the user sees is what's stored). So the
-  // range must be compared as wall-clock strings too — NOT converted to
-  // UTC, which would shift the window by the viewer's UTC offset.
-  // Expected format from the client: "YYYY-MM-DDTHH:mm" (datetime-local).
+  // The range is WIB wall-clock ("YYYY-MM-DDTHH:mm" from the datetime
+  // inputs), the same clock the truck times are shown in — not converted to
+  // UTC in the browser. lib/truckTimes.ts converts it for the query.
   const WALL_CLOCK = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/;
   if (!WALL_CLOCK.test(startParam) || !WALL_CLOCK.test(endParam)) {
     return NextResponse.json({ error: "Invalid date format" }, { status: 400 });
   }
-  const startIso = startParam.replace("T", " ");
-  const endIso = endParam.replace("T", " ");
+  // Minute precision: "From 08:00" starts at 08:00:00, "To 17:30"
+  // includes all of 17:30.
+  const startWall = startParam.replace("T", " ").slice(0, 16) + ":00";
+  const endWall = endParam.replace("T", " ").slice(0, 16) + ":59.999999";
 
-  const orders = await db
-    .select({
-      id: salesOrders.id,
-      soNumber: salesOrders.soNumber,
-      orderDate: salesOrders.orderDate,
-      truckEnterTime: salesOrders.truckEnterTime,
-      truckLeaveTime: salesOrders.truckLeaveTime,
-    })
-    .from(salesOrders)
-    // An order counts as "performed in the range" if its truck entered OR
-    // left within it — so a truck that arrived before the range start but
-    // left inside it (or vice versa) is still shown.
-    .where(
-      or(
-        and(
-          isNotNull(salesOrders.truckEnterTime),
-          gte(salesOrders.truckEnterTime, startIso),
-          lte(salesOrders.truckEnterTime, endIso)
-        ),
-        and(
-          isNotNull(salesOrders.truckLeaveTime),
-          gte(salesOrders.truckLeaveTime, startIso),
-          lte(salesOrders.truckLeaveTime, endIso)
-        )
-      )
-    );
+  const truckTimes = await getTruckTimesInWindow(db, startWall, endWall);
+  const orderIds = Array.from(truckTimes.keys());
 
-  if (orders.length === 0) {
+  if (orderIds.length === 0) {
     return NextResponse.json({ totalSalesOrders: 0, totalUnits: 0, totalSkus: 0, salesOrders: [] });
   }
 
-  const orderIds = orders.map((o) => o.id);
+  const [orders, shipEvents] = await Promise.all([
+    db
+      .select({
+        id: salesOrders.id,
+        soNumber: salesOrders.soNumber,
+        orderDate: salesOrders.orderDate,
+        salesOrderTypeId: salesOrders.salesOrderTypeId,
+        salesOrderTypeName: salesOrderTypes.name,
+      })
+      .from(salesOrders)
+      .leftJoin(salesOrderTypes, eq(salesOrders.salesOrderTypeId, salesOrderTypes.id))
+      .where(inArray(salesOrders.id, orderIds)),
 
-  const shipEvents = await db
-    .select({
-      salesOrderId: locationStockEvents.salesOrderId,
-      itemId: locationStockEvents.itemId,
-      itemSku: items.sku,
-      itemName: items.name,
-      quantity: locationStockEvents.quantity,
-    })
-    .from(locationStockEvents)
-    .innerJoin(items, eq(locationStockEvents.itemId, items.id))
-    .where(and(eq(locationStockEvents.type, "SHIP"), inArray(locationStockEvents.salesOrderId, orderIds)));
+    db
+      .select({
+        salesOrderId: locationStockEvents.salesOrderId,
+        itemId: locationStockEvents.itemId,
+        itemSku: items.sku,
+        itemName: items.name,
+        quantity: locationStockEvents.quantity,
+      })
+      .from(locationStockEvents)
+      .innerJoin(items, eq(locationStockEvents.itemId, items.id))
+      .where(and(eq(locationStockEvents.type, "SHIP"), inArray(locationStockEvents.salesOrderId, orderIds))),
+  ]);
 
   type LineItem = {
     itemId: number;
@@ -83,46 +76,47 @@ export async function GET(req: NextRequest) {
     quantity: number;
   };
 
+  // Shipment corrections are stored as a negative SHIP, so the plain sum is
+  // what actually left.
   const linesByOrder = new Map<number, Map<number, LineItem>>();
   for (const ev of shipEvents) {
     if (ev.salesOrderId == null) continue;
     if (!linesByOrder.has(ev.salesOrderId)) linesByOrder.set(ev.salesOrderId, new Map());
     const lines = linesByOrder.get(ev.salesOrderId)!;
-    const qty = Math.abs(ev.quantity);
     let line = lines.get(ev.itemId);
     if (!line) {
       line = { itemId: ev.itemId, itemSku: ev.itemSku, itemName: ev.itemName, quantity: 0 };
       lines.set(ev.itemId, line);
     }
-    line.quantity += qty;
+    line.quantity += ev.quantity;
   }
 
   const salesOrdersOut = orders
     .map((o) => {
-      const lines = Array.from(linesByOrder.get(o.id)?.values() ?? []).sort((a, b) =>
-        a.itemSku.localeCompare(b.itemSku)
-      );
+      const lines = Array.from(linesByOrder.get(o.id)?.values() ?? [])
+        .filter((l) => l.quantity !== 0)
+        .sort((a, b) => a.itemSku.localeCompare(b.itemSku));
       const totalQuantity = lines.reduce((sum, l) => sum + l.quantity, 0);
 
-      // Time needed = how long the truck was actually at the dock. Only
-      // computable once both ends are logged; still shown (as "—" for
-      // duration) if truck_leave_time hasn't been recorded yet.
-      const enterMs = o.truckEnterTime ? new Date(o.truckEnterTime).getTime() : null;
-      const leaveMs = o.truckLeaveTime ? new Date(o.truckLeaveTime).getTime() : null;
-      const durationMs = enterMs != null && leaveMs != null ? leaveMs - enterMs : null;
+      // Time needed = last ship − first pick. Still shown (as "—" for the
+      // duration) while the order is being picked and nothing has shipped.
+      const { truckEnterTime, truckLeaveTime, durationMs } = truckTimes.get(o.id) ?? NO_TRUCK_TIMES;
 
       return {
         salesOrderId: o.id,
         soNumber: o.soNumber,
+        salesOrderTypeId: o.salesOrderTypeId,
+        salesOrderTypeName: o.salesOrderTypeName,
         orderDate: o.orderDate,
-        truckEnterTime: o.truckEnterTime,
-        truckLeaveTime: o.truckLeaveTime,
+        truckEnterTime,
+        truckLeaveTime,
         durationMs,
         totalQuantity,
         skuCount: lines.length,
         lines,
       };
     })
+    // Wall-clock strings sort correctly as text.
     .sort((a, b) => {
       const at = a.truckEnterTime ?? a.truckLeaveTime ?? "";
       const bt = b.truckEnterTime ?? b.truckLeaveTime ?? "";
@@ -130,7 +124,7 @@ export async function GET(req: NextRequest) {
     });
 
   const totalUnits = salesOrdersOut.reduce((sum, o) => sum + o.totalQuantity, 0);
-  const totalSkus = new Set(shipEvents.map((e) => e.itemId)).size;
+  const totalSkus = new Set(salesOrdersOut.flatMap((o) => o.lines.map((l) => l.itemId))).size;
 
   return NextResponse.json({
     totalSalesOrders: salesOrdersOut.length,

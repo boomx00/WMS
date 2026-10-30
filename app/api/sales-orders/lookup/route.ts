@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items, palletEvents, pallets } from "@/db/schema";
 import { eq, and, sql, isNotNull } from "drizzle-orm";
+import { getSoDisplayLookup } from "@/lib/salesOrderTypes";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -49,8 +50,11 @@ const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.so
     return { ...line, shipped, remaining: line.quantity - shipped, status };
   });
 
+  const soDisplayOf = await getSoDisplayLookup(db);
+
   return NextResponse.json({
     soNumber: salesOrder.soNumber,
+    ...soDisplayOf(salesOrder), // salesOrderTypeName, soDisplay ("SO - 202608000162")
     orderDate: salesOrder.orderDate,
     items: result,
   });
@@ -61,11 +65,15 @@ const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.so
       id: salesOrders.id,
       soNumber: salesOrders.soNumber,
       orderDate: salesOrders.orderDate,
+      salesOrderTypeId: salesOrders.salesOrderTypeId,
     })
     .from(salesOrders)
     .where(isNotNull(salesOrders.assignedCheckerId))
 
-  return NextResponse.json(allSalesOrders);
+  const soDisplayOf = await getSoDisplayLookup(db);
+  return NextResponse.json(
+    allSalesOrders.map(({ salesOrderTypeId, ...o }) => ({ ...o, ...soDisplayOf({ ...o, salesOrderTypeId }) }))
+  );
   }
 
   

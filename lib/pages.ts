@@ -21,6 +21,7 @@ export const APP_PAGES: AppPage[] = [
   { path: "/location-stock", label: "Location Stock (v2)" },
   { path: "/total-stock", label: "Total Stock" },
   { path: "/sales-orders", label: "Sales Orders" },
+  { path: "/sales-order-types", label: "Sales Order Types" },
   { path: "/movement-history-v2", label: "Movement History (v2)" },
   { path: "/work-orders", label: "Work Orders" },
   { path: "/scan", label: "System Control" },
@@ -42,6 +43,7 @@ export type ActionKey =
   | "so.create"
   | "so.edit"
   | "so.tambahan"
+  | "so.types"
   | "locationStock.editOutboundWh"
   | "scan.inbound"
   | "scan.adjustLocation"
@@ -65,6 +67,12 @@ export const APP_ACTIONS: AppAction[] = [
     page: "/sales-orders",
     label: "Tambahan actions",
     hint: "Convert to SO, confirm leftover, return stock",
+  },
+  {
+    key: "so.types",
+    page: "/sales-order-types",
+    label: "Add and edit sales order types",
+    hint: "Document types like SO / HPT",
   },
   {
     key: "locationStock.editOutboundWh",

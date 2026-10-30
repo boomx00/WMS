@@ -8,9 +8,10 @@ import CreateSalesOrderForm from "./components/CreateSalesOrderForm";
 import EditSalesOrderForm from "./components/EditSalesOrderForm";
 import ShippedCell from "./components/ShippedCell";
 import DeleteSalesOrderDialog from "./components/DeleteSalesOrderDialog";
-import type { ItemOption, Order } from "./components/types";
+import type { ItemOption, Order, SalesOrderTypeOption } from "./components/types";
 import { formatTruckTime } from "./components/helpers";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
+import { SO_TYPE_SALES_PAGE_LABELS } from "@/lib/salesOrderTypeLabels";
 const OVERALL_STATUS_STYLES: Record<string, string> = {
   NOT_STARTED: "bg-zinc-800 text-zinc-400",
   PARTIAL: "bg-amber-950 text-amber-300",
@@ -30,6 +31,8 @@ export default function SalesOrdersClient({
   totalPages,
   totalCount,
   isAdmin,
+  salesOrderTypes,
+  typeFilter,
 }: {
   orders: Order[];
   allItems: ItemOption[];
@@ -37,6 +40,9 @@ export default function SalesOrdersClient({
   totalPages: number;
   totalCount: number;
   isAdmin: boolean;
+  salesOrderTypes: SalesOrderTypeOption[];
+  // "" = all, a type id, or "none" (orders with no type)
+  typeFilter: string;
 }) {
   const router = useRouter();
   const can = useCan();
@@ -50,7 +56,11 @@ export default function SalesOrdersClient({
   const [searching, setSearching] = useState(false);
   // The SO whose Delete window is open (Manager only).
   const [deletingSo, setDeletingSo] = useState<string | null>(null);
-    const labels = usePageLabels("sales_page");
+    const labels = usePageLabels("sales_page", SO_TYPE_SALES_PAGE_LABELS);
+  const typeNameById = useMemo(
+    () => new Map(salesOrderTypes.map((t) => [t.id, t.name])),
+    [salesOrderTypes]
+  );
   useEffect(() => {
     if (!search.trim()) {
       setSearchResults(null);
@@ -59,7 +69,8 @@ export default function SalesOrdersClient({
 
     const handle = setTimeout(async () => {
       setSearching(true);
-      const res = await fetch(`/api/sales-orders/search?q=${encodeURIComponent(search.trim())}`);
+      const typeParam = typeFilter ? `&type=${encodeURIComponent(typeFilter)}` : "";
+      const res = await fetch(`/api/sales-orders/search?q=${encodeURIComponent(search.trim())}${typeParam}`);
       setSearching(false);
       if (res.ok) {
         setSearchResults(await res.json());
@@ -67,11 +78,22 @@ export default function SalesOrdersClient({
     }, 300);
 
     return () => clearTimeout(handle);
-  }, [search]);
+  }, [search, typeFilter]);
 
   function goToPage(p: number) {
-    router.push(`/sales-orders?page=${p}`);
+    router.push(`/sales-orders?page=${p}${typeFilter ? `&type=${encodeURIComponent(typeFilter)}` : ""}`);
   }
+
+  // Switching the type filter starts again from page 1.
+  function setTypeFilter(value: string) {
+    router.push(value ? `/sales-orders?type=${encodeURIComponent(value)}` : "/sales-orders");
+  }
+
+  const typeFilterOptions = [
+    { value: "", label: labels.filter_all },
+    ...salesOrderTypes.map((t) => ({ value: String(t.id), label: t.name })),
+    { value: "none", label: labels.no_type },
+  ];
 
   function toggle(id: number) {
     setExpanded((prev) => {
@@ -107,9 +129,27 @@ export default function SalesOrdersClient({
       
       {canCreate && (
         <div className="mb-8">
-          <CreateSalesOrderForm allItems={allItems} />
+          <CreateSalesOrderForm allItems={allItems} salesOrderTypes={salesOrderTypes} />
         </div>
       )}
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <span className="text-xs text-zinc-500 mr-1">{labels.document_type}</span>
+        {typeFilterOptions.map((option) => (
+          <button
+            key={option.value || "all"}
+            type="button"
+            onClick={() => setTypeFilter(option.value)}
+            className={`px-3 py-1 rounded-md border text-xs font-mono transition-colors ${
+              typeFilter === option.value
+                ? "border-amber-500 bg-amber-500/10 text-amber-400"
+                : "border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80"
+            }`}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
 
       <input
         type="text"
@@ -175,7 +215,14 @@ export default function SalesOrdersClient({
                           ▶
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-amber-500">{order.soNumber}</td>
+                      <td className="px-4 py-3 font-mono text-amber-500">
+                        {order.salesOrderTypeId != null && typeNameById.has(order.salesOrderTypeId) && (
+                          <span className="mr-2 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300">
+                            {typeNameById.get(order.salesOrderTypeId)}
+                          </span>
+                        )}
+                        {order.soNumber}
+                      </td>
                       <td className="px-4 py-3 text-zinc-400">
                         {new Date(order.orderDate).toLocaleDateString()}
                       </td>
@@ -223,23 +270,25 @@ export default function SalesOrdersClient({
                             <EditSalesOrderForm
                               order={order}
                               allItems={allItems}
+                              salesOrderTypes={salesOrderTypes}
                               onDone={() => setEditingId(null)}
                             />
                           ) : (
                             <>
-                                                        <div className="flex gap-6 mb-3 text-xs">
+                            <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 mb-3 text-xs">
                               <div>
-                                <span className="text-zinc-500">Truck Enter: </span>
+                                <span className="text-zinc-500">{labels.truck_enter}: </span>
                                 <span className="text-zinc-300 font-mono">
                                   {formatTruckTime(order.truckEnterTime as string | null)}
                                 </span>
                               </div>
                               <div>
-                                <span className="text-zinc-500">Truck Leave: </span>
+                                <span className="text-zinc-500">{labels.truck_leave}: </span>
                                 <span className="text-zinc-300 font-mono">
                                   {formatTruckTime(order.truckLeaveTime as string | null)}
                                 </span>
                               </div>
+                              <div className="text-zinc-600">{labels.truck_times_note}</div>
                             </div>
                             <table className="w-full text-xs">
                               <thead>

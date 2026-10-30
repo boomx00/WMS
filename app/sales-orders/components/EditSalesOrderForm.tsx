@@ -3,25 +3,31 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import ItemPicker from "./ItemPicker";
-import { toDatetimeLocal } from "./helpers";
-import type { ItemOption, Order } from "./types";
+import type { ItemOption, Order, SalesOrderTypeOption } from "./types";
+import { usePageLabels } from "@/lib/hooks/usePageLabels";
+import { SO_TYPE_SALES_PAGE_LABELS } from "@/lib/salesOrderTypeLabels";
 
 export default function EditSalesOrderForm({
   order,
   allItems,
+  salesOrderTypes,
   onDone,
 }: {
   order: Order;
   allItems: ItemOption[];
+  salesOrderTypes: SalesOrderTypeOption[];
   onDone: () => void;
 }) {
   const router = useRouter();
+  const labels = usePageLabels("sales_page", SO_TYPE_SALES_PAGE_LABELS);
+  // Older orders have no type yet — saving one makes you choose.
+  const [salesOrderTypeId, setSalesOrderTypeId] = useState(
+    order.salesOrderTypeId != null ? String(order.salesOrderTypeId) : ""
+  );
   const [soNumber, setSoNumber] = useState(order.soNumber);
   const [orderDate, setOrderDate] = useState(
     new Date(order.orderDate).toISOString().slice(0, 10)
   );
-  const [truckEnterTime, setTruckEnterTime] = useState(toDatetimeLocal(order.truckEnterTime));
-  const [truckLeaveTime, setTruckLeaveTime] = useState(toDatetimeLocal(order.truckLeaveTime));
   const [lines, setLines] = useState(
     order.items.map((l) => ({ sku: l.itemSku, quantity: String(l.quantity) }))
   );
@@ -44,6 +50,11 @@ export default function EditSalesOrderForm({
     e.preventDefault();
     setError(null);
 
+    if (!salesOrderTypeId) {
+      setError(labels.choose_document_type);
+      return;
+    }
+
     const validLines = lines.filter((l) => l.sku && l.quantity);
     if (validLines.length === 0) {
       setError("Add at least one item with a SKU and quantity");
@@ -62,10 +73,9 @@ export default function EditSalesOrderForm({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         soNumber,
+        salesOrderTypeId: Number(salesOrderTypeId),
         orderDate,
         items: mergedLines,
-        truckEnterTime: truckEnterTime || null,
-        truckLeaveTime: truckLeaveTime || null,
       }),
     });
     setLoading(false);
@@ -83,8 +93,24 @@ export default function EditSalesOrderForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="flex gap-3 flex-wrap">
-        <div className="flex-1">
-          <label className="block text-xs text-zinc-500 mb-1">SO Number</label>
+        <div>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.document_type}</label>
+          <select
+            value={salesOrderTypeId}
+            onChange={(e) => setSalesOrderTypeId(e.target.value)}
+            className="min-w-36 px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm font-mono focus:outline-none focus:border-amber-500"
+            required
+          >
+            <option value="">{labels.choose_document_type}</option>
+            {salesOrderTypes.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.description ? `${t.name} — ${t.description}` : t.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-48">
+          <label className="block text-xs text-zinc-500 mb-1">{labels.so_number}</label>
           <input
             type="text"
             value={soNumber}
@@ -94,31 +120,13 @@ export default function EditSalesOrderForm({
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">Date</label>
+          <label className="block text-xs text-zinc-500 mb-1">{labels.date}</label>
           <input
             type="date"
             value={orderDate}
             onChange={(e) => setOrderDate(e.target.value)}
             className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
             required
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-zinc-500 mb-1">Truck Enter</label>
-          <input
-            type="datetime-local"
-            value={truckEnterTime}
-            onChange={(e) => setTruckEnterTime(e.target.value)}
-            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-zinc-500 mb-1">Truck Leave</label>
-          <input
-            type="datetime-local"
-            value={truckLeaveTime}
-            onChange={(e) => setTruckLeaveTime(e.target.value)}
-            className="px-3 py-2 rounded-md bg-zinc-900 border border-zinc-800 text-sm focus:outline-none focus:border-amber-500"
           />
         </div>
       </div>
@@ -165,17 +173,17 @@ export default function EditSalesOrderForm({
       <div className="flex gap-2">
         <button
           type="submit"
-          disabled={loading || !soNumber}
+          disabled={loading || !soNumber || !salesOrderTypeId}
           className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
         >
-          {loading ? "Saving..." : "Save Changes"}
+          {loading ? labels.saving : labels.save_changes}
         </button>
         <button
           type="button"
           onClick={onDone}
           className="px-4 py-2 rounded-md border border-zinc-800 text-zinc-400 text-sm hover:bg-zinc-900 transition-colors"
         >
-          Cancel
+          {labels.cancel}
         </button>
       </div>
 

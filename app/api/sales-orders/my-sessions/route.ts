@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, palletEvents, pallets } from "@/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
+import { getSoDisplayLookup } from "@/lib/salesOrderTypes";
 
 export async function GET() {
   const session = await getSession();
@@ -16,6 +17,8 @@ export async function GET() {
     .where(eq(salesOrders.assignedCheckerId, session.userId))
     .orderBy(desc(salesOrders.createdAt))
     .limit(5);
+
+  const soDisplayOf = await getSoDisplayLookup(db);
 
   const result = await Promise.all(
     orders.map(async (order) => {
@@ -48,6 +51,7 @@ export async function GET() {
 
       return {
         soNumber: order.soNumber,
+        ...soDisplayOf(order), // salesOrderTypeName, soDisplay ("SO - 202608000162")
         orderDate: order.orderDate,
         status,
       };

@@ -4,9 +4,12 @@ import { salesOrders, salesOrderItems, items, palletEvents, pallets } from "@/db
 import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { denyUnlessAllowed } from "@/lib/pagePermissions";
+import { resolveSalesOrderTypeId } from "@/lib/salesOrderTypes";
 
 // PATCH /api/sales-orders/:soNumber
-// body: { soNumber, orderDate, items: [{ sku, quantity }], truckEnterTime?, truckLeaveTime? }
+// body: { soNumber, salesOrderTypeId, orderDate, items: [{ sku, quantity }] }
+// Truck enter / leave can't be edited — they're worked out from the first
+// pick / last ship (lib/truckTimes.ts).
 // Replaces the sales order's header and line items wholesale. Blocks any
 // item's new quantity from dropping below what's already been shipped
 // against it, and blocks removing an item entirely if anything has already
@@ -37,8 +40,6 @@ export async function PATCH(
 
   const body = await req.json();
   const { soNumber, orderDate, items: lineItems } = body;
-  const truckEnterTime = body.truckEnterTime || null;
-  const truckLeaveTime = body.truckLeaveTime || null;
 
   if (!soNumber || !orderDate || !Array.isArray(lineItems) || lineItems.length === 0) {
     return NextResponse.json(
@@ -47,11 +48,9 @@ export async function PATCH(
     );
   }
 
-  if (truckEnterTime && truckLeaveTime && truckLeaveTime < truckEnterTime) {
-    return NextResponse.json(
-      { error: "Truck leave time can't be before truck enter time" },
-      { status: 400 }
-    );
+  const type = await resolveSalesOrderTypeId(db, body.salesOrderTypeId);
+  if ("error" in type) {
+    return NextResponse.json({ error: type.error }, { status: type.status });
   }
 
   // Resolve and merge duplicate SKUs, same as creation.
@@ -107,7 +106,7 @@ export async function PATCH(
   const result = await db.transaction(async (tx) => {
     const [updatedOrder] = await tx
       .update(salesOrders)
-      .set({ soNumber, orderDate: new Date(orderDate), truckEnterTime, truckLeaveTime })
+      .set({ soNumber, salesOrderTypeId: type.id, orderDate: new Date(orderDate) })
       .where(eq(salesOrders.id, orderId))
       .returning();
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items, locationStockEvents } from "@/db/schema";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
+import { getSoDisplayLookup } from "@/lib/salesOrderTypes";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -63,5 +64,10 @@ export async function GET(req: NextRequest) {
     };
   });
 
-  return NextResponse.json({ soNumber: salesOrder.soNumber, items: result });
+  const soDisplayOf = await getSoDisplayLookup(db);
+  return NextResponse.json({
+    soNumber: salesOrder.soNumber,
+    ...soDisplayOf(salesOrder), // salesOrderTypeName, soDisplay ("SO - 202608000162")
+    items: result,
+  });
 }

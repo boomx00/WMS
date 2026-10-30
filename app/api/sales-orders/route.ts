@@ -4,6 +4,7 @@ import { salesOrders, salesOrderItems, items } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { denyUnlessAllowed } from "@/lib/pagePermissions";
+import { resolveSalesOrderTypeId } from "@/lib/salesOrderTypes";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -39,7 +40,9 @@ export async function GET() {
 }
 
 // POST /api/sales-orders - create a sales order with line items
-// body: { soNumber, orderDate, items: [{ sku, quantity }], truckEnterTime?, truckLeaveTime? }
+// body: { soNumber, salesOrderTypeId, orderDate, items: [{ sku, quantity }] }
+// Truck enter / leave aren't set here any more — they're worked out from
+// the first pick / last ship (lib/truckTimes.ts).
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -53,8 +56,6 @@ export async function POST(req: NextRequest) {
   const soNumber = sanitize(body.soNumber ?? "");
   const orderDate = body.orderDate;
   const lineItems = Array.isArray(body.items) ? body.items : [];
-  const truckEnterTime = body.truckEnterTime || null;
-  const truckLeaveTime = body.truckLeaveTime || null;
 
   if (!soNumber || !orderDate || lineItems.length === 0) {
     return NextResponse.json(
@@ -63,11 +64,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (truckEnterTime && truckLeaveTime && truckLeaveTime < truckEnterTime) {
-    return NextResponse.json(
-      { error: "Truck leave time can't be before truck enter time" },
-      { status: 400 }
-    );
+  const type = await resolveSalesOrderTypeId(db, body.salesOrderTypeId);
+  if ("error" in type) {
+    return NextResponse.json({ error: type.error }, { status: type.status });
   }
 
   // Resolve every SKU up front, before writing anything. Duplicate SKUs
@@ -93,7 +92,7 @@ export async function POST(req: NextRequest) {
   const result = await db.transaction(async (tx) => {
     const [order] = await tx
       .insert(salesOrders)
-      .values({ soNumber, orderDate: new Date(orderDate), truckEnterTime, truckLeaveTime })
+      .values({ soNumber, salesOrderTypeId: type.id, orderDate: new Date(orderDate) })
       .returning();
 
     await tx.insert(salesOrderItems).values(

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { useLanguage } from "@/lib/LanguageContext";
 import { LANGUAGE_OPTIONS } from "@/lib/pageLabels";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { canAccessPath, type PageAccess } from "@/lib/pages";
+import { SO_TYPE_NAVBAR_LABELS } from "@/lib/salesOrderTypeLabels";
 
 // const navItems = [
 //   { href: "/", label: "Inventory" },
@@ -28,6 +30,8 @@ type NavItems =
   | "Location_Stock"
   | "Total_Stock"
   | "Sales_Orders"
+  | "Sales_Order_List"
+  | "Sales_Order_Types"
   | "Movement_History"
   | "Work_Orders"
   | "System_Control"
@@ -50,6 +54,15 @@ type MasterItems =
   | "Role_List"
   | "Permissions"
 
+type NavLink = { key: NavItems; label: string; href: string }
+// An entry with children is a dropdown (e.g. Sales Orders → list / types).
+type NavEntry = NavLink & { children?: NavLink[] }
+
+function isCurrent(pathname: string | null, href: string): boolean {
+  if (!pathname) return false
+  return pathname === href || pathname.startsWith(`${href}/`)
+}
+
 const adminItems = [
   { href: "/items", label: "Items" },
   { href: "/locations", label: "Locations" },
@@ -70,8 +83,9 @@ export default function SiteNav({
 }) {
   const [open, setOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const pathname = usePathname();
   const { language, setLanguage } = useLanguage();
-  const labels = usePageLabels("navbar")
+  const labels = usePageLabels("navbar", SO_TYPE_NAVBAR_LABELS)
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -84,11 +98,14 @@ export default function SiteNav({
 
 
 
-  const navItem:{key: NavItems; label: string, href: string}[] = [
+  const navItem: NavEntry[] = [
     {key: "HeatMap", label: labels.heat_map, href:"/"},
     {key: "Location_Stock", label: labels.location_stock, href:"/location-stock"},
     {key: "Total_Stock", label: labels.total_stock, href:"/total-stock"},
-    {key: "Sales_Orders", label: labels.sales_order, href:"/sales-orders"},
+    {key: "Sales_Orders", label: labels.sales_order, href:"/sales-orders", children: [
+      {key: "Sales_Order_List", label: labels.sales_order_list, href:"/sales-orders"},
+      {key: "Sales_Order_Types", label: labels.sales_order_types, href:"/sales-order-types"},
+    ]},
     {key: "Movement_History", label: labels.movement_history, href:"/movement-history-v2"},
     {key: "Work_Orders", label: labels.work_order, href:"/work-orders"},
     {key: "System_Control", label: labels.system_control, href:"/scan"},
@@ -107,7 +124,35 @@ export default function SiteNav({
     {key: "Permissions", label: labels.permissions, href:"/permissions"},
   ]
 
-  const visibleNavItems = navItem.filter((item) => !access || canAccessPath(item.href, access))
+  const canSee = (href: string) => !access || canAccessPath(href, access)
+
+  // A dropdown keeps only the children the role can open. With just one
+  // left it's shown as a plain link; with none it's hidden.
+  const visibleNavItems: NavEntry[] = navItem.flatMap((item): NavEntry[] => {
+    if (!item.children) return canSee(item.href) ? [item] : []
+    const children = item.children.filter((child) => canSee(child.href))
+    if (children.length === 0) return []
+    if (children.length === 1) return [{ key: item.key, label: item.label, href: children[0].href }]
+    return [{ ...item, children }]
+  })
+
+  // Dropdowns start open when the current page is one of their children.
+  const [openGroups, setOpenGroups] = useState<Set<NavItems>>(
+    () =>
+      new Set(
+        navItem
+          .filter((item) => item.children?.some((child) => isCurrent(pathname, child.href)))
+          .map((item) => item.key)
+      )
+  )
+  function toggleGroup(key: NavItems) {
+    setOpenGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   const visibleAdminItems = masterItem.filter((item) => !access || canAccessPath(item.href, access))
 
@@ -142,15 +187,25 @@ export default function SiteNav({
 
         <nav className="flex-1 px-3 py-4 space-y-1">
           {/* Main navigation */}
-          {visibleNavItems.map((item) => (
-            <a
-              key={item.key}
-              href={item.href}
-              className="block px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
-            >
-              {item.label}
-            </a>
-          ))}
+          {visibleNavItems.map((item) =>
+            item.children ? (
+              <NavDropdown
+                key={item.key}
+                label={item.label}
+                items={item.children}
+                open={openGroups.has(item.key)}
+                onToggle={() => toggleGroup(item.key)}
+              />
+            ) : (
+              <a
+                key={item.key}
+                href={item.href}
+                className="block px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+              >
+                {item.label}
+              </a>
+            )
+          )}
 
           {/* Administration dropdown — hidden if the role can't open any of it */}
           {visibleAdminItems.length > 0 && (
@@ -286,16 +341,27 @@ export default function SiteNav({
         {open && (
           <nav className="border-t border-zinc-800 px-3 py-3 space-y-1 max-h-[calc(100vh-57px)] overflow-y-auto">
             {/* Main navigation */}
-            {visibleNavItems.map((item) => (
-              <a
-                key={item.href}
-                href={item.href}
-                onClick={() => setOpen(false)}
-                className="block px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
-              >
-                {item.label}
-              </a>
-            ))}
+            {visibleNavItems.map((item) =>
+              item.children ? (
+                <NavDropdown
+                  key={item.key}
+                  label={item.label}
+                  items={item.children}
+                  open={openGroups.has(item.key)}
+                  onToggle={() => toggleGroup(item.key)}
+                  onNavigate={() => setOpen(false)}
+                />
+              ) : (
+                <a
+                  key={item.key}
+                  href={item.href}
+                  onClick={() => setOpen(false)}
+                  className="block px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+                >
+                  {item.label}
+                </a>
+              )
+            )}
 
             {/* Administration dropdown — hidden if the role can't open any of it */}
             {visibleAdminItems.length > 0 && (
@@ -376,3 +442,54 @@ function LanguageSwitcher({
   );
 }
 
+// A collapsible group in the nav, styled like Master Data.
+function NavDropdown({
+  label,
+  items,
+  open,
+  onToggle,
+  onNavigate,
+}: {
+  label: string;
+  items: NavLink[];
+  open: boolean;
+  onToggle: () => void;
+  onNavigate?: () => void;
+}) {
+  return (
+    <div>
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between px-3 py-2 rounded-md text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+      >
+        <span>{label}</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="ml-3 mt-1 space-y-1 border-l border-zinc-800 pl-2">
+          {items.map((item) => (
+            <a
+              key={item.key}
+              href={item.href}
+              onClick={onNavigate}
+              className="block px-3 py-2 rounded-md text-sm text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800/80 transition-colors"
+            >
+              {item.label}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -5,21 +5,32 @@ import SalesOrdersClient from "./SalesOrdersClient";
 import { sessionIsSuper } from "@/lib/auth";
 import { getPickedForSoQuantities } from "@/lib/pickedForSo";
 import { tambahanOrders } from "@/db/schema";
+import { getTruckTimes, NO_TRUCK_TIMES } from "@/lib/truckTimes";
+import {
+  getSalesOrderTypes,
+  parseTypeFilter,
+  typeFilterCondition,
+  type SalesOrderTypeFilter,
+} from "@/lib/salesOrderTypes";
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 50;
 
-async function getTotalOrderCount() {
-  const [row] = await db.select({ count: sql<number>`count(*)::int` }).from(salesOrders);
+async function getTotalOrderCount(typeFilter: SalesOrderTypeFilter) {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(salesOrders)
+    .where(typeFilterCondition(typeFilter));
   return row.count;
 }
 
-async function getSalesOrdersForPage(page: number) {
+async function getSalesOrdersForPage(page: number, typeFilter: SalesOrderTypeFilter) {
   const offset = (page - 1) * PAGE_SIZE;
 
   const orders = await db
     .select()
     .from(salesOrders)
+    .where(typeFilterCondition(typeFilter))
     .orderBy(desc(salesOrders.orderDate))
     .limit(PAGE_SIZE)
     .offset(offset);
@@ -31,7 +42,7 @@ async function getSalesOrdersForPage(page: number) {
   const { palletEvents, pallets, locationStockEvents, locations, users } = await import("@/db/schema");
 
   // All independent — run in parallel instead of one after another.
-  const [lines, pickedMap, activeTambahanRows, pickSourceRows, shippedByRows] = await Promise.all([
+  const [lines, pickedMap, activeTambahanRows, pickSourceRows, shippedByRows, truckTimes] = await Promise.all([
     db
       .select({
         salesOrderId: salesOrderItems.salesOrderId,
@@ -93,6 +104,9 @@ async function getSalesOrdersForPage(page: number) {
         sql`${palletEvents.type} = 'OUTBOUND' AND ${inArray(palletEvents.salesOrderId, orderIds)}`
       )
       .groupBy(palletEvents.salesOrderId, pallets.itemId, users.username),
+
+    // Truck enter = first pick, truck leave = last ship (from the ledger).
+    getTruckTimes(db, orderIds),
   ]);
 
   const activeTambahanSet = new Set(activeTambahanRows.map((r) => r.parentSalesOrderId));
@@ -157,23 +171,28 @@ async function getSalesOrdersForPage(page: number) {
       new Set(orderItems.flatMap((l) => l.pickedFrom.map((p) => p.username)))
     );
 
-    return { ...o, items: orderItems, overallStatus, pickedByUsers };
+    const { truckEnterTime, truckLeaveTime } = truckTimes.get(o.id) ?? NO_TRUCK_TIMES;
+
+    return { ...o, truckEnterTime, truckLeaveTime, items: orderItems, overallStatus, pickedByUsers };
   });
 }
 
 export default async function SalesOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; type?: string }>;
 }) {
-  const { page: pageParam } = await searchParams;
+  const { page: pageParam, type: typeParam } = await searchParams;
   const page = Math.max(1, Number(pageParam) || 1);
+  // ?type=<id> / ?type=none — the type filter buttons on the page.
+  const typeFilter = parseTypeFilter(typeParam);
 
-const [totalCount, orders, allItems, isAdmin] = await Promise.all([
-  getTotalOrderCount(),
-  getSalesOrdersForPage(page),
+const [totalCount, orders, allItems, isAdmin, salesOrderTypes] = await Promise.all([
+  getTotalOrderCount(typeFilter),
+  getSalesOrdersForPage(page, typeFilter),
   db.select({ sku: items.sku, name: items.name }).from(items).orderBy(items.sku),
   sessionIsSuper(),
+  getSalesOrderTypes(db),
 ]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -188,6 +207,8 @@ const [totalCount, orders, allItems, isAdmin] = await Promise.all([
   totalPages={totalPages}
   totalCount={totalCount}
   isAdmin={isAdmin}
+  salesOrderTypes={salesOrderTypes}
+  typeFilter={typeFilter === null ? "" : String(typeFilter)}
 />
     </div>
   );

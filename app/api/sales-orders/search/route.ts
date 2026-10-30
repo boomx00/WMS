@@ -14,7 +14,9 @@ import {
 import { eq, and, inArray, ilike, desc, sql } from "drizzle-orm";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
-// GET /api/sales-orders/search?q=...
+import { getTruckTimes, NO_TRUCK_TIMES } from "@/lib/truckTimes";
+import { parseTypeFilter, typeFilterCondition } from "@/lib/salesOrderTypes";
+// GET /api/sales-orders/search?q=...[&type=<id>|none]
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
 
@@ -25,7 +27,12 @@ export async function GET(req: NextRequest) {
   const matchedOrders = await db
     .select()
     .from(salesOrders)
-    .where(ilike(salesOrders.soNumber, `%${q}%`))
+    .where(
+      and(
+        ilike(salesOrders.soNumber, `%${q}%`),
+        typeFilterCondition(parseTypeFilter(req.nextUrl.searchParams.get("type")))
+      )
+    )
     .orderBy(desc(salesOrders.orderDate))
     .limit(50);
 
@@ -34,6 +41,9 @@ export async function GET(req: NextRequest) {
   }
 
   const orderIds = matchedOrders.map((o) => o.id);
+
+  // Truck enter = first pick, truck leave = last ship (from the ledger).
+  const truckTimes = await getTruckTimes(db, orderIds);
 
   const lines = await db
     .select({
@@ -123,7 +133,9 @@ const withStatus = await Promise.all(
       new Set(withStatus.flatMap((l) => l.pickedFrom.map((p: any) => p.username)))
     );
 
-    return { ...o, items: withStatus, overallStatus, pickedByUsers };
+    const { truckEnterTime, truckLeaveTime } = truckTimes.get(o.id) ?? NO_TRUCK_TIMES;
+
+    return { ...o, truckEnterTime, truckLeaveTime, items: withStatus, overallStatus, pickedByUsers };
   })
 );
 
