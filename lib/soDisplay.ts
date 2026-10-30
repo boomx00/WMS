@@ -1,19 +1,23 @@
-// How a sales order is shown on the PDA (and anywhere else that wants it):
-// "<document type> - <document number>", e.g. "SO - 202610000658" for the
-// stored SO number "SO-202610000658", or "HPT - 202610000506" for
-// "HPT202610000506". Safe to import from client code.
+// How a sales order is shown on the PDA (soDisplay): its document number
+// written with the type's SO Number Prefix exactly as set on Sales Orders →
+// Sales Order Types, e.g. "SO-202610000658" (prefix "SO-") or
+// "HPT202610000506" (prefix "HPT"). Safe to import from client code.
 //
-// The number part drops the type's own start so it isn't shown twice:
-// the type's number prefix ("SO-") if the SO number starts with it,
-// otherwise the type name if the number starts with it followed by a
-// non-letter ("HPT2026…", "MDE 0001", "hpt/0004"). Then any leading
-// dashes / slashes / spaces go. Orders with no type are shown as their
-// plain SO number.
+// The number part is what's left after the type's own start — its prefix
+// ("SO-"), or its name followed by a non-letter ("hpt-0001", "MDE 0001") —
+// minus any leading dashes / slashes / spaces. So older or hand-typed
+// numbers come out in the same format as new ones:
+//   "hpt-202610000001" with prefix "HPT"  → "HPT202610000001"
+//   "MDE 202610000002" with prefix "MDE-" → "MDE-202610000002"
+//   "202610000005"     with prefix "SO-"  → "SO-202610000005"
+// A type with no prefix shows the stored number (with the type name in
+// front if the number doesn't already start with it). Orders with no type
+// are shown as their plain SO number.
 
 export type SoTypeForDisplay = { name: string; numberPrefix: string | null };
 
 // Non-breaking and zero-width spaces sneak in from pasted paperwork.
-const INVISIBLE = /[ ​‌‍﻿]/g;
+const INVISIBLE = /[\u00A0\u200B\u200C\u200D\uFEFF]/g;
 
 function stripStart(value: string, start: string): string | null {
   return start && value.toLowerCase().startsWith(start.toLowerCase()) ? value.slice(start.length) : null;
@@ -23,13 +27,22 @@ export function formatSoDisplay(soNumber: string, type: SoTypeForDisplay | null 
   if (!type) return soNumber;
 
   const clean = soNumber.replace(INVISIBLE, " ").trim();
-  const afterName = stripStart(clean, type.name);
-  const rest =
-    stripStart(clean, (type.numberPrefix ?? "").trim()) ??
-    // The name only counts as a whole word: "SO" must not eat "SOX…".
-    (afterName !== null && !/^[A-Za-z]/.test(afterName) ? afterName : null) ??
-    clean;
+  // Kept as set on the web (a trailing space can be part of the format);
+  // compared without surrounding spaces.
+  const prefix = type.numberPrefix && type.numberPrefix.trim() ? type.numberPrefix : null;
 
-  const number = rest.replace(/^[\s\-/]+/, "") || clean;
-  return `${type.name} - ${number}`;
+  const afterPrefix = prefix ? stripStart(clean, prefix.trim()) : null;
+  const afterName = stripStart(clean, type.name);
+  // The name only counts as a whole word: "SO" must not eat "SOX…".
+  const rest = afterPrefix ?? (afterName !== null && !/^[A-Za-z]/.test(afterName) ? afterName : null);
+
+  if (!prefix) {
+    return rest !== null ? clean : `${type.name} ${clean}`;
+  }
+
+  // Doesn't start with the type at all (e.g. a bare "202610000005"): the
+  // whole stored number is the number part.
+  const number = (rest ?? clean).replace(/^[\s\-/]+/, "");
+  if (!number) return clean;
+  return `${prefix}${number}`;
 }
