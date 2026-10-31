@@ -3,6 +3,7 @@
 // a new customizable page/string later just means adding an entry here
 // and using usePageLabels(page).key wherever that string is rendered.
     import { STOCK_OPNAME_SUMMARY_LABELS } from "./stockOpnameSummaryLabels";
+import { DASHBOARD_LABELS } from "./dashboardLabels";
 
 export const DEFAULT_LABELS = {
     stock_opname: {
@@ -104,6 +105,7 @@ export const DEFAULT_LABELS = {
     
   },
   navbar: {
+    dashboard: "Dashboard",
     heat_map: "Heat Map",
     location_stock: "Location Stock",
     total_stock: "Total Stock",
@@ -121,6 +123,9 @@ export const DEFAULT_LABELS = {
     user_list: "User List",
     role_list: "Role List",
     permissions: "Permissions"
+  },
+  dashboard_page: {
+    ...DASHBOARD_LABELS,
   },
   heatmap_page:{
     inventory_header: "Inventory Heat Map",
@@ -456,6 +461,7 @@ export type LabelKey<P extends PageKey> = keyof (typeof DEFAULT_LABELS)[P];
 
 export const PAGE_OPTIONS: { key: PageKey; label: string }[] = [
     { key: "navbar", label: "NavBar"},
+    { key: "dashboard_page", label: "Dashboard"},
     { key: "heatmap_page", label: "Heat Map"},
     { key: "location_stock", label: "Location Stock"},
         { key: "total_stock", label: "Total Stock"},

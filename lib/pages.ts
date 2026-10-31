@@ -17,7 +17,8 @@ export type AppPage = {
 };
 
 export const APP_PAGES: AppPage[] = [
-  { path: "/", label: "Inventory" },
+  { path: "/", label: "Dashboard" },
+  { path: "/heatmap", label: "Heat Map" },
   { path: "/location-stock", label: "Location Stock (v2)" },
   { path: "/total-stock", label: "Total Stock" },
   { path: "/sales-orders", label: "Sales Orders" },

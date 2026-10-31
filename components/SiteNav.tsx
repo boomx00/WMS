@@ -26,6 +26,7 @@ import { SO_TYPE_NAVBAR_LABELS } from "@/lib/salesOrderTypeLabels";
 // ];
 
 type NavItems =
+  | "Dashboard"
   | "HeatMap"
   | "Location_Stock"
   | "Total_Stock"
@@ -99,7 +100,8 @@ export default function SiteNav({
 
 
   const navItem: NavEntry[] = [
-    {key: "HeatMap", label: labels.heat_map, href:"/"},
+    {key: "Dashboard", label: labels.dashboard, href:"/"},
+    {key: "HeatMap", label: labels.heat_map, href:"/heatmap"},
     {key: "Location_Stock", label: labels.location_stock, href:"/location-stock"},
     {key: "Total_Stock", label: labels.total_stock, href:"/total-stock"},
     {key: "Sales_Orders", label: labels.sales_order, href:"/sales-orders", children: [

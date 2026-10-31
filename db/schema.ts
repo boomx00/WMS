@@ -495,6 +495,10 @@ export const settings = pgTable("settings", {
   // SO / Tambahan it was picked for. Off = staging stock is one shared pool
   // any order can ship from (picking still counts per SO).
   markingEnabled: boolean("marking_enabled").notNull().default(true),
+  // Office hour: when the Dashboard's office day starts, in minutes after
+  // midnight WIB (420 = 07:00). Each day runs from this time to the same
+  // time the next day — production works 07:00 → 07:00.
+  officeDayStartMinutes: integer("office_day_start_minutes").notNull().default(420),
 });
 export const itemLedgerAnchors = pgTable(
   "item_ledger_anchors",

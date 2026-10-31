@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { settings } from "@/db/schema";
 import { DEFAULT_LEDGER_START_AT } from "@/lib/ledger";
+import { DEFAULT_OFFICE_DAY_START_MINUTES } from "@/lib/officeDay";
 import { getPurposeLocations } from "@/lib/locationRules";
 import { getWarehouses } from "@/lib/warehouses";
 import type { WarehouseDefaults } from "./DefaultLocationsSetting";
@@ -22,6 +23,7 @@ async function getSettings() {
     ledgerStartAt: (row?.ledgerStartAt ?? DEFAULT_LEDGER_START_AT).toISOString(),
     ledgerStartIsDefault: !row?.ledgerStartAt,
     markingEnabled: row?.markingEnabled ?? true,
+    officeDayStartMinutes: row?.officeDayStartMinutes ?? DEFAULT_OFFICE_DAY_START_MINUTES,
   };
 }
 

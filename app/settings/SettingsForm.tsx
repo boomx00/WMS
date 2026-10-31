@@ -6,6 +6,8 @@ import StockColumnsSettings from "./StockColumnsSettings";
 import DefaultLocationsSetting, { MarkingSetting, type WarehouseDefaults } from "./DefaultLocationsSetting";
 import { useCan } from "@/lib/AccessContext";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
+import { formatOfficeHour } from "@/lib/officeDay";
+import { OFFICE_HOUR_SETTINGS_LABELS } from "@/lib/dashboardLabels";
 export default function SettingsForm({
   initial,
   warehouses,
@@ -21,6 +23,7 @@ export default function SettingsForm({
     ledgerStartAt: string; // ISO, UTC
     ledgerStartIsDefault: boolean;
     markingEnabled: boolean;
+    officeDayStartMinutes: number; // minutes after midnight WIB, 420 = 07:00
   };
   warehouses: WarehouseDefaults[];
 }) {
@@ -99,6 +102,8 @@ export default function SettingsForm({
               {labels.access_information}
             </p>
           )}
+          <OfficeHourSetting readOnly={!canEdit} initialMinutes={initial.officeDayStartMinutes} />
+
           <LedgerStartSetting
             readOnly={!canEdit}
             initialIso={initial.ledgerStartAt}
@@ -409,6 +414,106 @@ const labels = usePageLabels("settings_page")
             className="px-3 py-1.5 rounded-md border border-zinc-700 text-sm text-zinc-400 hover:text-zinc-100 disabled:opacity-40"
           >
             {labels.reset}
+          </button>
+        )}
+        {message && (
+          <span className={`text-xs ${message.kind === "ok" ? "text-emerald-400" : "text-red-400"}`}>
+            {message.text}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Office hour: when the Dashboard's office day starts (WIB). Each day runs
+// from this time to the same time the next day, e.g. 07:00 → 07:00.
+const OFFICE_HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+const OFFICE_MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
+
+function OfficeHourSetting({ initialMinutes, readOnly }: { initialMinutes: number; readOnly: boolean }) {
+  const labels = usePageLabels("settings_page", OFFICE_HOUR_SETTINGS_LABELS);
+  const [saved, setSaved] = useState(initialMinutes);
+  const [hour, setHour] = useState(Math.floor(initialMinutes / 60));
+  const [minute, setMinute] = useState(initialMinutes % 60);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+
+  const value = hour * 60 + minute;
+  const dirty = value !== saved;
+
+  async function handleSave() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ officeDayStartMinutes: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save");
+      setSaved(data.officeDayStartMinutes ?? value);
+      setMessage({ kind: "ok", text: labels.office_hour_saved });
+    } catch (err) {
+      setMessage({ kind: "error", text: err instanceof Error ? err.message : "Failed to save" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fieldClass =
+    "px-2 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-sm text-zinc-100 focus:outline-none focus:border-amber-500 disabled:opacity-60";
+
+  return (
+    <div className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30">
+      <div className="text-sm font-medium">{labels.office_hour}</div>
+      <p className="text-xs text-zinc-500 mt-1 max-w-sm">{labels.office_hour_description}</p>
+
+      <div className="flex flex-wrap items-center gap-2 mt-4">
+        <select
+          value={hour}
+          onChange={(e) => {
+            setHour(Number(e.target.value));
+            setMessage(null);
+          }}
+          disabled={readOnly}
+          aria-label="Hour (24-hour)"
+          className={fieldClass}
+        >
+          {OFFICE_HOURS.map((h, i) => (
+            <option key={h} value={i}>
+              {h}
+            </option>
+          ))}
+        </select>
+        <span className="text-zinc-500">:</span>
+        <select
+          value={minute}
+          onChange={(e) => {
+            setMinute(Number(e.target.value));
+            setMessage(null);
+          }}
+          disabled={readOnly}
+          aria-label="Minute"
+          className={fieldClass}
+        >
+          {OFFICE_MINUTES.map((m, i) => (
+            <option key={m} value={i}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-zinc-500">
+          → {formatOfficeHour(value)} {labels.office_hour_next_day}
+        </span>
+        {!readOnly && (
+          <button
+            onClick={handleSave}
+            disabled={saving || !dirty}
+            className="px-3 py-1.5 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium disabled:opacity-40"
+          >
+            {saving ? "Saving…" : labels.save}
           </button>
         )}
         {message && (
