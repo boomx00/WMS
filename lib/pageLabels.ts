@@ -170,7 +170,8 @@ export const DEFAULT_LABELS = {
     delete_total: "Total back to {floor}",
     delete_confirm: "Delete {so}",
     deleting: "Deleting…",
-    delete_failed: "Failed to delete"
+    delete_failed: "Failed to delete",
+    ...STOCK_OPNAME_SUMMARY_LABELS
   },
   movement_history_page:{
     page_header:"Movement History",
@@ -461,6 +462,7 @@ export const PAGE_OPTIONS: { key: PageKey; label: string }[] = [
         { key: "total_stock", label: "Total Stock"},
     {key:"work_orders_page", label: "Work Order"},
          { key: "sales_page", label: "Sales Page"},
+         { key: "analytics", label: "Analytics"},
 
     { key: "stock_opname", label: "Stock Opname" }, 
     { key: "scan", label: "System Control"},

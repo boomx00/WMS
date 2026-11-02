@@ -8,6 +8,7 @@ import CreateSalesOrderForm from "./components/CreateSalesOrderForm";
 import EditSalesOrderForm from "./components/EditSalesOrderForm";
 import ShippedCell from "./components/ShippedCell";
 import DeleteSalesOrderDialog from "./components/DeleteSalesOrderDialog";
+import ImportSalesOrdersPanel from "./components/ImportSalesOrdersPanel";
 import type { ItemOption, Order, SalesOrderTypeOption } from "./components/types";
 import { formatTruckTime } from "./components/helpers";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
@@ -128,8 +129,9 @@ export default function SalesOrdersClient({
             </header>
       
       {canCreate && (
-        <div className="mb-8">
+        <div className="mb-8 space-y-3">
           <CreateSalesOrderForm allItems={allItems} salesOrderTypes={salesOrderTypes} />
+          <ImportSalesOrdersPanel />
         </div>
       )}
 
