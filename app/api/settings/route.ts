@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { DEFAULT_LEDGER_START_AT } from "@/lib/ledger";
+import { DEFAULT_OFFICE_DAY_START_MINUTES, isValidOfficeDayStart } from "@/lib/officeDay";
 
 const BOOLEAN_KEYS = [
   "allowDefaultCodeTransactions",
@@ -27,6 +28,7 @@ const DEFAULTS = {
   allowNegativeRackStock: false,
   markingEnabled: true,
   ledgerStartAt: DEFAULT_LEDGER_START_AT,
+  officeDayStartMinutes: DEFAULT_OFFICE_DAY_START_MINUTES,
 };
 
 export async function GET() {
@@ -39,6 +41,8 @@ export async function GET() {
 // body: any subset of the boolean flags, and/or
 // (default receiving / staging locations are per warehouse: PATCH /api/warehouses/:id)
 //       ledgerStartAt: ISO string (e.g. "2026-09-20T17:00:00.000Z") or null to reset to default
+//       officeDayStartMinutes: 0–1439, minutes after midnight WIB the Dashboard's
+//         office day starts (420 = 07:00)
 export async function PATCH(req: Request) {
   const session = await getSession();
   if (!session) {
@@ -74,6 +78,16 @@ export async function PATCH(req: Request) {
       }
       updates.ledgerStartAt = parsed;
     }
+  }
+
+  if (body.officeDayStartMinutes !== undefined) {
+    if (!isValidOfficeDayStart(body.officeDayStartMinutes)) {
+      return NextResponse.json(
+        { error: "officeDayStartMinutes must be a whole number from 0 to 1439" },
+        { status: 400 }
+      );
+    }
+    updates.officeDayStartMinutes = body.officeDayStartMinutes;
   }
 
   if (Object.keys(updates).length === 0) {
