@@ -9,7 +9,7 @@ import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import type { Session } from "./_sessions/types";
 import { TabButton } from "./_sessions/badges";
 import { OpnameSessionRow } from "./_sessions/OpnameSessionRow";
-
+import { StockOpnamePlanModal } from "./_plan/StockOpnamePlanModal";
 export default function StockOpnameClient({
   sessions,
   users,
@@ -18,6 +18,7 @@ export default function StockOpnameClient({
   users: { username: string }[];
 }) {
   const [activeTab, setActiveTab] = useState<"opname" | "verify" | "summary">("opname");
+  const [planOpen, setPlanOpen] = useState(false);
   const router = useRouter();
   const labels = usePageLabels("stock_opname", STOCK_OPNAME_SUMMARY_LABELS);
   const [opnameNumber, setOpnameNumber] = useState("");
@@ -81,7 +82,14 @@ export default function StockOpnameClient({
           onClick={() => setActiveTab("summary")}
         />
       </div>
-
+<button
+  type="button"
+  onClick={() => setPlanOpen(true)}
+  className="ml-auto mb-1 px-3 py-1.5 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 transition-colors"
+>
+  {labels.plan_button}
+</button>
+{planOpen && <StockOpnamePlanModal labels={labels} onClose={() => setPlanOpen(false)} />}
       {activeTab === "verify" ? (
         <VerifyStockIntegrityPanel />
       ) : activeTab === "summary" ? (

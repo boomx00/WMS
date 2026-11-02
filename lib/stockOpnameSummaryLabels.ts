@@ -3,8 +3,9 @@
 // lib/pageLabels.ts, so every key here is listed (and translatable) on
 // Settings → Translations. Placeholders like {n} or {date} are filled in by
 // the page — keep them in the translations.
-
+import { STOCK_OPNAME_PLAN_LABELS } from "./stockOpnamePlanLabels";
 export const STOCK_OPNAME_SUMMARY_LABELS = {
+    ...STOCK_OPNAME_PLAN_LABELS,
   tab_opname: "Stock Opname",
   tab_verify: "Verify Stock Integrity",
   tab_summary: "Stock Opname Summary",
