@@ -10,11 +10,13 @@ import {
   type StockOpnamePlan,
   type WarehouseShift,
 } from "@/lib/stockOpnamePlan";
+import type { StockOpnameCycle } from "@/lib/stockOpnameCycle";
 import { readProductionPlan, readShippingPlan } from "./planFiles";
 
 type PlanResponse = {
   warehouse: { id: number; name: string };
   warehouses: { id: number; name: string; isActive: boolean }[];
+  cycle: StockOpnameCycle;
   plan: StockOpnamePlan;
 };
 
@@ -26,7 +28,7 @@ const SHIFTS: { key: WarehouseShift; name: string; hours: string }[] = [
 
 const SKIP_REASONS: { key: SkipReason; label: string }[] = [
   { key: "IN_PRODUCTION", label: "plan_skip_in_production" },
-  { key: "COUNTED_THIS_WEEK", label: "plan_skip_counted" },
+  { key: "COUNTED_THIS_CYCLE", label: "plan_skip_counted" },
   { key: "ON_OTHER_ORDERS", label: "plan_skip_other_orders" },
 ];
 
@@ -79,8 +81,7 @@ export function StockOpnamePlanModal({ labels, onClose }: { labels: Record<strin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PlanResponse | null>(null);
-  const [noProductionFor, setNoProductionFor] = useState<string | null>(null);
-
+const [productionSource, setProductionSource] = useState<string | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
     window.addEventListener("keydown", onKey);
@@ -99,6 +100,13 @@ export function StockOpnamePlanModal({ labels, onClose }: { labels: Record<strin
         readProductionPlan(productionFile, labels),
         readShippingPlan(shippingFile, labels),
       ]);
+      const rowsForDate = productionPlan.filter((row) => row.date === date);
+if (rowsForDate.length === 0) {
+  const dates = [...new Set(productionPlan.map((row) => row.date))].sort().slice(-5);
+  throw new Error(
+    labels.plan_err_no_production_rows.replace("{date}", date).replace("{dates}", dates.join(", ") || "-")
+  );
+}
       const res = await fetch("/api/stock-opname/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -107,7 +115,9 @@ export function StockOpnamePlanModal({ labels, onClose }: { labels: Record<strin
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error ?? `${labels.plan_err_generate} (${res.status})`);
       setResult(json as PlanResponse);
-      setNoProductionFor(productionPlan.some((r) => r.date === date) ? null : date);
+setProductionSource(
+  labels.plan_production_source.replace("{n}", String(rowsForDate.length)).replace("{date}", date)
+);
     } catch (err) {
       setResult(null);
       setError(err instanceof Error ? err.message : labels.plan_err_generate);
@@ -206,9 +216,16 @@ export function StockOpnamePlanModal({ labels, onClose }: { labels: Record<strin
           {result && plan && (
             <div className="px-5 py-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-zinc-300">
-                  {labels.plan_summary.replace("{n}", String(total)).replace("{skipped}", String(plan.skipped.length))}
-                </p>
+                <div>
+                  <p className="text-sm text-zinc-300">
+                    {labels.plan_summary.replace("{n}", String(total)).replace("{skipped}", String(plan.skipped.length))}
+                  </p>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {(result.cycle.type === "MONTHLY" ? labels.plan_cycle_monthly : labels.plan_cycle_weekly)
+                      .replace("{from}", plan.cycleStart)
+                      .replace("{to}", plan.cycleEnd)}
+                  </p>
+                </div>
                 {result.warehouses.length > 1 && (
                   <label className="flex items-center gap-2 text-xs text-zinc-500">
                     {labels.plan_warehouse}
@@ -228,11 +245,7 @@ export function StockOpnamePlanModal({ labels, onClose }: { labels: Record<strin
                 )}
               </div>
 
-              {noProductionFor && (
-                <p className="rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
-                  {labels.plan_warn_no_production.replace("{date}", noProductionFor)}
-                </p>
-              )}
+  {productionSource && <p className="text-xs text-zinc-500">{productionSource}</p>}
               {highStockInC < DEFAULT_SHIFT_3_MIN_SKUS && (
                 <p className="rounded-md border border-amber-900 bg-amber-950/30 px-3 py-2 text-xs text-amber-300">
                   {labels.plan_warn_shift_c

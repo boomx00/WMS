@@ -22,6 +22,11 @@ export const settings = pgTable("settings", {
   // midnight WIB (420 = 07:00). Each day runs from this time to the same
   // time the next day — production works 07:00 → 07:00.
   officeDayStartMinutes: integer("office_day_start_minutes").notNull().default(420),
+  // Stock opname cycle: a SKU opnamed in the current cycle isn't planned again
+  // until the next one. WEEKLY or MONTHLY; start day 1 (Monday) to 7 (Sunday)
+  // when weekly, or 1 to 31 when monthly (lib/stockOpnameCycle.ts).
+  opnameCycleType: text("opname_cycle_type").notNull().default("WEEKLY"),
+  opnameCycleStartDay: integer("opname_cycle_start_day").notNull().default(1),
 });
 
 export const appVersion = pgTable("app_version", {

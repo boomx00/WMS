@@ -3,8 +3,9 @@ import { db } from "@/lib/db";
 import { getSession } from "@/lib/auth";
 import { getWarehouses, resolveWarehouse } from "@/lib/warehouses";
 import { cleanDate } from "@/lib/skuOpnameSummary";
-import { getWeekRange, planStockOpname, type ProductionPlanRow, type ShippingPlanRow } from "@/lib/stockOpnamePlan";
-import { getGoodStock, getOpnamedSkus } from "@/lib/stockOpnamePlanStock";
+import { getStockOpnameCycleRange } from "@/lib/stockOpnameCycle";
+import { planStockOpname, type ProductionPlanRow, type ShippingPlanRow } from "@/lib/stockOpnamePlan";
+import { getGoodStock, getOpnamedSkus, getStockOpnameCycle } from "@/lib/stockOpnamePlanStock";
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +19,11 @@ const clean = (v: unknown): string => (typeof v === "string" || typeof v === "nu
 //         shippingPlan: [{ docNo, sku, status }] }
 //
 // Which SKUs to count in each warehouse shift (lib/stockOpnamePlan.ts). The
-// two plans are read in the browser; stock and this week's opnames come from
-// the WMS. Nothing is saved.
+// two plans are read in the browser; stock, the opname cycle (Settings →
+// General) and that cycle's opnames come from the WMS. Nothing is saved.
 //
-// Returns { warehouse: { id, name }, warehouses: [{ id, name, isActive }], plan }
+// Returns { warehouse: { id, name }, warehouses: [{ id, name, isActive }],
+//           cycle: { type, startDay }, plan }
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -66,8 +68,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Couldn't read Good Stock" }, { status: 400 });
   }
 
-  const week = getWeekRange(date);
-  const [counted, warehouses] = await Promise.all([getOpnamedSkus(db, week.from, week.to), getWarehouses(db)]);
+  const cycle = await getStockOpnameCycle(db);
+  const range = getStockOpnameCycleRange(date, cycle);
+  const [counted, warehouses] = await Promise.all([getOpnamedSkus(db, range.from, range.to), getWarehouses(db)]);
 
   const plan = planStockOpname({
     date,
@@ -76,11 +79,13 @@ export async function POST(req: NextRequest) {
     productionPlan,
     shippingPlan,
     counted,
+    cycle,
   });
 
   return NextResponse.json({
     warehouse: { id: warehouse.id, name: warehouse.name },
     warehouses: warehouses.map((w) => ({ id: w.id, name: w.name, isActive: w.isActive })),
+    cycle,
     plan,
   });
 }

@@ -6,6 +6,7 @@ import { getSession } from "@/lib/auth";
 import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { DEFAULT_LEDGER_START_AT } from "@/lib/ledger";
 import { DEFAULT_OFFICE_DAY_START_MINUTES, isValidOfficeDayStart } from "@/lib/officeDay";
+import { DEFAULT_STOCK_OPNAME_CYCLE, isValidStockOpnameCycle } from "@/lib/stockOpnameCycle";
 
 const BOOLEAN_KEYS = [
   "allowDefaultCodeTransactions",
@@ -29,6 +30,8 @@ const DEFAULTS = {
   markingEnabled: true,
   ledgerStartAt: DEFAULT_LEDGER_START_AT,
   officeDayStartMinutes: DEFAULT_OFFICE_DAY_START_MINUTES,
+  opnameCycleType: DEFAULT_STOCK_OPNAME_CYCLE.type,
+  opnameCycleStartDay: DEFAULT_STOCK_OPNAME_CYCLE.startDay,
 };
 
 export async function GET() {
@@ -43,6 +46,8 @@ export async function GET() {
 //       ledgerStartAt: ISO string (e.g. "2026-09-20T17:00:00.000Z") or null to reset to default
 //       officeDayStartMinutes: 0–1439, minutes after midnight WIB the Dashboard's
 //         office day starts (420 = 07:00)
+//       opnameCycleType: "WEEKLY" | "MONTHLY", opnameCycleStartDay: 1 (Monday) to 7
+//         (Sunday) when weekly, 1 to 31 when monthly
 export async function PATCH(req: Request) {
   const session = await getSession();
   if (!session) {
@@ -88,6 +93,24 @@ export async function PATCH(req: Request) {
       );
     }
     updates.officeDayStartMinutes = body.officeDayStartMinutes;
+  }
+
+  if (body.opnameCycleType !== undefined || body.opnameCycleStartDay !== undefined) {
+    // Checked together with whichever one isn't being changed.
+    const [current] = await db
+      .select({ type: settings.opnameCycleType, startDay: settings.opnameCycleStartDay })
+      .from(settings)
+      .limit(1);
+    const type = body.opnameCycleType ?? current?.type ?? DEFAULTS.opnameCycleType;
+    const startDay = body.opnameCycleStartDay ?? current?.startDay ?? DEFAULTS.opnameCycleStartDay;
+    if (!isValidStockOpnameCycle(type, startDay)) {
+      return NextResponse.json(
+        { error: "Stock opname cycle must be WEEKLY with a start day from 1 to 7, or MONTHLY with one from 1 to 31" },
+        { status: 400 }
+      );
+    }
+    updates.opnameCycleType = type;
+    updates.opnameCycleStartDay = startDay;
   }
 
   if (Object.keys(updates).length === 0) {

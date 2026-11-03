@@ -3,11 +3,13 @@
 import { useState } from "react";
 import PageLabelsSettings from "./PageLabelsSettings";
 import StockColumnsSettings from "./StockColumnsSettings";
+import OpnameCycleSetting from "./OpnameCycleSetting";
 import DefaultLocationsSetting, { MarkingSetting, type WarehouseDefaults } from "./DefaultLocationsSetting";
 import { useCan } from "@/lib/AccessContext";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { formatOfficeHour } from "@/lib/officeDay";
 import { OFFICE_HOUR_SETTINGS_LABELS } from "@/lib/dashboardLabels";
+import type { StockOpnameCycle } from "@/lib/stockOpnameCycle";
 export default function SettingsForm({
   initial,
   warehouses,
@@ -24,6 +26,7 @@ export default function SettingsForm({
     ledgerStartIsDefault: boolean;
     markingEnabled: boolean;
     officeDayStartMinutes: number; // minutes after midnight WIB, 420 = 07:00
+    opnameCycle: StockOpnameCycle;
   };
   warehouses: WarehouseDefaults[];
 }) {
@@ -103,6 +106,8 @@ export default function SettingsForm({
             </p>
           )}
           <OfficeHourSetting readOnly={!canEdit} initialMinutes={initial.officeDayStartMinutes} />
+
+          <OpnameCycleSetting readOnly={!canEdit} initial={initial.opnameCycle} />
 
           <LedgerStartSetting
             readOnly={!canEdit}

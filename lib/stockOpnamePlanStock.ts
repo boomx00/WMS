@@ -3,9 +3,10 @@
 // the Locations page), each item's legacy SKU so plan codes that use it still
 // match, and the SKUs already opnamed (locked in a SOSKU session).
 
-import { items, locations, locationStock, stockColumns, stockOpnameSkus } from "@/db/schema";
+import { items, locations, locationStock, settings, stockColumns, stockOpnameSkus } from "@/db/schema";
 import { and, eq, gte, isNotNull, like, lte, sql } from "drizzle-orm";
 import { SKU_OPNAME_PREFIX } from "@/lib/skuOpname";
+import { cleanStockOpnameCycle, type StockOpnameCycle } from "@/lib/stockOpnameCycle";
 import type { CountedSku, StockRow } from "@/lib/stockOpnamePlan";
 
 const GOOD_STOCK_COLUMN = "good stock";
@@ -55,6 +56,15 @@ export async function getGoodStock(
   for (const row of legacyRows) skuAliases[row.legacySku] = row.sku;
 
   return { stock, skuAliases };
+}
+
+// The cycle chosen on Settings → General.
+export async function getStockOpnameCycle(db: any): Promise<StockOpnameCycle> {
+  const [row]: { type: string; startDay: number }[] = await db
+    .select({ type: settings.opnameCycleType, startDay: settings.opnameCycleStartDay })
+    .from(settings)
+    .limit(1);
+  return cleanStockOpnameCycle(row?.type, row?.startDay);
 }
 
 // SKUs locked in a SOSKU session between two dates (YYYY-MM-DD, inclusive,

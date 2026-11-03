@@ -1,3 +1,10 @@
+import {
+  DEFAULT_STOCK_OPNAME_CYCLE,
+  getStockOpnameCycleRange,
+  toDayNumber,
+  type StockOpnameCycle,
+} from "@/lib/stockOpnameCycle";
+
 export type ProductionShift = "A" | "B";
 export type WarehouseShift = "08-16" | "16-24" | "24-08";
 
@@ -35,8 +42,10 @@ export interface StockOpnamePlanInput {
   /** Include the next day's rows too: the 24-08 shift overlaps its Shift A from 07:00 to 08:00. */
   productionPlan: ProductionPlanRow[];
   shippingPlan: ShippingPlanRow[];
-  /** Past counts. Only those in the same Monday-Sunday week as `date` are used. */
+  /** Past counts. Only those in the same cycle as `date` are used. */
   counted?: CountedSku[];
+  /** The cycle a count stays valid for. Defaults to weekly from Monday. */
+  cycle?: StockOpnameCycle;
   /** The warehouse shifts that will count. Defaults to all three. */
   warehouseShifts?: WarehouseShift[];
   /** Plan codes that mean the same product as a stock SKU, e.g. { "5020004007": "14013075701" }. */
@@ -60,7 +69,7 @@ export interface PlannedSku {
 }
 
 export type SkipReason =
-  | "COUNTED_THIS_WEEK"
+  | "COUNTED_THIS_CYCLE"
   | "IN_PRODUCTION"
   | "ON_OTHER_ORDERS";
 
@@ -74,7 +83,8 @@ export interface SkippedSku {
 
 export interface StockOpnamePlan {
   date: string;
-  weekStart: string;
+  cycleStart: string;
+  cycleEnd: string;
   /**
    * Each SKU appears once. Low-stock SKUs go to 08-16 and the rest to 16-24, unless
    * production leaves only one shift free. High-stock SKUs then move to 24-08 until it
@@ -103,29 +113,6 @@ const PRODUCTION_WINDOWS: Record<ProductionShift, [number, number]> = {
   B: [19, 31],
 };
 
-const MS_PER_DAY = 86_400_000;
-
-function toDayNumber(date: string): number {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim());
-  if (!match) throw new Error(`Invalid date "${date}", expected YYYY-MM-DD`);
-  return Date.UTC(+match[1], +match[2] - 1, +match[3]) / MS_PER_DAY;
-}
-
-function fromDayNumber(day: number): string {
-  return new Date(day * MS_PER_DAY).toISOString().slice(0, 10);
-}
-
-function getWeekStart(day: number): number {
-  // Day 0 (1970-01-01) was a Thursday, so Monday-based weekday = (day + 3) mod 7.
-  return day - (((day + 3) % 7) + 7) % 7;
-}
-
-/** The Monday and Sunday (YYYY-MM-DD) of the week `date` falls in. */
-export function getWeekRange(date: string): { from: string; to: string } {
-  const start = getWeekStart(toDayNumber(date));
-  return { from: fromDayNumber(start), to: fromDayNumber(start + 6) };
-}
-
 function normalizeSku(sku: string): string {
   return String(sku).trim().toUpperCase();
 }
@@ -140,7 +127,7 @@ function sortBySku<T extends { sku: string }>(items: T[]): T[] {
 
 export function planStockOpname(input: StockOpnamePlanInput): StockOpnamePlan {
   const planDay = toDayNumber(input.date);
-  const weekStart = getWeekStart(planDay);
+  const cycleRange = getStockOpnameCycleRange(input.date, input.cycle ?? DEFAULT_STOCK_OPNAME_CYCLE);
   const shifts = input.warehouseShifts ?? ALL_WAREHOUSE_SHIFTS;
   const shiftAMaxStock = input.shiftAMaxStock ?? DEFAULT_SHIFT_A_MAX_STOCK;
   const shift3MinStock = input.shift3MinStock ?? DEFAULT_SHIFT_3_MIN_STOCK;
@@ -155,11 +142,10 @@ export function planStockOpname(input: StockOpnamePlanInput): StockOpnamePlan {
     return aliases.get(normalized) ?? normalized;
   };
 
-  // Filter 1: counted earlier in this Monday-Sunday week.
-  const countedThisWeek = new Set<string>();
+  // Filter 1: counted earlier in this cycle.
+  const countedThisCycle = new Set<string>();
   for (const row of input.counted ?? []) {
-    const day = toDayNumber(row.date);
-    if (day >= weekStart && day < weekStart + 7) countedThisWeek.add(resolveSku(row.sku));
+    if (row.date >= cycleRange.from && row.date <= cycleRange.to) countedThisCycle.add(resolveSku(row.sku));
   }
 
   // Filter 2: the warehouse shifts blocked by production of each SKU.
@@ -210,8 +196,8 @@ export function planStockOpname(input: StockOpnamePlanInput): StockOpnamePlan {
     const docNos = [...(docsBySku.get(sku) ?? [])].sort();
     const name = nameBySku.get(sku) ?? null;
 
-    if (countedThisWeek.has(sku)) {
-      skipped.push({ sku, name, reason: "COUNTED_THIS_WEEK", docNos });
+    if (countedThisCycle.has(sku)) {
+      skipped.push({ sku, name, reason: "COUNTED_THIS_CYCLE", docNos });
       continue;
     }
 
@@ -250,8 +236,9 @@ export function planStockOpname(input: StockOpnamePlanInput): StockOpnamePlan {
   for (const shift of ALL_WAREHOUSE_SHIFTS) sortBySku(sessions[shift]);
 
   return {
-    date: fromDayNumber(planDay),
-    weekStart: fromDayNumber(weekStart),
+    date: input.date.trim(),
+    cycleStart: cycleRange.from,
+    cycleEnd: cycleRange.to,
     sessions,
     skipped: sortBySku(skipped),
   };
