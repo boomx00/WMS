@@ -111,6 +111,13 @@ export const STOCK_OPNAME_SUMMARY_LABELS = {
   k3_err_no_material_code: 'No "Material Code" column found in the file',
 
   // Report (per date)
+  summary_report_all: "Generate report",
+  summary_report_all_title: "Every stock opname of the dates shown, in one report (downloadable)",
+  summary_hide_date: "Hide this date from view",
+  summary_dates_hidden: "{n} date(s) hidden ·",
+  summary_show_all_dates: "Show all",
+  report_range: "{from} – {to} ({n} dates)",
+  report_th_opname_date: "Opname date",
   report_button: "Report",
   report_button_title: "Open the report for this date",
   report_title: "Stock opname report",

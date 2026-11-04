@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 // A report column header with a filter: the label plus a ▾ button opening a
 // checklist of the column's values (with how many lines have each), a
 // search box, and Select all / Clear all (for the values matching the
-// search). `hidden` = the unticked values.
+// search). `hidden` = the unticked values. An option's `label`, when given,
+// is what's shown and searched (e.g. a date as "2 Nov 2026"); its value is
+// what's filtered on.
 export function ColumnFilter({
   label,
   options,
@@ -15,7 +17,7 @@ export function ColumnFilter({
   labels,
 }: {
   label: string;
-  options: { value: string; count: number }[];
+  options: { value: string; count: number; label?: string }[];
   hidden: string[];
   onChange: (hidden: string[]) => void;
   onOpenChange: (open: boolean) => void;
@@ -66,7 +68,7 @@ export function ColumnFilter({
   }
 
   const q = search.trim().toLowerCase();
-  const matching = q ? options.filter((o) => o.value.toLowerCase().includes(q)) : options;
+  const matching = q ? options.filter((o) => (o.label ?? o.value).toLowerCase().includes(q)) : options;
   const hiddenSet = new Set(hidden);
 
   return (
@@ -136,7 +138,7 @@ export function ColumnFilter({
                     }
                     className="mt-0.5 h-3.5 w-3.5 accent-amber-500"
                   />
-                  <span className="flex-1 break-words">{o.value}</span>
+                  <span className="flex-1 break-words">{o.label ?? o.value}</span>
                   <span className="text-zinc-500 tabular-nums">{o.count}</span>
                 </label>
               ))

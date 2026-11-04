@@ -10,12 +10,17 @@ import { ColumnFilter } from "./ColumnFilter";
 import { AdjustmentInput } from "./AdjustmentInput";
 import { reconcileTitle, ReconcileInput } from "./ReconcileInput";
 
-// The Report button of a date: every SOSKU session that day (with the page's
+// The report window: every SOSKU session of the given dates (with the page's
 // search, hidden products, filters and column choices applied) in a window
 // 90% of the screen, so full product names and adjustment notes fit. Notes
-// can be written here too; totals at the bottom; Excel export of the report.
+// and reconciliation can be written here too; totals at the bottom; Excel
+// export of the report.
+//   - A date's Report button: that one date.
+//   - Generate report (above the SKU column): every date shown on the page.
+//     Each product's opnames are listed together, oldest date first, with an
+//     Opname date column — a SKU counted on 2 and 3 Nov has both lines.
 export function DateReportModal({
-  date,
+  dates,
   data,
   rows,
   buckets,
@@ -31,7 +36,7 @@ export function DateReportModal({
   bucketLabel,
   onClose,
 }: {
-  date: string;
+  dates: string[]; // oldest first
   data: SummaryResponse;
   rows: SummaryResponse["items"];
   buckets: Bucket[];
@@ -54,18 +59,31 @@ export function DateReportModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // K3 columns when any of the date's sessions has K3 data; per line only
+  // More than one date: an Opname date column, and the range in the title.
+  const multi = dates.length > 1;
+  // K3 columns when any of the dates' sessions has K3 data; per line only
   // for sessions that have it.
-  const daySessions = sessionsByDate(data).get(date) ?? [];
+  const bySessionDate = sessionsByDate(data);
+  const daySessions = dates.flatMap((d) => bySessionDate.get(d) ?? []);
   const k3Sessions = daySessions.filter((s) => data.k3Sessions?.[s.opnameNumber] !== undefined).length;
   const k3 = k3Sessions > 0;
-  const { day, weekday } = formatDay(date, locale);
+  const first = formatDay(dates[0] ?? "", locale);
+  const last = formatDay(dates[dates.length - 1] ?? "", locale);
+  const dayOf = (d: string) => formatDay(d, locale).day;
+  const titleRange = multi
+    ? labels.report_range
+        .replace("{from}", first.day)
+        .replace("{to}", last.day)
+        .replace("{n}", String(dates.length))
+    : `${first.day} ${first.weekday}`;
   const statusLabel = (st: Status) =>
     st === "CONFIRMED" ? labels.status_confirmed : st === "DONE" ? labels.status_done : labels.status_in_progress;
 
-  // One line per SOSKU session that day, with everything the table shows.
+  // One line per SOSKU session, with everything the table shows: each
+  // product's sessions together (in the page's product order), oldest date
+  // first, then oldest session first.
   const allLines = rows.flatMap((item) =>
-    (item.cells[date] ?? []).map((cell) => {
+    dates.flatMap((date) => (item.cells[date] ?? []).map((cell) => {
       const figs = buckets.map((b) => shownFigures(cell, b.key, excludedKeys));
       const totalSo = shownFigures(cell, "total", excludedKeys).counted;
       // Reconciliation: + and − on the Total SO give the Final SO, which K3
@@ -77,13 +95,13 @@ export function DateReportModal({
       const k3Qty = k3Line ? k3Line.qty : null;
       const k3Delta = k3Qty === null ? null : round3(finalSo - k3Qty);
       const hasDiff = figs.some((f) => f.counted !== f.system) || (k3Delta !== null && k3Delta !== 0);
-      return { item, cell, figs, k3Qty, k3Delta, k3InFile: k3Line?.inFile ?? false, hasDiff, totalSo, plus, minus, finalSo };
-    })
+      return { item, cell, date, figs, k3Qty, k3Delta, k3InFile: k3Line?.inFile ?? false, hasDiff, totalSo, plus, minus, finalSo };
+    }))
   );
 
-  // Column filters (SKU, Product Name, Status, SOSKU): the values each
+  // Column filters (SKU, Product Name, Opname date, Status, SOSKU): the values each
   // one has unticked. Empty = everything shown, so new values show by default.
-  const [hidden, setHidden] = useState<Record<ReportFilterKey, string[]>>({ sku: [], product: [], status: [], sosku: [] });
+  const [hidden, setHidden] = useState<Record<ReportFilterKey, string[]>>({ sku: [], product: [], date: [], status: [], sosku: [] });
   // A click on the dark backdrop closes the report — unless a filter list was
   // open, in which case that click only closes the list.
   const filterOpen = useRef(false);
@@ -94,6 +112,7 @@ export function DateReportModal({
   const valueOf: Record<ReportFilterKey, (l: (typeof allLines)[number]) => string> = {
     sku: (l) => l.item.sku,
     product: (l) => l.item.name,
+    date: (l) => l.date,
     status: (l) => statusLabel(l.cell.status),
     sosku: (l) => l.cell.opnameNumber,
   };
@@ -105,14 +124,33 @@ export function DateReportModal({
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true }));
   };
+  // The Opname date filter lists dates as shown (e.g. "2 Nov 2026"), but
+  // keeps the YYYY-MM-DD value, so they stay in date order.
   const filtered = filterKeys.some((k) => hidden[k].length > 0);
   const shownLines = allLines.filter((l) => filterKeys.every((k) => !hidden[k].includes(valueOf[k](l))));
 
-  // A product opnamed more than once that day: only its latest shown session
-  // (a recount) goes into the totals, so nothing is counted twice.
+  // A product opnamed more than once (that day, or on several of the dates):
+  // only its latest shown session goes into the totals, so nothing is
+  // counted twice.
   const lastShown = new Map<number, (typeof allLines)[number]>();
   for (const l of shownLines) lastShown.set(l.item.itemId, l);
   const lines = shownLines.map((l) => ({ ...l, latest: lastShown.get(l.item.itemId) === l }));
+  // A product's lines sit together, so its #, SKU and Product Name are one
+  // merged cell over all of them: the size of each product's group (on its
+  // first line; 0 on the others) and the product's number.
+  const groupSize: number[] = lines.map(() => 0);
+  const productNo: number[] = [];
+  for (let i = 0, n = 0; i < lines.length; i++) {
+    if (i > 0 && lines[i - 1].item.itemId === lines[i].item.itemId) {
+      let start = i - 1;
+      while (groupSize[start] === 0) start--;
+      groupSize[start]++;
+      productNo.push(n);
+    } else {
+      groupSize[i] = 1;
+      productNo.push(++n);
+    }
+  }
   const totalLines = lines.filter((l) => l.latest);
   const totals = buckets.map((_, i) =>
     totalLines.reduce(
@@ -124,7 +162,7 @@ export function DateReportModal({
     itemId: l.item.itemId,
     sku: l.item.sku,
     name: l.item.name,
-    date,
+    date: l.date,
     opnameNumber: l.cell.opnameNumber,
     current: l.cell.adjustment,
   });
@@ -139,6 +177,7 @@ export function DateReportModal({
 
   function exportReport() {
     const header: (string | number)[] = ["#", labels.summary_th_sku, labels.summary_th_product];
+    if (multi) header.push(labels.report_th_opname_date);
     for (const b of buckets) header.push(`${b.name} ${labels.summary_system}`, `${b.name} ${labels.summary_so}`, labels.summary_delta);
     header.push(
       `${labels.report_th_reconciliation} ${labels.report_th_reconcile_plus}`,
@@ -147,8 +186,18 @@ export function DateReportModal({
     );
     if (k3) header.push(labels.summary_th_k3, labels.summary_th_k3_delta);
     header.push(labels.detail_th_status, labels.summary_th_sosku, labels.report_th_pic, labels.detail_th_date, labels.report_th_note);
+    // Same merged #, SKU and Product Name cells as on screen.
+    const merges: XLSX.Range[] = [];
+    const firstRow = 3; // title, blank row, header
     const body = lines.map((l, i) => {
-      const r: (string | number)[] = [i + 1, l.item.sku, l.item.name];
+      if (groupSize[i] > 1) {
+        for (let c = 0; c < 3; c++) {
+          merges.push({ s: { r: firstRow + i, c }, e: { r: firstRow + i + groupSize[i] - 1, c } });
+        }
+      }
+      const r: (string | number)[] =
+        groupSize[i] > 0 ? [productNo[i], l.item.sku, l.item.name] : ["", "", ""];
+      if (multi) r.push(l.date);
       for (const f of l.figs) r.push(f.system, f.counted, f.counted - f.system);
       r.push(l.plus, l.minus, l.finalSo);
       if (k3) r.push(l.k3Qty ?? "", l.k3Delta ?? "");
@@ -156,17 +205,20 @@ export function DateReportModal({
       return r;
     });
     const totalRow: (string | number)[] = ["", labels.report_totals, ""];
+    if (multi) totalRow.push("");
     for (const tt of totals) totalRow.push(tt.system, tt.counted, tt.counted - tt.system);
     totalRow.push(plusTotal, minusTotal, finalSoTotal);
     if (k3) totalRow.push(k3Total, k3DeltaTotal);
-    const title = [`${labels.report_title} — ${day} ${weekday} — ${data.warehouse.name}`];
+    const title = [`${labels.report_title} — ${titleRange} — ${data.warehouse.name}`];
     const sheet = XLSX.utils.aoa_to_sheet([title, [], header, ...body, totalRow]);
+    sheet["!merges"] = merges;
     sheet["!cols"] = header.map((h) =>
       h === labels.summary_th_product ? { wch: 45 } : h === labels.report_th_note ? { wch: 60 } : { wch: 14 }
     );
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, sheetName(labels.report_title));
-    XLSX.writeFile(book, `stock-opname-report-${date}.xlsx`, { bookType: "xlsx" });
+    const fileRange = multi ? `${dates[0]}_${dates[dates.length - 1]}` : dates[0];
+    XLSX.writeFile(book, `stock-opname-report-${fileRange}.xlsx`, { bookType: "xlsx" });
   }
 
   // Base cell styles, then text-left / text-right added per column (never
@@ -195,7 +247,7 @@ export function DateReportModal({
             <h2 className="text-lg font-semibold">
               {labels.report_title}{" "}
               <span className="text-zinc-400 font-normal">
-                · {day} {weekday} · {data.warehouse.name}
+                · {titleRange} · {data.warehouse.name}
               </span>
             </h2>
             <p className="text-xs text-zinc-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -209,7 +261,7 @@ export function DateReportModal({
                     .replace("{total}", allLines.length.toLocaleString())}{" "}
                   <button
                     type="button"
-                    onClick={() => setHidden({ sku: [], product: [], status: [], sosku: [] })}
+                    onClick={() => setHidden({ sku: [], product: [], date: [], status: [], sosku: [] })}
                     className="underline hover:text-amber-200"
                   >
                     {labels.report_filter_reset}
@@ -298,6 +350,18 @@ export function DateReportModal({
                       labels={labels}
                     />
                   </th>
+                  {multi && (
+                    <th rowSpan={2} className={`${thBase} text-left`}>
+                      <ColumnFilter
+                        label={labels.report_th_opname_date}
+                        options={optionsOf("date").map((o) => ({ ...o, label: dayOf(o.value) }))}
+                        hidden={hidden.date}
+                        onChange={(next) => setHidden((h) => ({ ...h, date: next }))}
+                        onOpenChange={onFilterOpenChange}
+                        labels={labels}
+                      />
+                    </th>
+                  )}
                   {buckets.map((b) => (
                     <Fragment key={b.key}>
                       <th rowSpan={2} className={`${th} border-l border-l-zinc-800`}>
@@ -374,12 +438,39 @@ export function DateReportModal({
                 {lines.map((l, i) => (
                   <tr
                     key={`${l.item.itemId}-${l.cell.opnameNumber}`}
-                    className={`hover:bg-zinc-900/60 ${l.latest ? "" : "text-zinc-500 [&_td]:opacity-60"}`}
+                    className={`hover:bg-zinc-900/60 ${l.latest ? "" : "text-zinc-500 [&_td]:opacity-60"} ${
+                      // a clearer line where the next product starts
+                      i > 0 && groupSize[i] > 0 ? "[&_td]:border-t-zinc-600" : ""
+                    }`}
                     title={l.latest ? undefined : labels.report_not_in_totals}
                   >
-                    <td className={`${tdBase} text-left text-zinc-600`}>{i + 1}</td>
-                    <td className={`${tdBase} text-left font-mono text-amber-500 whitespace-nowrap`}>{l.item.sku}</td>
-                    <td className={`${tdBase} text-left text-zinc-300 whitespace-normal break-words`}>{l.item.name}</td>
+                    {groupSize[i] > 0 && (
+                      <>
+                        {/* Merged over the product's lines; never dimmed with an older line. */}
+                        <td rowSpan={groupSize[i]} className={`${tdBase} text-left text-zinc-600 opacity-100!`} title="">
+                          {productNo[i]}
+                        </td>
+                        <td
+                          rowSpan={groupSize[i]}
+                          className={`${tdBase} text-left font-mono text-amber-500 whitespace-nowrap opacity-100!`}
+                          title=""
+                        >
+                          {l.item.sku}
+                        </td>
+                        <td
+                          rowSpan={groupSize[i]}
+                          className={`${tdBase} text-left text-zinc-300 whitespace-normal break-words opacity-100!`}
+                          title=""
+                        >
+                          {l.item.name}
+                        </td>
+                      </>
+                    )}
+                    {multi && (
+                      <td className={`${tdBase} text-left whitespace-nowrap text-zinc-200`}>
+                        {dayOf(l.date)} <span className="text-zinc-500">{formatDay(l.date, locale).weekday}</span>
+                      </td>
+                    )}
                     {l.figs.map((f, j) => (
                       <Fragment key={buckets[j].key}>
                         <td className={`${td} text-zinc-400 border-l border-l-zinc-800`}>{f.system.toLocaleString()}</td>
@@ -464,14 +555,7 @@ export function DateReportModal({
                         ariaLabel={`${labels.report_th_note} ${l.item.sku} ${l.cell.opnameNumber}`}
                         onSave={(note) =>
                           onSaveNote(
-                            {
-                              itemId: l.item.itemId,
-                              sku: l.item.sku,
-                              name: l.item.name,
-                              date,
-                              opnameNumber: l.cell.opnameNumber,
-                              current: l.cell.adjustment,
-                            },
+                            targetOf(l),
                             note
                           )
                         }
@@ -483,7 +567,7 @@ export function DateReportModal({
               <tfoot className="sticky bottom-0">
                 <tr className="text-zinc-200 font-medium">
                   <td className={`${td} bg-zinc-900 border-t-zinc-700`} />
-                  <td className={`${td} bg-zinc-900 border-t-zinc-700 text-left`} colSpan={2}>
+                  <td className={`${td} bg-zinc-900 border-t-zinc-700 text-left`} colSpan={multi ? 3 : 2}>
                     {labels.report_totals}
                   </td>
                   {totals.map((tt, j) => (

@@ -66,8 +66,11 @@ export default function StockOpnameSummaryPanel() {
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ itemId: number; date: string; opnameNumber: string } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  // The date whose report window is open.
-  const [reportDate, setReportDate] = useState<string | null>(null);
+  // The dates whose report window is open: one date (its Report button) or
+  // every date shown (Generate report).
+  const [reportDates, setReportDates] = useState<string[] | null>(null);
+  // Dates taken out of view with the × on their header (until shown again).
+  const [hiddenDates, setHiddenDates] = useState<string[]>([]);
   // Bumped to reload the summary (e.g. after a K3 import), keeping filters.
   const [reloadKey, setReloadKey] = useState(0);
   // The date whose Import K3 window (pick SOSKU sessions + file) is open.
@@ -108,6 +111,15 @@ export default function StockOpnameSummaryPanel() {
   }, [from, to, warehouseId, reloadKey]);
 
   const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds]);
+
+  // The dates in the range that aren't hidden: what the table, the Excel
+  // export and Generate report use.
+  const visibleDates = useMemo(
+    () => (data ? data.dates.filter((d) => !hiddenDates.includes(d)) : []),
+    [data, hiddenDates]
+  );
+  // Dates hidden that are in the loaded range (others don't matter here).
+  const hiddenInRange = data ? data.dates.filter((d) => hiddenDates.includes(d)) : [];
 
   // Each date's SOSKU sessions, and how many of them have K3 data. A date
   // gets the K3 Stock / Δ K3 columns once any of its sessions has K3 data.
@@ -153,10 +165,12 @@ export default function StockOpnameSummaryPanel() {
     const filtered = data.items.filter((item) => {
       if (q && !item.sku.toLowerCase().includes(q) && !item.name.toLowerCase().includes(q)) return false;
       if (!showHidden && hiddenSet.has(item.itemId)) return false;
-      const cells = Object.values(item.cells).flat();
+      // Only the dates shown count (a hidden date's opnames are out of view).
+      const shownLists = visibleDates.map((d) => item.cells[d] ?? []);
+      const cells = shownLists.flat();
       if (hideNever && cells.length === 0) return false;
       if (onlyDiff) {
-        const hasDiff = Object.values(item.cells).some((list) =>
+        const hasDiff = shownLists.some((list) =>
           list.some(
             (c) =>
               buckets.some((b) => {
@@ -181,7 +195,7 @@ export default function StockOpnameSummaryPanel() {
         ? (a.currentStock - b.currentStock) * factor || a.sku.localeCompare(b.sku)
         : a.sku.localeCompare(b.sku, undefined, { numeric: true }) * factor
     );
-  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet, sort, excludedKeys]);
+  }, [data, search, hideNever, onlyDiff, buckets, showHidden, hiddenSet, sort, excludedKeys, visibleDates]);
 
   function toggleBucket(key: string) {
     if (!data || !selected) return;
@@ -272,7 +286,7 @@ export default function StockOpnameSummaryPanel() {
 
   function exportExcel() {
     if (!data) return;
-    exportSummaryExcel({ data, rows, buckets, excludedKeys, labels, hasK3, from, to });
+    exportSummaryExcel({ data: { ...data, dates: visibleDates }, rows, buckets, excludedKeys, labels, hasK3, from, to });
   }
 
   const input =
@@ -410,7 +424,15 @@ export default function StockOpnameSummaryPanel() {
         <p className="text-xs text-zinc-600 mb-2">
           {loading
             ? labels.summary_loading
-            : labels.summary_rows.replace("{n}", rows.length.toLocaleString()).replace("{d}", String(data.dates.length))}
+            : labels.summary_rows.replace("{n}", rows.length.toLocaleString()).replace("{d}", String(visibleDates.length))}
+          {!loading && hiddenInRange.length > 0 && (
+            <span className="ml-3 text-zinc-400">
+              {labels.summary_dates_hidden.replace("{n}", String(hiddenInRange.length))}{" "}
+              <button type="button" onClick={() => setHiddenDates([])} className="text-amber-500 hover:underline">
+                {labels.summary_show_all_dates}
+              </button>
+            </span>
+          )}
           {!loading && selected?.includes("total") && excludedNames.length > 0 && (
             <span className="ml-3 text-amber-500/80">
               * {labels.summary_total_excludes.replace("{list}", excludedNames.join(", "))}
@@ -429,6 +451,15 @@ export default function StockOpnameSummaryPanel() {
             <thead className="sticky top-0 z-20">
               <tr className="text-zinc-500 text-left">
                 <th rowSpan={2} className={`${stickyLeft} z-30 bg-zinc-900 px-2 py-1 font-medium align-bottom border-b border-zinc-800`}>
+                  <button
+                    type="button"
+                    onClick={() => setReportDates(visibleDates)}
+                    disabled={visibleDates.length === 0}
+                    title={labels.summary_report_all_title}
+                    className="mb-1.5 px-2 py-0.5 rounded border border-zinc-600 text-[10px] font-normal text-zinc-200 hover:text-zinc-100 hover:bg-zinc-700 transition-colors disabled:opacity-40"
+                  >
+                    {labels.summary_report_all}
+                  </button>
                   <div className={`${productGrid} items-end`}>
                     <div className="min-w-0">
                       <SortHeader label={labels.summary_th_sku} sortKey="sku" sort={sort} onSort={(k) => setSort((c) => nextSort(c, k))} />
@@ -446,7 +477,7 @@ export default function StockOpnameSummaryPanel() {
                     <span aria-hidden="true" />
                   </div>
                 </th>
-                {data.dates.length === 0 ? (
+                {visibleDates.length === 0 ? (
                   <>
                     <th rowSpan={2} className={gap} aria-hidden="true" />
                     <th rowSpan={2} className="px-2 py-1 font-normal text-zinc-600 bg-zinc-900 border-b border-zinc-800">
@@ -454,7 +485,7 @@ export default function StockOpnameSummaryPanel() {
                     </th>
                   </>
                 ) : (
-                  data.dates.map((date) => {
+                  visibleDates.map((date) => {
                     const { day, weekday } = formatDay(date, locale);
                     const k3Count = k3CountOf(date);
                     const sessionCount = dateSessions.get(date)?.length ?? 0;
@@ -472,7 +503,7 @@ export default function StockOpnameSummaryPanel() {
                             <span className="inline-flex items-center gap-0.5 font-normal">
                               <button
                                 type="button"
-                                onClick={() => setReportDate(date)}
+                                onClick={() => setReportDates([date])}
                                 title={labels.report_button_title}
                                 className="px-1.5 py-0.5 rounded border border-zinc-600 text-[9px] text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700 transition-colors"
                               >
@@ -494,6 +525,15 @@ export default function StockOpnameSummaryPanel() {
                                       .replace("{total}", String(sessionCount))
                                   : `↑ ${labels.k3_import}`}
                               </button>
+                              <button
+                                type="button"
+                                onClick={() => setHiddenDates((current) => [...current, date])}
+                                title={labels.summary_hide_date}
+                                aria-label={`${labels.summary_hide_date} ${day}`}
+                                className="ml-0.5 px-1 py-0.5 rounded text-[10px] leading-none text-zinc-500 hover:text-zinc-100 hover:bg-zinc-700"
+                              >
+                                ✕
+                              </button>
                             </span>
                           </div>
                         </th>
@@ -504,7 +544,7 @@ export default function StockOpnameSummaryPanel() {
                 <th rowSpan={2} className={gap} aria-hidden="true" />
               </tr>
               <tr className="text-zinc-400 text-[9px]">
-                {data.dates.map((date) => (
+                {visibleDates.map((date) => (
                   <Fragment key={date}>
                     {buckets.map((b, i) => (
                       <Fragment key={`${date}-${b.key}`}>
@@ -565,7 +605,7 @@ export default function StockOpnameSummaryPanel() {
               <tbody>
                 <tr>
                   <td
-                    colSpan={2 + (data.dates.length === 0 ? 2 : data.dates.reduce((n, date) => n + spanOf(date) + 1, 0))}
+                    colSpan={2 + (visibleDates.length === 0 ? 2 : visibleDates.reduce((n, date) => n + spanOf(date) + 1, 0))}
                     className="px-4 py-6 text-center text-zinc-600"
                   >
                     {labels.summary_no_products}
@@ -580,7 +620,7 @@ export default function StockOpnameSummaryPanel() {
               // first), leaving the rest of its block blank.
               rows.map((item) => {
                 const isHidden = hiddenSet.has(item.itemId);
-                const perDate = data.dates.map((date) => item.cells[date] ?? []);
+                const perDate = visibleDates.map((date) => item.cells[date] ?? []);
                 const height = Math.max(1, ...perDate.map((list) => list.length));
                 return (
                   <tbody key={item.itemId} className={`group ${isHidden ? "opacity-40" : ""}`}>
@@ -620,13 +660,13 @@ export default function StockOpnameSummaryPanel() {
                               </div>
                             </td>
                           )}
-                          {k === 0 && data.dates.length === 0 && (
+                          {k === 0 && visibleDates.length === 0 && (
                             <>
                               <td rowSpan={height} className={gap} aria-hidden="true" />
                               <td rowSpan={height} className="border-t border-zinc-800/70" />
                             </>
                           )}
-                          {data.dates.map((date, d) => {
+                          {visibleDates.map((date, d) => {
                             const list = perDate[d];
                             const cell = list[k];
                             const gapCell = k === 0 ? <td rowSpan={height} className={gap} aria-hidden="true" /> : null;
@@ -840,9 +880,9 @@ export default function StockOpnameSummaryPanel() {
         />
       )}
 
-      {reportDate !== null && data && (
+      {reportDates !== null && data && (
         <DateReportModal
-          date={reportDate}
+          dates={reportDates}
           data={data}
           rows={rows}
           buckets={buckets}
@@ -856,7 +896,7 @@ export default function StockOpnameSummaryPanel() {
           selectedKeys={selected ?? []}
           onToggleBucket={toggleBucket}
           bucketLabel={bucketLabel}
-          onClose={() => setReportDate(null)}
+          onClose={() => setReportDates(null)}
         />
       )}
 

@@ -81,14 +81,15 @@ export default function StockOpnameClient({
           active={activeTab === "summary"}
           onClick={() => setActiveTab("summary")}
         />
-      </div>
-<button
+        <button
   type="button"
   onClick={() => setPlanOpen(true)}
   className="ml-auto mb-1 px-3 py-1.5 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 transition-colors"
 >
   {labels.plan_button}
 </button>
+      </div>
+
 {planOpen && <StockOpnamePlanModal labels={labels} onClose={() => setPlanOpen(false)} />}
       {activeTab === "verify" ? (
         <VerifyStockIntegrityPanel />

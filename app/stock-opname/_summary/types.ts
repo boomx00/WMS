@@ -105,4 +105,4 @@ export type DateSession = {
   lastAt: string;
 };
 
-export type ReportFilterKey = "sku" | "product" | "status" | "sosku";
+export type ReportFilterKey = "sku" | "product" | "date" | "status" | "sosku";
