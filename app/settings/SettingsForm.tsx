@@ -4,6 +4,7 @@ import { useState } from "react";
 import PageLabelsSettings from "./PageLabelsSettings";
 import StockColumnsSettings from "./StockColumnsSettings";
 import OpnameCycleSetting from "./OpnameCycleSetting";
+import OperationsFreezeSetting from "./OperationsFreezeSetting";
 import DefaultLocationsSetting, { MarkingSetting, type WarehouseDefaults } from "./DefaultLocationsSetting";
 import { useCan } from "@/lib/AccessContext";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
@@ -25,6 +26,7 @@ export default function SettingsForm({
     ledgerStartAt: string; // ISO, UTC
     ledgerStartIsDefault: boolean;
     markingEnabled: boolean;
+    operationsFrozen: boolean;
     officeDayStartMinutes: number; // minutes after midnight WIB, 420 = 07:00
     opnameCycle: StockOpnameCycle;
   };
@@ -105,6 +107,8 @@ export default function SettingsForm({
               {labels.access_information}
             </p>
           )}
+          <OperationsFreezeSetting readOnly={!canEdit} initial={initial.operationsFrozen} />
+
           <OfficeHourSetting readOnly={!canEdit} initialMinutes={initial.officeDayStartMinutes} />
 
           <OpnameCycleSetting readOnly={!canEdit} initial={initial.opnameCycle} />

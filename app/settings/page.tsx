@@ -24,6 +24,7 @@ async function getSettings() {
     ledgerStartAt: (row?.ledgerStartAt ?? DEFAULT_LEDGER_START_AT).toISOString(),
     ledgerStartIsDefault: !row?.ledgerStartAt,
     markingEnabled: row?.markingEnabled ?? true,
+    operationsFrozen: row?.operationsFrozen ?? false,
     officeDayStartMinutes: row?.officeDayStartMinutes ?? DEFAULT_OFFICE_DAY_START_MINUTES,
     opnameCycle: cleanStockOpnameCycle(row?.opnameCycleType, row?.opnameCycleStartDay),
   };

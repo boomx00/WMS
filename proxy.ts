@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySession } from "@/lib/auth";
 import { getPageAccess } from "@/lib/pagePermissions";
 import { canAccessPath, firstAllowedPath } from "@/lib/pages";
+import { OPERATIONS_FROZEN_MESSAGE, isOperationsFrozen, isStockOperation } from "@/lib/operationsFreeze";
 
 // Next 16 renamed middleware.ts → proxy.ts. Proxy runs on the Node.js
 // runtime, so it can query the DB for the user's page permissions.
@@ -20,6 +21,11 @@ export async function proxy(req: NextRequest) {
   // Let API routes handle their own auth (they already do via getSession).
   // This is also what keeps the PDA app working for non-admin roles.
   if (pathname.startsWith("/api")) {
+    // Settings → Operations Freeze, for every role and client. Checked here so
+    // no stock route can miss it; lib/operationsFreeze.ts lists which ones.
+    if (isStockOperation(req.method, pathname) && (await isOperationsFrozen())) {
+      return NextResponse.json({ error: OPERATIONS_FROZEN_MESSAGE }, { status: 423 });
+    }
     return NextResponse.next();
   }
 

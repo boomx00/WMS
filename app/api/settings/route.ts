@@ -17,6 +17,7 @@ const BOOLEAN_KEYS = [
   "allowNegativeFloorStock",
   "allowNegativeRackStock",
   "markingEnabled",
+  "operationsFrozen",
 ] as const;
 
 const DEFAULTS = {
@@ -28,6 +29,7 @@ const DEFAULTS = {
   allowNegativeFloorStock: false,
   allowNegativeRackStock: false,
   markingEnabled: true,
+  operationsFrozen: false,
   ledgerStartAt: DEFAULT_LEDGER_START_AT,
   officeDayStartMinutes: DEFAULT_OFFICE_DAY_START_MINUTES,
   opnameCycleType: DEFAULT_STOCK_OPNAME_CYCLE.type,

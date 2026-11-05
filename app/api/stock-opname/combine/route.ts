@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpname, stockOpnameItems, stockOpnameLocations, locationStock, items, locations, users } from "@/db/schema";
-import { eq, and, inArray, isNotNull, isNull, ilike, sql, desc } from "drizzle-orm";
+import {
+  stockOpname,
+  stockOpnameItems,
+  stockOpnameLocations,
+  locationStock,
+  items,
+  locations,
+  locationTypes,
+  users,
+  k3StockImports,
+  k3StockImportSessions,
+  k3StockLines,
+} from "@/db/schema";
+import { eq, inArray, ilike, sql, desc } from "drizzle-orm";
+import { isOpenPickArea } from "@/lib/locationRules";
 
 // GET /api/stock-opname/combine
 // Lists every stock opname session whose opnameNumber starts with "CSO-"
@@ -61,27 +74,41 @@ function sanitizeList(input: unknown): string[] {
   return input.map((v) => String(v).trim()).filter(Boolean);
 }
 
-type CountedEntry = {
-  opnameNumber: string;
-  countedQty: number;
-  countedAt: string | null;
-  countedByUsername: string | null;
-};
+type ReportColumn = { key: string; label: string };
+
+// Which column of the SKU Summary a location's stock goes in: Defect, Floor,
+// Rack, or a column of its own (Export, Outbound WH, ...). DEFECT and EXPOR are
+// floor-type locations told apart by their code.
+function columnOf(location: { code: string; hasPosition: boolean; pickable: boolean }): ReportColumn {
+  const code = location.code.trim().toUpperCase();
+  if (code === "DEFECT") return { key: "defect", label: "Defect" };
+  if (location.hasPosition) return { key: "rack", label: "Rack" };
+  if (code !== "EXPOR" && isOpenPickArea(location)) return { key: "floor", label: "Floor" };
+  return { key: `loc:${location.code}`, label: location.code };
+}
+
+const BASE_COLUMNS: ReportColumn[] = [
+  { key: "defect", label: "Defect" },
+  { key: "floor", label: "Floor" },
+  { key: "rack", label: "Rack" },
+];
+
+const byCode = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
 // POST /api/stock-opname/combine
 // body: { opnameNumbers: string[] }
 //
-// Combines counts across the selected sessions PER LOCATION first, not
-// just per SKU — because the same physical location can legitimately be
-// counted by more than one CSO session. If every session that counted a
-// given location agrees on the quantity, that location contributes its
-// quantity ONCE to the SKU's combined total (not once per session — two
-// sessions agreeing on 500 is still 500, not 1000). If sessions disagree
-// on a location's quantity, that location is left UNRESOLVED (contributes
-// nothing to the default total) and flagged for the person to pick which
-// session's count to trust — the frontend does that selection and
-// recomputes the total client-side; this endpoint always reports the
-// default (conflicts excluded) state. Read-only — nothing gets changed.
+// The data behind Combine & Compare's report. Compares against live
+// location_stock, and only K3 imports are stored by the page: stock is never
+// changed.
+//
+//   locations: every rack, and every other location the selected sessions
+//   counted, with what the system has there and each session's count. The page
+//   works out the rows and statuses, since those depend on which session the
+//   person picks where sessions disagree.
+//
+//   items: system quantity per SKU and report column across EVERY location,
+//   plus the SKU's K3 quantity. The counted side is added up by the page too.
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const opnameNumbers = sanitizeList(body.opnameNumbers);
@@ -90,157 +117,163 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "At least one opnameNumber is required" }, { status: 400 });
   }
 
-  const [emptyRow] = await db
-    .select({ count: sql<number>`count(*)`.mapWith(Number) })
-    .from(stockOpnameItems)
-    .where(and(inArray(stockOpnameItems.opnameNumber, opnameNumbers), isNull(stockOpnameItems.itemId)));
+  const [locationRows, lineRows, stockRows, itemRows, k3Links] = await Promise.all([
+    db
+      .select({
+        id: locations.id,
+        code: locations.code,
+        hasPosition: locationTypes.hasPosition,
+        pickable: locationTypes.pickable,
+        allowsMultipleSku: locationTypes.allowsMultipleSku,
+      })
+      .from(locations)
+      .innerJoin(locationTypes, eq(locations.type, locationTypes.code)),
+    db
+      .select({
+        locationId: stockOpnameItems.locationId,
+        itemId: stockOpnameItems.itemId,
+        opnameNumber: stockOpnameItems.opnameNumber,
+        countedQty: stockOpnameItems.countedQty,
+        countedBy: users.username,
+      })
+      .from(stockOpnameItems)
+      .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
+      .where(inArray(stockOpnameItems.opnameNumber, opnameNumbers)),
+    db
+      .select({ locationId: locationStock.locationId, itemId: locationStock.itemId, quantity: locationStock.quantity })
+      .from(locationStock),
+    db.select({ id: items.id, sku: items.sku, name: items.name }).from(items),
+    db
+      .select({
+        importId: k3StockImportSessions.importId,
+        opnameNumber: k3StockImportSessions.opnameNumber,
+        fileName: k3StockImports.fileName,
+        unmatched: k3StockImports.unmatched,
+        importedAtRaw: k3StockImports.importedAt,
+        importedAt: sql<string>`to_char(${k3StockImports.importedAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI')`,
+        by: users.username,
+      })
+      .from(k3StockImportSessions)
+      .innerJoin(k3StockImports, eq(k3StockImports.id, k3StockImportSessions.importId))
+      .leftJoin(users, eq(users.id, k3StockImports.importedBy))
+      .where(inArray(k3StockImportSessions.opnameNumber, opnameNumbers)),
+  ]);
 
-  // Every counted (location, item) line across the selected sessions.
-  const countedLineRows = await db
-    .select({
-      itemId: stockOpnameItems.itemId,
-      opnameNumber: stockOpnameItems.opnameNumber,
-      locationCode: locations.code,
-      countedQty: stockOpnameItems.countedQty,
-      countedAt: stockOpnameItems.countedAt,
-      countedByUsername: users.username,
-    })
-    .from(stockOpnameItems)
-    .innerJoin(locations, eq(stockOpnameItems.locationId, locations.id))
-    .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
-    .where(and(inArray(stockOpnameItems.opnameNumber, opnameNumbers), isNotNull(stockOpnameItems.itemId)));
-
-  // item -> location -> every session's count at that location
-  const rawByItemLocation = new Map<number, Map<string, CountedEntry[]>>();
-  for (const row of countedLineRows) {
-    const itemId = row.itemId as number;
-    if (!rawByItemLocation.has(itemId)) rawByItemLocation.set(itemId, new Map());
-    const byLoc = rawByItemLocation.get(itemId)!;
-    if (!byLoc.has(row.locationCode)) byLoc.set(row.locationCode, []);
-    byLoc.get(row.locationCode)!.push({
-      opnameNumber: row.opnameNumber,
-      countedQty: row.countedQty ?? 0,
-      countedAt: row.countedAt ? row.countedAt.toISOString() : null,
-      countedByUsername: row.countedByUsername,
-    });
-  }
-
-  // Total system quantity per item, across every location — the figure
-  // the combined count is ultimately checked against.
-  const systemAgg = await db
-    .select({
-      itemId: locationStock.itemId,
-      systemQty: sql<number>`sum(${locationStock.quantity})`.mapWith(Number),
-    })
-    .from(locationStock)
-    .groupBy(locationStock.itemId);
-  const systemByItem = new Map(systemAgg.map((r) => [r.itemId, r.systemQty]));
-
-  // Live system quantity per item, broken down by location — for the
-  // side-by-side detail view.
-  const allItemIds = Array.from(new Set([...rawByItemLocation.keys(), ...systemByItem.keys()]));
-
-  const systemLocationRows =
-    allItemIds.length > 0
-      ? await db
-          .select({
-            itemId: locationStock.itemId,
-            locationCode: locations.code,
-            quantity: locationStock.quantity,
-          })
-          .from(locationStock)
-          .innerJoin(locations, eq(locationStock.locationId, locations.id))
-          .where(inArray(locationStock.itemId, allItemIds))
-      : [];
-
-  const systemByItemLocation = new Map<number, Map<string, number>>();
-  for (const row of systemLocationRows) {
-    if (row.quantity === 0) continue;
-    if (!systemByItemLocation.has(row.itemId)) systemByItemLocation.set(row.itemId, new Map());
-    systemByItemLocation.get(row.itemId)!.set(row.locationCode, row.quantity);
-  }
-
-  const itemRows = allItemIds.length > 0 ? await db.select().from(items).where(inArray(items.id, allItemIds)) : [];
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
+  const columnByLocation = new Map(locationRows.map((l) => [l.id, columnOf(l)]));
 
-  function buildBreakdownForItem(itemId: number) {
-    const countedMap = rawByItemLocation.get(itemId) ?? new Map<string, CountedEntry[]>();
-    const systemMap = systemByItemLocation.get(itemId) ?? new Map<string, number>();
-    const allCodes = Array.from(new Set([...countedMap.keys(), ...systemMap.keys()])).sort((a, b) =>
-      a.localeCompare(b)
-    );
+  const itemInfo = (itemId: number) => ({
+    itemId,
+    sku: itemById.get(itemId)?.sku ?? `#${itemId}`,
+    name: itemById.get(itemId)?.name ?? "(unknown item)",
+  });
 
-    let hasConflict = false;
-    let combinedQty = 0;
-
-    const locationBreakdown = allCodes.map((locationCode) => {
-      const entries = (countedMap.get(locationCode) ?? []).sort((a, b) => a.opnameNumber.localeCompare(b.opnameNumber));
-      const systemQty = systemMap.has(locationCode) ? systemMap.get(locationCode)! : null;
-
-      let resolvedQty: number | null = null;
-      let conflict = false;
-
-      if (entries.length > 0) {
-        const distinctQtys = new Set(entries.map((e) => e.countedQty));
-        if (distinctQtys.size === 1) {
-          resolvedQty = entries[0].countedQty;
-        } else {
-          conflict = true;
-          hasConflict = true;
-        }
-      }
-
-      if (resolvedQty !== null) combinedQty += resolvedQty;
-
-      return { locationCode, systemQty, entries, resolvedQty, conflict };
+  // What the selected sessions counted, per location.
+  const countsByLocation = new Map<
+    number,
+    {
+      opnameNumber: string;
+      countedBy: string | null;
+      itemId: number | null;
+      sku: string | null;
+      name: string | null;
+      qty: number;
+    }[]
+  >();
+  for (const line of lineRows) {
+    if (!countsByLocation.has(line.locationId)) countsByLocation.set(line.locationId, []);
+    countsByLocation.get(line.locationId)!.push({
+      opnameNumber: line.opnameNumber,
+      countedBy: line.countedBy,
+      ...(line.itemId === null ? { itemId: null, sku: null, name: null } : itemInfo(line.itemId)),
+      qty: line.countedQty ?? 0,
     });
-
-    return { locationBreakdown, combinedQty, hasConflict };
   }
 
-  const resultItems = allItemIds
-    .map((itemId) => {
-      const { locationBreakdown, combinedQty, hasConflict } = buildBreakdownForItem(itemId);
-      const systemQty = systemByItem.get(itemId) ?? 0;
-      const difference = combinedQty - systemQty;
-      const item = itemById.get(itemId);
-      const status: "MATCH" | "MISMATCH" | "NEEDS_REVIEW" = hasConflict
-        ? "NEEDS_REVIEW"
-        : difference === 0
-          ? "MATCH"
-          : "MISMATCH";
-      return {
-        itemId,
-        itemSku: item?.sku ?? `#${itemId}`,
-        itemName: item?.name ?? "(unknown item)",
-        combinedQty,
-        systemQty,
-        difference,
-        status,
-        hasConflict,
-        locationBreakdown,
-      };
-    })
-    .sort((a, b) => {
-      if (a.hasConflict !== b.hasConflict) return a.hasConflict ? -1 : 1;
-      return Math.abs(b.difference) - Math.abs(a.difference) || a.itemSku.localeCompare(b.itemSku);
-    });
+  // What the system has, per location and per SKU + column.
+  const systemByLocation = new Map<number, { itemId: number; sku: string; name: string; qty: number }[]>();
+  const systemByItem = new Map<number, Record<string, number>>();
+  for (const row of stockRows) {
+    if (!systemByItem.has(row.itemId)) systemByItem.set(row.itemId, {});
+    const column = columnByLocation.get(row.locationId);
+    if (column) {
+      const figures = systemByItem.get(row.itemId)!;
+      figures[column.key] = (figures[column.key] ?? 0) + row.quantity;
+    }
+    if (row.quantity === 0) continue;
+    if (!systemByLocation.has(row.locationId)) systemByLocation.set(row.locationId, []);
+    systemByLocation.get(row.locationId)!.push({ ...itemInfo(row.itemId), qty: row.quantity });
+  }
 
-  const matches = resultItems.filter((i) => i.status === "MATCH").length;
-  const needsReview = resultItems.filter((i) => i.status === "NEEDS_REVIEW").length;
+  // Every rack (opnamed or not), then whatever else was counted.
+  const shownLocations = locationRows
+    .filter((l) => l.hasPosition || countsByLocation.has(l.id))
+    .sort((a, b) => Number(b.hasPosition) - Number(a.hasPosition) || byCode(a.code, b.code));
+
+  // Defect, Floor, Rack, then each other location with stock or a count.
+  const otherColumns = new Map<string, ReportColumn>();
+  for (const l of locationRows) {
+    const column = columnByLocation.get(l.id)!;
+    if (BASE_COLUMNS.some((b) => b.key === column.key)) continue;
+    if (countsByLocation.has(l.id) || systemByLocation.has(l.id)) otherColumns.set(column.key, column);
+  }
+  const columns = [...BASE_COLUMNS, ...[...otherColumns.values()].sort((a, b) => byCode(a.label, b.label))];
+
+  const racks = locationRows.filter((l) => l.hasPosition);
+  const racksOpnamed = racks.filter((l) => countsByLocation.has(l.id)).length;
+
+  // K3: one file per report, the newest one imported for a selected session.
+  const newestLink = k3Links.reduce<(typeof k3Links)[number] | null>(
+    (newest, link) => (!newest || link.importedAtRaw > newest.importedAtRaw ? link : newest),
+    null
+  );
+  const k3Lines = newestLink
+    ? await db
+        .select({ itemId: k3StockLines.itemId, quantity: k3StockLines.quantity })
+        .from(k3StockLines)
+        .where(eq(k3StockLines.importId, newestLink.importId))
+    : [];
+  const k3ByItem = new Map(k3Lines.map((l) => [l.itemId, l.quantity]));
+
+  const allItemIds = new Set<number>([...systemByItem.keys(), ...k3ByItem.keys()]);
+  for (const line of lineRows) if (line.itemId !== null) allItemIds.add(line.itemId);
 
   return NextResponse.json({
     opnameNumbers,
     sessionCount: opnameNumbers.length,
-    emptyConfirmations: emptyRow?.count ?? 0,
-    items: resultItems,
-    summary: {
-      totalSkus: resultItems.length,
-      matches,
-      mismatches: resultItems.length - matches - needsReview,
-      needsReview,
-      totalCombinedQty: resultItems.reduce((sum, i) => sum + i.combinedQty, 0),
-      totalSystemQty: resultItems.reduce((sum, i) => sum + i.systemQty, 0),
+    emptyConfirmations: lineRows.filter((l) => l.itemId === null).length,
+    rackCoverage: {
+      total: racks.length,
+      opnamed: racksOpnamed,
+      notOpnamed: racks.length - racksOpnamed,
     },
+    columns,
+    locations: shownLocations.map((location) => ({
+      locationCode: location.code,
+      column: columnByLocation.get(location.id)!.key,
+      allowsMultipleSku: location.allowsMultipleSku,
+      opnamed: countsByLocation.has(location.id),
+      system: systemByLocation.get(location.id) ?? [],
+      counts: countsByLocation.get(location.id) ?? [],
+    })),
+    items: [...allItemIds].map((itemId) => ({
+      ...itemInfo(itemId),
+      system: systemByItem.get(itemId) ?? {},
+      k3Qty: k3ByItem.get(itemId) ?? null,
+    })),
+    k3: newestLink
+      ? {
+          fileName: newestLink.fileName,
+          importedAt: newestLink.importedAt,
+          by: newestLink.by,
+          sessions: k3Links
+            .filter((l) => l.importId === newestLink.importId)
+            .map((l) => l.opnameNumber)
+            .sort(byCode),
+          matchedSkus: k3Lines.length,
+          totalQuantity: Math.round(k3Lines.reduce((sum, l) => sum + l.quantity, 0) * 1000) / 1000,
+          unmatched: newestLink.unmatched,
+        }
+      : null,
   });
 }

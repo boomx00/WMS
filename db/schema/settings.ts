@@ -27,6 +27,9 @@ export const settings = pgTable("settings", {
   // when weekly, or 1 to 31 when monthly (lib/stockOpnameCycle.ts).
   opnameCycleType: text("opname_cycle_type").notNull().default("WEEKLY"),
   opnameCycleStartDay: integer("opname_cycle_start_day").notNull().default(1),
+  // Operations Freeze: while true, every API route that changes stock is
+  // refused, for all roles, web and PDA (lib/operationsFreeze.ts).
+  operationsFrozen: boolean("operations_frozen").notNull().default(false),
 });
 
 export const appVersion = pgTable("app_version", {
