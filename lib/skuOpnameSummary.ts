@@ -4,14 +4,12 @@
 // counted (SO) quantity can be compared column by column, opname after
 // opname.
 //
-// System quantity per column: for every location that was counted, the
-// system quantity snapshotted on its line at the moment it was counted (the
-// same "System at count" the lines show). For locations that held stock but
-// were never counted, the stock at the moment the SKU was locked, rebuilt
-// from the ledger: today's stock minus every stock movement logged since
-// (the same backwards-from-live rule the ledgers use). Counted quantity per
-// column: the counted lines, by the column of the location they were
-// counted in.
+// System quantity per column: a SOSKU session only locks the SKU's TOTAL
+// system quantity when the SKU is added. The split per column is rebuilt
+// from the ledger: each location's stock at that moment = today's stock
+// minus every stock movement logged since (the same backwards-from-live
+// rule the ledgers use). Counted quantity per column: the counted lines,
+// by the column of the location they were counted in.
 
 import {
   items,
@@ -278,27 +276,13 @@ export async function getSkuOpnameEntries(
       buckets[key][field] += qty;
     };
 
-    const skuLines = linesByKey.get(`${row.opnameNumber}|${row.itemId}`) ?? [];
-
-    // System at count per counted location (one figure per location, even if
-    // it has more than one line).
-    const systemAtCount = new Map<number, number>();
-    for (const l of skuLines) systemAtCount.set(l.locationId, l.systemQty ?? 0);
-
-    // rebuiltTotal stays at the lock moment: it's compared with the locked
-    // SKU total for "unaccounted".
     let rebuiltTotal = 0;
     for (const [locationId, qty] of balancesAt(row.itemId, row.addedAt)) {
       rebuiltTotal += qty;
-      // Counted locations take their snapshot below; only locations that
-      // were never counted use the stock at the lock moment.
-      if (!systemAtCount.has(locationId)) add(bucketOf(locationId), "system", qty);
-    }
-    for (const [locationId, qty] of systemAtCount) {
       add(bucketOf(locationId), "system", qty);
     }
 
-    const lines = skuLines.map((l) => ({
+    const lines = (linesByKey.get(`${row.opnameNumber}|${row.itemId}`) ?? []).map((l) => ({
       locationCode: locationById.get(l.locationId)?.code ?? `#${l.locationId}`,
       bucket: bucketOf(l.locationId),
       systemQty: l.systemQty,
