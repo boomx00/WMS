@@ -175,7 +175,54 @@ export function DateReportModal({
   const diffCount = lines.filter((l) => l.hasDiff).length;
   const notedCount = lines.filter((l) => l.cell.adjustment).length;
 
-  function exportReport() {
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  // The second sheet: every location of the warehouse, not just the report's
+  // lines. SO comes from the same lines as the first sheet's totals.
+  async function buildLocationSheet(): Promise<XLSX.WorkSheet> {
+    const asOfDate = totalLines.reduce((latest, l) => (l.date > latest ? l.date : latest), "");
+    const res = await fetch("/api/stock-opname/summary/locations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        warehouseId: data.warehouse.id,
+        asOfDate,
+        lines: totalLines.map((l) => ({ opnameNumber: l.cell.opnameNumber, itemId: l.item.itemId })),
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error ?? `${labels.report_err_export} (${res.status})`);
+    const rows: { location: string; systemSku: string; systemQty: number | null; soSku: string; soQty: number | null }[] =
+      json.rows;
+    const sheet = XLSX.utils.aoa_to_sheet([
+      [`${labels.report_loc_title} — ${titleRange} — ${data.warehouse.name}`],
+      [labels.report_loc_note.replace("{date}", dayOf(asOfDate))],
+      [
+        labels.detail_th_location,
+        labels.report_loc_th_system_sku,
+        labels.report_loc_th_system_stock,
+        labels.report_loc_th_so_sku,
+        labels.report_loc_th_so_stock,
+      ],
+      ...rows.map((r) => [r.location, r.systemSku, r.systemQty ?? "", r.soSku, r.soQty ?? ""]),
+    ]);
+    sheet["!cols"] = [{ wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 14 }];
+    return sheet;
+  }
+
+  async function exportReport() {
+    setExporting(true);
+    setExportError(null);
+    let locationSheet: XLSX.WorkSheet;
+    try {
+      locationSheet = await buildLocationSheet();
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : labels.report_err_export);
+      return;
+    } finally {
+      setExporting(false);
+    }
     const header: (string | number)[] = ["#", labels.summary_th_sku, labels.summary_th_product];
     if (multi) header.push(labels.report_th_opname_date);
     for (const b of buckets) header.push(`${b.name} ${labels.summary_system}`, `${b.name} ${labels.summary_so}`, labels.summary_delta);
@@ -217,6 +264,7 @@ export function DateReportModal({
     );
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, sheetName(labels.report_title));
+    XLSX.utils.book_append_sheet(book, locationSheet, sheetName(labels.report_loc_sheet));
     const fileRange = multi ? `${dates[0]}_${dates[dates.length - 1]}` : dates[0];
     XLSX.writeFile(book, `stock-opname-report-${fileRange}.xlsx`, { bookType: "xlsx" });
   }
@@ -303,14 +351,15 @@ export function DateReportModal({
               ))}
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {exportError && <span className="text-xs text-red-400">{exportError}</span>}
             <button
               type="button"
               onClick={exportReport}
-              disabled={lines.length === 0}
+              disabled={lines.length === 0 || exporting}
               className="px-3 py-1.5 rounded-md border border-zinc-800 text-sm text-zinc-300 hover:text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
             >
-              {labels.summary_export}
+              {exporting ? labels.report_exporting : labels.summary_export}
             </button>
             <button
               type="button"
