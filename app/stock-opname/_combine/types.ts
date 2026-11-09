@@ -1,6 +1,7 @@
 // Shapes of the Combine CSO API response and the report built from it.
 
-export type ReportColumn = { key: string; label: string };
+// packs: a packs location's column — its System / SO are loose packs.
+export type ReportColumn = { key: string; label: string; packs?: boolean };
 
 export type SystemLine = { itemId: number; sku: string; name: string; qty: number };
 
@@ -27,8 +28,9 @@ export type CombinedItem = {
   itemId: number;
   sku: string;
   name: string;
-  system: Record<string, number>; // per report column; missing = 0
+  system: Record<string, number>; // per report column; missing = 0 (packs in a packs column)
   k3Qty: number | null; // null = not in the K3 file (0 in K3)
+  packsPerCarton?: number; // turns a packs column into cartons for the totals
 };
 
 export type K3Info = {
@@ -83,9 +85,9 @@ export type SkuSummaryRow = {
   itemId: number;
   sku: string;
   name: string;
-  system: Record<string, number>;
-  so: Record<string, number>;
-  totalSystem: number;
+  system: Record<string, number>; // packs in a packs column
+  so: Record<string, number>; // packs in a packs column
+  totalSystem: number; // cartons — packs ÷ packs per carton (decimal)
   totalSo: number;
   difference: number;
   status: SkuStatus;

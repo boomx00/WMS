@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { stockOpname, stockOpnameItems, stockOpnameLocations, locations, items, users, locationStock } from "@/db/schema";
 import { eq, inArray } from "drizzle-orm";
+import { lineInUnit } from "@/lib/opnamePacks";
 
 // A handful of code paths (and possibly older rows) can end up with the
 // literal 4-character string "null" instead of a true SQL NULL — that
@@ -88,6 +89,10 @@ export async function GET(
       systemSku: stockOpnameItems.systemSku,
       countedQty: stockOpnameItems.countedQty,
       difference: stockOpnameItems.difference,
+      countsInPacks: stockOpnameItems.countsInPacks,
+      systemPacks: stockOpnameItems.systemPacks,
+      countedPacks: stockOpnameItems.countedPacks,
+      differencePacks: stockOpnameItems.differencePacks,
       countedAt: stockOpnameItems.countedAt,
       countedByUsername: users.username,
     })
@@ -137,17 +142,28 @@ export async function GET(
             itemSku: items.sku,
             itemName: items.name,
             quantity: locationStock.quantity,
+            loosePacks: locationStock.loosePacks,
           })
           .from(locationStock)
           .innerJoin(items, eq(locationStock.itemId, items.id))
           .where(inArray(locationStock.locationId, locationIds))
       : [];
 
-  const liveByLocation = new Map<number, { sku: string; name: string; quantity: number }[]>();
+  // At a packs location the live stock is its loose packs (quantity is 0
+  // there); `unit` says which.
+  const liveQty = (row: { quantity: number; loosePacks: number }) => row.quantity || row.loosePacks;
+  const liveUnit = (row: { quantity: number; loosePacks: number }) =>
+    row.quantity === 0 && row.loosePacks !== 0 ? ("PACKS" as const) : ("CARTON" as const);
+  const liveByLocation = new Map<
+    number,
+    { sku: string; name: string; quantity: number; unit: "CARTON" | "PACKS" }[]
+  >();
   for (const row of liveStockRows) {
-    if (row.quantity === 0) continue;
+    if (liveQty(row) === 0) continue;
     if (!liveByLocation.has(row.locationId)) liveByLocation.set(row.locationId, []);
-    liveByLocation.get(row.locationId)!.push({ sku: row.itemSku, name: row.itemName, quantity: row.quantity });
+    liveByLocation
+      .get(row.locationId)!
+      .push({ sku: row.itemSku, name: row.itemName, quantity: liveQty(row), unit: liveUnit(row) });
   }
 
   // Scoped to exactly (location, item) — used to show "Current System Qty"
@@ -155,7 +171,7 @@ export async function GET(
   // every other SKU that happens to share the same FLOOR cell.
   const liveByLocationItem = new Map<string, number>();
   for (const row of liveStockRows) {
-    liveByLocationItem.set(`${row.locationId}-${row.itemId}`, row.quantity);
+    liveByLocationItem.set(`${row.locationId}-${row.itemId}`, liveQty(row));
   }
 
   const report = allLocations.map((loc) => {
@@ -166,7 +182,7 @@ export async function GET(
     return {
       locationCode: loc.locationCode,
       counted: counts.length > 0,
-      currentSystemStock: liveEntries.map((e) => ({ sku: e.sku, name: e.name, quantity: e.quantity })),
+      currentSystemStock: liveEntries.map((e) => ({ sku: e.sku, name: e.name, quantity: e.quantity, unit: e.unit })),
       currentSystemQty,
       items: counts.map((c) => {
         const cleanedSystemSku = cleanSystemSku(c.systemSku);
@@ -185,10 +201,9 @@ export async function GET(
           itemId: c.itemId,
           itemSku: c.itemSku ?? null,
           itemName: c.itemName ?? "(Empty — no stock found)",
-          systemQty: c.systemQty,
+          // In the line's unit: loose packs at a packs location ("PACKS").
+          ...lineInUnit(c),
           systemSku: formatSkuWithNames(cleanedSystemSku, snapshotNameBySku),
-          countedQty: c.countedQty,
-          difference: c.difference,
           countedAt: c.countedAt,
           countedByUsername: c.countedByUsername,
           // Live current stock for THIS specific item at this location —

@@ -12,7 +12,8 @@ export type Session = {
   confirmedAt: string | Date | null;
   confirmDescription: string | null;
   confirmedAdjustmentCode: string | null;
-  // Per-SKU (SOSKU-) sessions only — summed across every SKU in the session.
+  // Per-SKU (SOSKU-) sessions only — summed across every SKU in the session:
+  // Total Stock locations only, loose packs as cartons (decimal).
   isSkuSession: boolean;
   skuCount: number;
   skuLockedQty: number;
@@ -31,12 +32,14 @@ export type ReportItem = {
   countedByUsername: string | null;
   currentItemQty: number | null; // ADD
   skuMatch: "MATCH" | "MISMATCH";
+  // "PACKS": a packs-location line — every quantity on it is loose packs.
+  unit?: "CARTON" | "PACKS";
 };
 
 export type ReportLocation = {
   locationCode: string;
   counted: boolean;
-  currentSystemStock: { sku: string; name: string; quantity: number }[];
+  currentSystemStock: { sku: string; name: string; quantity: number; unit?: "CARTON" | "PACKS" }[];
   currentSystemQty: number;
   items: ReportItem[];
 };

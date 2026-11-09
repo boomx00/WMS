@@ -31,6 +31,9 @@ export function LocationCheckTab({
   onChoose: (key: string, opnameNumber: string) => void;
 }) {
   const [filter, setFilter] = useState<"ALL" | LocationStatus>("ALL");
+  // " pk" after a quantity in a packs location's column (loose packs).
+  const packsColumns = new Set(result.columns.filter((c) => c.packs).map((c) => c.key));
+  const packsUnit = (column: string) => (packsColumns.has(column) ? " pk" : "");
 
   const countOf = (status: LocationStatus) => rows.filter((r) => r.status === status).length;
   const shown = filter === "ALL" ? rows : rows.filter((r) => r.status === filter);
@@ -89,14 +92,18 @@ export function LocationCheckTab({
                   <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">{row.system?.sku ?? "—"}</td>
                   <td className="px-3 py-1.5 text-zinc-500">{row.system?.name ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono text-zinc-400">
-                    {row.system ? row.system.qty.toLocaleString() : "—"}
+                    {row.system ? `${row.system.qty.toLocaleString()}${packsUnit(row.column)}` : "—"}
                   </td>
                   <td className="px-3 py-1.5 font-mono text-zinc-300 whitespace-nowrap">
                     {row.so?.sku ?? (row.emptyConfirmed ? <span className="font-sans text-zinc-500 italic">Empty</span> : "—")}
                   </td>
                   <td className="px-3 py-1.5 text-zinc-500">{row.so?.name ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono">
-                    {row.so?.qty != null ? row.so.qty.toLocaleString() : row.emptyConfirmed ? "0" : "—"}
+                    {row.so?.qty != null
+                      ? `${row.so.qty.toLocaleString()}${packsUnit(row.column)}`
+                      : row.emptyConfirmed
+                        ? "0"
+                        : "—"}
                   </td>
                   <td className="px-3 py-1.5">
                     <CsoByCell row={row} selections={selections} onChoose={onChoose} />

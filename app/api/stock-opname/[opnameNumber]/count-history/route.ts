@@ -60,6 +60,8 @@ export async function GET(
     .select({
       delta: stockOpnameCountEvents.delta,
       resultingTotal: stockOpnameCountEvents.resultingTotal,
+      // delta / resultingTotal are loose packs on a packs-location line.
+      countsInPacks: stockOpnameCountEvents.countsInPacks,
       createdAt: stockOpnameCountEvents.createdAt,
       username: users.username,
     })
@@ -74,5 +76,7 @@ export async function GET(
     )
     .orderBy(desc(stockOpnameCountEvents.createdAt));
 
-  return NextResponse.json(rows);
+  return NextResponse.json(
+    rows.map(({ countsInPacks, ...r }) => ({ ...r, unit: countsInPacks ? "PACKS" : "CARTON" }))
+  );
 }

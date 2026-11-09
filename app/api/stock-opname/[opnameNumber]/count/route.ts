@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { stockOpnameSkus, stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, locations, items, locationStock } from "@/db/schema";
+import { stockOpnameSkus, stockOpnameItems, stockOpnameLocations, stockOpnameCountEvents, items, locationStock } from "@/db/schema";
 import { eq, and, or, inArray, isNull } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
@@ -40,6 +40,9 @@ export async function PATCH(
   // deliberate statement that nothing is here, not a malformed request.
   const isEmptyConfirmation = !rawScanned;
   const countedQty = isEmptyConfirmation ? 0 : Number(body.countedQty);
+  // unit: "PACKS" — countedQty is loose packs (sent by the PDA at a packs
+  // location, i.e. a "Counted in loose packs" type). Anything else = cartons.
+  const sentInPacks = body.unit === "PACKS";
 
   if (!locationCode) {
     return NextResponse.json({ error: "locationCode is required" }, { status: 400 });
@@ -63,9 +66,23 @@ export async function PATCH(
     );
   }
 
-  const [location] = await db.select().from(locations).where(eq(locations.code, locationCode));
+  const location = await getLocationByCode(db, locationCode);
   if (!location) {
     return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
+  }
+
+  // Packs locations are counted in loose packs, everything else in cartons.
+  // A PDA app from before packs sends no unit — refuse rather than store
+  // its carton count as packs. Confirming a location empty needs no unit.
+  const inPacks = location.rules.countsInPacks;
+  if (inPacks && !sentInPacks && !isEmptyConfirmation) {
+    return NextResponse.json(
+      { error: `${location.code} is counted in loose packs — wait for the location to load and enter packs (or update the PDA app)` },
+      { status: 400 }
+    );
+  }
+  if (!inPacks && sentInPacks) {
+    return NextResponse.json({ error: `${location.code} is counted in cartons, not packs` }, { status: 400 });
   }
 
   let item: typeof items.$inferSelect | null = null;
@@ -118,19 +135,21 @@ export async function PATCH(
   // TOTAL quantity across every item at the location — if that's nonzero,
   // the resulting difference correctly flags "system expected stock here,
   // PIC found none".
+  // At a packs location the same snapshot is taken in loose packs.
+  const stockOf = (r: { quantity: number; loosePacks: number }) => (inPacks ? r.loosePacks : r.quantity);
   let systemQty: number;
   if (item) {
     const [stockRow] = await db
       .select()
       .from(locationStock)
       .where(and(eq(locationStock.locationId, location.id), eq(locationStock.itemId, item.id)));
-    systemQty = stockRow?.quantity ?? 0;
+    systemQty = stockRow ? stockOf(stockRow) : 0;
   } else {
     const allStockRows = await db
-      .select({ quantity: locationStock.quantity })
+      .select({ quantity: locationStock.quantity, loosePacks: locationStock.loosePacks })
       .from(locationStock)
       .where(eq(locationStock.locationId, location.id));
-    systemQty = allStockRows.reduce((sum, r) => sum + r.quantity, 0);
+    systemQty = allStockRows.reduce((sum, r) => sum + stockOf(r), 0);
   }
 
   const difference = countedQty - systemQty;
@@ -151,11 +170,11 @@ export async function PATCH(
     systemSku = systemQty !== 0 ? item.sku : null;
   } else {
     const allStockAtLocation = await db
-      .select({ itemId: locationStock.itemId, quantity: locationStock.quantity })
+      .select({ itemId: locationStock.itemId, quantity: locationStock.quantity, loosePacks: locationStock.loosePacks })
       .from(locationStock)
       .where(eq(locationStock.locationId, location.id));
 
-    const nonZeroItemIds = allStockAtLocation.filter((r) => r.quantity !== 0).map((r) => r.itemId);
+    const nonZeroItemIds = allStockAtLocation.filter((r) => stockOf(r) !== 0).map((r) => r.itemId);
     if (nonZeroItemIds.length > 0) {
       const systemItems = await db.select({ sku: items.sku }).from(items).where(inArray(items.id, nonZeroItemIds));
       systemSku = systemItems.map((i) => i.sku).join(", ") || null;
@@ -247,16 +266,36 @@ export async function PATCH(
     snapshotCountsInTotal: location.countsInTotalStock,
   };
 
+  // Cartons go in systemQty / countedQty / difference, loose packs in the
+  // *_packs columns — the other unit's columns are 0 on the line.
+  const figures = inPacks
+    ? {
+        countsInPacks: true,
+        systemQty: 0,
+        countedQty: 0,
+        difference: 0,
+        systemPacks: systemQty,
+        countedPacks: countedQty,
+        differencePacks: difference,
+      }
+    : {
+        countsInPacks: false,
+        systemQty,
+        countedQty,
+        difference,
+        systemPacks: 0,
+        countedPacks: null,
+        differencePacks: 0,
+      };
+
   let result;
-  const previousQty = existingLine?.countedQty ?? 0;
+  const previousQty = (existingLine?.countsInPacks ? existingLine.countedPacks : existingLine?.countedQty) ?? 0;
   if (existingLine) {
     [result] = await db
       .update(stockOpnameItems)
       .set({
-        systemQty,
+        ...figures,
         systemSku,
-        countedQty,
-        difference,
         countedAt: new Date(),
         countedBy: session.userId,
         ...(existingLine.snapshotWarehouseId === null ? snapshot : {}),
@@ -270,10 +309,8 @@ export async function PATCH(
         opnameNumber,
         locationId: location.id,
         itemId: item?.id ?? null,
-        systemQty,
+        ...figures,
         systemSku,
-        countedQty,
-        difference,
         countedAt: new Date(),
         countedBy: session.userId,
         ...snapshot,
@@ -293,12 +330,18 @@ export async function PATCH(
       itemId: item?.id ?? null,
       delta,
       resultingTotal: countedQty,
+      countsInPacks: inPacks,
       userId: session.userId,
     });
   }
 
   return NextResponse.json({
     ...result,
+    // In the line's unit (loose packs at a packs location).
+    systemQty,
+    countedQty,
+    difference,
+    unit: inPacks ? "PACKS" : "CARTON",
     itemSku: item?.sku ?? null,
     itemName: item?.name ?? null,
     locationCode: location.code,

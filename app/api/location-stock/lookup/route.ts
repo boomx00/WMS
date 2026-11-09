@@ -45,6 +45,9 @@ export async function GET(req: NextRequest) {
     allowsMultipleSku: location.rules.allowsMultipleSku,
     hasPosition: location.rules.hasPosition,
     pickable: location.rules.pickable,
+    // Holds loose packs, not cartons (a packs location): stock opname counts
+    // packs here. Its stock isn't listed in `stock` (cartons only).
+    countsInPacks: location.rules.countsInPacks,
     isReceiving: location.isReceiving,
     isStaging: location.isStaging,
     stock: rows,

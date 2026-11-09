@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { stockOpname, stockOpnameItems, stockOpnameLocations, locations, items, users } from "@/db/schema";
+import { lineInUnit } from "@/lib/opnamePacks";
 import { eq } from "drizzle-orm";
 
 // GET /api/stock-opname/:opnameNumber/report
@@ -47,6 +48,10 @@ export async function GET(
       systemQty: stockOpnameItems.systemQty,
       countedQty: stockOpnameItems.countedQty,
       difference: stockOpnameItems.difference,
+      countsInPacks: stockOpnameItems.countsInPacks,
+      systemPacks: stockOpnameItems.systemPacks,
+      countedPacks: stockOpnameItems.countedPacks,
+      differencePacks: stockOpnameItems.differencePacks,
       countedAt: stockOpnameItems.countedAt,
       countedByUsername: users.username,
     })
@@ -70,9 +75,8 @@ export async function GET(
         itemId: c.itemId,
         itemSku: c.itemSku,
         itemName: c.itemName,
-        systemQty: c.systemQty,
-        countedQty: c.countedQty,
-        difference: c.difference,
+        // In the line's unit: loose packs at a packs location ("PACKS").
+        ...lineInUnit(c),
         countedAt: c.countedAt,
         countedByUsername: c.countedByUsername,
       })),

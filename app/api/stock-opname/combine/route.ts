@@ -74,13 +74,21 @@ function sanitizeList(input: unknown): string[] {
   return input.map((v) => String(v).trim()).filter(Boolean);
 }
 
-type ReportColumn = { key: string; label: string };
+// packs: a packs location's own column — its figures are loose packs.
+type ReportColumn = { key: string; label: string; packs?: boolean };
 
 // Which column of the SKU Summary a location's stock goes in: Defect, Floor,
 // Rack, or a column of its own (Export, Outbound WH, ...). DEFECT and EXPOR are
 // floor-type locations told apart by their code.
-function columnOf(location: { code: string; hasPosition: boolean; pickable: boolean }): ReportColumn {
+function columnOf(location: {
+  code: string;
+  hasPosition: boolean;
+  pickable: boolean;
+  countsInPacks: boolean;
+}): ReportColumn {
   const code = location.code.trim().toUpperCase();
+  // A packs location ("Counted in loose packs" type): own column, in packs.
+  if (location.countsInPacks) return { key: `loc:${location.code}`, label: location.code, packs: true };
   if (code === "DEFECT") return { key: "defect", label: "Defect" };
   if (location.hasPosition) return { key: "rack", label: "Rack" };
   if (code !== "EXPOR" && isOpenPickArea(location)) return { key: "floor", label: "Floor" };
@@ -125,6 +133,7 @@ export async function POST(req: NextRequest) {
         hasPosition: locationTypes.hasPosition,
         pickable: locationTypes.pickable,
         allowsMultipleSku: locationTypes.allowsMultipleSku,
+        countsInPacks: locationTypes.countsInPacks,
       })
       .from(locations)
       .innerJoin(locationTypes, eq(locations.type, locationTypes.code)),
@@ -134,15 +143,22 @@ export async function POST(req: NextRequest) {
         itemId: stockOpnameItems.itemId,
         opnameNumber: stockOpnameItems.opnameNumber,
         countedQty: stockOpnameItems.countedQty,
+        countsInPacks: stockOpnameItems.countsInPacks,
+        countedPacks: stockOpnameItems.countedPacks,
         countedBy: users.username,
       })
       .from(stockOpnameItems)
       .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
       .where(inArray(stockOpnameItems.opnameNumber, opnameNumbers)),
     db
-      .select({ locationId: locationStock.locationId, itemId: locationStock.itemId, quantity: locationStock.quantity })
+      .select({
+        locationId: locationStock.locationId,
+        itemId: locationStock.itemId,
+        quantity: locationStock.quantity,
+        loosePacks: locationStock.loosePacks,
+      })
       .from(locationStock),
-    db.select({ id: items.id, sku: items.sku, name: items.name }).from(items),
+    db.select({ id: items.id, sku: items.sku, name: items.name, packsPerCarton: items.cartonBagQty }).from(items),
     db
       .select({
         importId: k3StockImportSessions.importId,
@@ -161,6 +177,11 @@ export async function POST(req: NextRequest) {
 
   const itemById = new Map(itemRows.map((i) => [i.id, i]));
   const columnByLocation = new Map(locationRows.map((l) => [l.id, columnOf(l)]));
+
+  // A packs location's stock and counts are loose packs, kept in packs here
+  // (its column is marked packs); the page turns them into cartons
+  // (packs ÷ packs per carton) for the totals.
+  const packsLocation = new Set(locationRows.filter((l) => l.countsInPacks).map((l) => l.id));
 
   const itemInfo = (itemId: number) => ({
     itemId,
@@ -186,14 +207,15 @@ export async function POST(req: NextRequest) {
       opnameNumber: line.opnameNumber,
       countedBy: line.countedBy,
       ...(line.itemId === null ? { itemId: null, sku: null, name: null } : itemInfo(line.itemId)),
-      qty: line.countedQty ?? 0,
+      qty: (line.countsInPacks ? line.countedPacks : line.countedQty) ?? 0,
     });
   }
 
   // What the system has, per location and per SKU + column.
   const systemByLocation = new Map<number, { itemId: number; sku: string; name: string; qty: number }[]>();
   const systemByItem = new Map<number, Record<string, number>>();
-  for (const row of stockRows) {
+  for (const raw of stockRows) {
+    const row = { ...raw, quantity: packsLocation.has(raw.locationId) ? raw.loosePacks : raw.quantity };
     if (!systemByItem.has(row.itemId)) systemByItem.set(row.itemId, {});
     const column = columnByLocation.get(row.locationId);
     if (column) {
@@ -258,6 +280,8 @@ export async function POST(req: NextRequest) {
     })),
     items: [...allItemIds].map((itemId) => ({
       ...itemInfo(itemId),
+      // For turning a packs column into cartons in the totals.
+      packsPerCarton: itemById.get(itemId)?.packsPerCarton ?? 0,
       system: systemByItem.get(itemId) ?? {},
       k3Qty: k3ByItem.get(itemId) ?? null,
     })),

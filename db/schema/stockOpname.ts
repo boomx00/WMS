@@ -22,6 +22,9 @@ export type OpnameColumnSnapshotRow = {
   stockColumnId: number | null;
   countsInTotalStock: boolean;
   qty: number;
+  // Loose packs at the location (packs locations only). Missing on locks
+  // from before packs existed.
+  packs?: number;
 };
 
 export const stockOpname = pgTable("stock_opname", {
@@ -47,6 +50,10 @@ export const stockOpnameSkus = pgTable(
     opnameNumber: varchar("opname_number", { length: 50 }).notNull().references(() => stockOpname.opnameNumber),
     itemId: integer("item_id").notNull().references(() => items.id),
     systemQty: integer("system_qty").notNull(),
+    // Loose packs locked with systemQty (packs locations — "Counted in loose
+    // packs" types). The summary's total = systemQty + systemPacks ÷ packs
+    // per carton. 0 on opnames from before packs existed.
+    systemPacks: integer("system_packs").notNull().default(0),
     addedBy: integer("added_by").references(() => users.id),
     addedAt: timestamp("added_at").defaultNow().notNull(),
     adjustmentNote: text("adjustment_note"),
@@ -86,6 +93,15 @@ export const stockOpnameItems = pgTable("stock_opname_items", {
   systemQty: integer("system_qty").notNull(),
   countedQty: integer("counted_qty"),
   difference: integer("difference"),
+  // A line at a packs location ("Counted in loose packs" type) counts loose
+  // packs: countsInPacks is set, the packs go in the *_packs columns and
+  // systemQty / countedQty / difference stay 0 — so every carton sum over
+  // opname lines leaves packs out. countsInPacks is kept on the line so it
+  // still reads right if the location's type changes later.
+  countsInPacks: boolean("counts_in_packs").notNull().default(false),
+  systemPacks: integer("system_packs").notNull().default(0),
+  countedPacks: integer("counted_packs"),
+  differencePacks: integer("difference_packs").notNull().default(0),
   countedAt: timestamp("counted_at"),
   countedBy: integer("counted_by").references(() => users.id),
   // The location's warehouse / Total Stock settings when it was first
@@ -121,6 +137,8 @@ export const stockOpnameCountEvents = pgTable("stock_opname_count_events", {
   itemId: integer("item_id").references(() => items.id), // null = a confirmed-empty commit
   delta: integer("delta").notNull(),
   resultingTotal: integer("resulting_total").notNull(),
+  // Packs-location counts: delta / resultingTotal are in loose packs.
+  countsInPacks: boolean("counts_in_packs").notNull().default(false),
   userId: integer("user_id")
     .notNull()
     .references(() => users.id),

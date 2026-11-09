@@ -10,6 +10,9 @@
 // report doesn't pick up today's stock.
 //
 // SO stock: the counted lines of the sessions the report asked for.
+//
+// A packs location ("Counted in loose packs" type) is shown in loose packs,
+// system and SO alike, with " (pk)" after its code.
 
 import {
   items,
@@ -82,12 +85,14 @@ export async function getLocationSheetRows(
     code: string;
     allowsMultipleSku: boolean;
     typeOrder: number;
+    countsInPacks: boolean;
   }[] = await db
     .select({
       id: locations.id,
       code: locations.code,
       allowsMultipleSku: locationTypes.allowsMultipleSku,
       typeOrder: locationTypes.sortOrder,
+      countsInPacks: locationTypes.countsInPacks,
     })
     .from(locations)
     .innerJoin(locationTypes, eq(locationTypes.code, locations.type))
@@ -95,13 +100,26 @@ export async function getLocationSheetRows(
   if (locationRows.length === 0) return [];
   const locationIds = locationRows.map((l) => l.id);
   const inWarehouse = new Set(locationIds);
+  const packsLocations = new Set(locationRows.filter((l) => l.countsInPacks).map((l) => l.id));
 
   // The report's sessions, per SKU.
   const wanted = new Set(lines.map((l) => `${l.opnameNumber}|${l.itemId}`));
   const opnameNumbers = [...new Set(lines.map((l) => l.opnameNumber))];
   const [lockRows, countRows]: [
-    { opnameNumber: string; itemId: number; addedAt: Date; columnSnapshot: { locationId: number; qty: number }[] | null }[],
-    { opnameNumber: string; itemId: number; locationId: number; countedQty: number | null }[],
+    {
+      opnameNumber: string;
+      itemId: number;
+      addedAt: Date;
+      columnSnapshot: { locationId: number; qty: number; packs?: number }[] | null;
+    }[],
+    {
+      opnameNumber: string;
+      itemId: number;
+      locationId: number;
+      countedQty: number | null;
+      countsInPacks: boolean;
+      countedPacks: number | null;
+    }[],
   ] =
     opnameNumbers.length === 0
       ? [[], []]
@@ -121,6 +139,8 @@ export async function getLocationSheetRows(
               itemId: stockOpnameItems.itemId,
               locationId: stockOpnameItems.locationId,
               countedQty: stockOpnameItems.countedQty,
+              countsInPacks: stockOpnameItems.countsInPacks,
+              countedPacks: stockOpnameItems.countedPacks,
             })
             .from(stockOpnameItems)
             .where(
@@ -142,14 +162,31 @@ export async function getLocationSheetRows(
   );
   const [itemRows, liveRows, eventRows]: [
     { id: number; sku: string }[],
-    { itemId: number; locationId: number; quantity: number }[],
-    { itemId: number; sourceLocationId: number | null; destinationLocationId: number | null; quantity: number; createdAt: Date }[],
+    { itemId: number; locationId: number; quantity: number; loosePacks: number }[],
+    {
+      itemId: number;
+      sourceLocationId: number | null;
+      destinationLocationId: number | null;
+      quantity: number;
+      loosePacks: number;
+      createdAt: Date;
+    }[],
   ] = await Promise.all([
     db.select({ id: items.id, sku: items.sku }).from(items),
     db
-      .select({ itemId: locationStock.itemId, locationId: locationStock.locationId, quantity: locationStock.quantity })
+      .select({
+        itemId: locationStock.itemId,
+        locationId: locationStock.locationId,
+        quantity: locationStock.quantity,
+        loosePacks: locationStock.loosePacks,
+      })
       .from(locationStock)
-      .where(and(inArray(locationStock.locationId, locationIds), ne(locationStock.quantity, 0))),
+      .where(
+        and(
+          inArray(locationStock.locationId, locationIds),
+          or(ne(locationStock.quantity, 0), ne(locationStock.loosePacks, 0))
+        )
+      ),
     // RELEASE moves nothing (lib/ledger.ts movesStock).
     db
       .select({
@@ -157,6 +194,7 @@ export async function getLocationSheetRows(
         sourceLocationId: locationStockEvents.sourceLocationId,
         destinationLocationId: locationStockEvents.destinationLocationId,
         quantity: locationStockEvents.quantity,
+        loosePacks: locationStockEvents.loosePacks,
         createdAt: locationStockEvents.createdAt,
       })
       .from(locationStockEvents)
@@ -174,10 +212,13 @@ export async function getLocationSheetRows(
   const skuOf = new Map(itemRows.map((i) => [i.id, i.sku]));
 
   const liveByItem = new Map<number, Map<number, number>>();
+  // In the location's unit: loose packs at a packs location.
   for (const r of liveRows) {
     if (!liveByItem.has(r.itemId)) liveByItem.set(r.itemId, new Map());
-    liveByItem.get(r.itemId)!.set(r.locationId, r.quantity);
+    liveByItem.get(r.itemId)!.set(r.locationId, packsLocations.has(r.locationId) ? r.loosePacks : r.quantity);
   }
+  const moved = (e: (typeof eventRows)[number], locationId: number) =>
+    packsLocations.has(locationId) ? e.loosePacks : e.quantity;
   const eventsByItem = new Map<number, typeof eventRows>();
   for (const e of eventRows) {
     if (!eventsByItem.has(e.itemId)) eventsByItem.set(e.itemId, []);
@@ -189,10 +230,13 @@ export async function getLocationSheetRows(
     for (const e of eventsByItem.get(itemId) ?? []) {
       if (e.createdAt <= at) continue;
       if (e.destinationLocationId) {
-        balances.set(e.destinationLocationId, (balances.get(e.destinationLocationId) ?? 0) - e.quantity);
+        balances.set(
+          e.destinationLocationId,
+          (balances.get(e.destinationLocationId) ?? 0) - moved(e, e.destinationLocationId)
+        );
       }
       if (e.sourceLocationId) {
-        balances.set(e.sourceLocationId, (balances.get(e.sourceLocationId) ?? 0) + e.quantity);
+        balances.set(e.sourceLocationId, (balances.get(e.sourceLocationId) ?? 0) + moved(e, e.sourceLocationId));
       }
     }
     return balances;
@@ -210,7 +254,9 @@ export async function getLocationSheetRows(
   for (const itemId of allItemIds) {
     const lock = lockByItem.get(itemId);
     if (lock?.columnSnapshot) {
-      for (const s of lock.columnSnapshot) addSystem(itemId, s.locationId, s.qty);
+      for (const s of lock.columnSnapshot) {
+        addSystem(itemId, s.locationId, packsLocations.has(s.locationId) ? s.packs ?? 0 : s.qty);
+      }
     } else {
       for (const [locationId, qty] of balancesAt(itemId, lock?.addedAt ?? asOf)) addSystem(itemId, locationId, qty);
     }
@@ -221,7 +267,7 @@ export async function getLocationSheetRows(
     if (!wanted.has(`${c.opnameNumber}|${c.itemId}`)) continue;
     const sku = skuOf.get(c.itemId);
     if (!sku) continue;
-    const qty = c.countedQty ?? 0;
+    const qty = (c.countsInPacks ? c.countedPacks : c.countedQty) ?? 0;
     // A 0 where the system has none of it is a corrected scan, not a finding.
     if (qty === 0 && !systemAt.get(c.locationId)?.has(sku)) continue;
     if (!countedAt.has(c.locationId)) countedAt.set(c.locationId, new Map());
@@ -237,6 +283,11 @@ export async function getLocationSheetRows(
         a.code.localeCompare(b.code, undefined, { numeric: true })
     )
     .flatMap((l) =>
-      pairLocationRows(l.code, !l.allowsMultipleSku, systemAt.get(l.id) ?? new Map(), countedAt.get(l.id) ?? new Map())
+      pairLocationRows(
+        l.countsInPacks ? `${l.code} (pk)` : l.code,
+        !l.allowsMultipleSku,
+        systemAt.get(l.id) ?? new Map(),
+        countedAt.get(l.id) ?? new Map()
+      )
     );
 }

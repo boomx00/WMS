@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { k3StockImportSessions, k3StockImports, k3StockLines, locationStock, locations, users } from "@/db/schema";
+import { items, k3StockImportSessions, k3StockImports, k3StockLines, locationStock, locations, users } from "@/db/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { getWarehouses, resolveWarehouse } from "@/lib/warehouses";
@@ -9,6 +9,7 @@ import {
   getSkuOpnameEntries,
   getSummaryBuckets,
   getSummaryItems,
+  packsToCartons,
   type SummaryEntry,
 } from "@/lib/skuOpnameSummary";
 
@@ -76,14 +77,23 @@ export async function GET(req: NextRequest) {
       .select({
         itemId: locationStock.itemId,
         quantity: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::int`,
+        loosePacks: sql<number>`coalesce(sum(${locationStock.loosePacks}), 0)::int`,
+        packsPerCarton: sql<number>`max(${items.cartonBagQty})::int`,
       })
       .from(locationStock)
       .innerJoin(locations, eq(locationStock.locationId, locations.id))
+      .innerJoin(items, eq(locationStock.itemId, items.id))
       .where(and(eq(locations.countsInTotalStock, true), eq(locations.warehouseId, warehouse.id)))
       .groupBy(locationStock.itemId),
   ]);
 
-  const stockByItem = new Map(stockRows.map((r) => [r.itemId, r.quantity]));
+  // Cartons plus loose packs as cartons (decimal), like Total Stock.
+  const stockByItem = new Map(
+    stockRows.map((r) => [
+      r.itemId,
+      Math.round((r.quantity + packsToCartons(r.loosePacks, r.packsPerCarton)) * 1000) / 1000,
+    ])
+  );
 
   // Every opname per product per day (entries come oldest first, so each
   // day's list is oldest first too).

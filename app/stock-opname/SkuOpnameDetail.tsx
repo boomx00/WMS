@@ -5,6 +5,10 @@ import { formatDateTime } from "@/lib/formatDateTime";
 
 export type SkuDetailLine = {
   locationCode: string;
+  // "PACKS": a packs location — the line's quantities are loose packs.
+  unit?: "CARTON" | "PACKS";
+  // false: not counted in Total Stock — listed, but not in the SKU's totals.
+  inTotalStock?: boolean;
   systemQty: number;
   countedQty: number;
   difference: number;
@@ -16,11 +20,18 @@ export type SkuDetailEntry = {
   itemId: number;
   skuCode: string;
   skuName: string;
-  systemQty: number; // locked at the moment the SKU was added to the session
+  systemQty: number; // locked when the SKU was added — Total Stock locations only
   countedQty: number;
   difference: number;
+  // Loose packs, on top of the cartons above (packs locations).
+  systemPacks?: number;
+  countedPacks?: number;
+  differencePacks?: number;
   lines: SkuDetailLine[];
 };
+
+// A quantity with " pk" when it's loose packs.
+const qty = (n: number, packs: boolean) => `${n.toLocaleString()}${packs ? " pk" : ""}`;
 
 export type SkuDetailResponse = {
   opnameNumber: string;
@@ -28,14 +39,14 @@ export type SkuDetailResponse = {
   skus: SkuDetailEntry[];
 };
 
-function MatchBadge({ difference }: { difference: number }) {
+function MatchBadge({ difference, packs = false }: { difference: number; packs?: boolean }) {
   if (difference === 0) {
     return <span className="text-emerald-400">Match</span>;
   }
   const sign = difference > 0 ? "+" : "";
   return (
     <span className={difference > 0 ? "text-amber-400" : "text-red-400"}>
-      Not match <span className="font-mono">({sign}{difference.toLocaleString()})</span>
+      Not match <span className="font-mono">({sign}{qty(difference, packs)})</span>
     </span>
   );
 }
@@ -83,11 +94,20 @@ export default function SkuOpnameDetail({
             <div className="flex items-center gap-4 text-xs text-zinc-500">
               <span>
                 Locked qty: <span className="font-mono text-zinc-300">{sku.systemQty.toLocaleString()}</span>
+                {(sku.systemPacks ?? 0) !== 0 && (
+                  <span className="font-mono text-sky-300"> + {sku.systemPacks!.toLocaleString()} pk</span>
+                )}
               </span>
               <span>
                 Stock opname qty: <span className="font-mono text-zinc-300">{sku.countedQty.toLocaleString()}</span>
+                {(sku.countedPacks ?? 0) !== 0 && (
+                  <span className="font-mono text-sky-300"> + {sku.countedPacks!.toLocaleString()} pk</span>
+                )}
               </span>
               <MatchBadge difference={sku.difference} />
+              {(sku.systemPacks || sku.countedPacks) ? (
+                <MatchBadge difference={sku.differencePacks ?? 0} packs />
+              ) : null}
               {onDelete && (
                 <button
                   type="button"
@@ -121,13 +141,18 @@ export default function SkuOpnameDetail({
                     key={line.locationCode}
                     className="border-t border-zinc-800/60 hover:bg-zinc-900/50 transition-colors"
                   >
-                    <td className="py-1.5 px-3 font-mono text-amber-500">{line.locationCode}</td>
-                    <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
-                      {line.systemQty.toLocaleString()}
+                    <td className="py-1.5 px-3 font-mono text-amber-500">
+                      {line.locationCode}
+                      {line.inTotalStock === false && (
+                        <span className="ml-2 font-sans text-[10px] text-zinc-500">not in Total Stock</span>
+                      )}
                     </td>
-                    <td className="py-1.5 px-3 text-right font-mono">{line.countedQty.toLocaleString()}</td>
+                    <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
+                      {qty(line.systemQty, line.unit === "PACKS")}
+                    </td>
+                    <td className="py-1.5 px-3 text-right font-mono">{qty(line.countedQty, line.unit === "PACKS")}</td>
                     <td className="py-1.5 px-3">
-                      <MatchBadge difference={line.difference} />
+                      <MatchBadge difference={line.difference} packs={line.unit === "PACKS"} />
                     </td>
                     <td className="py-1.5 px-3 font-mono text-zinc-500 whitespace-nowrap">
                       {formatDateTime(line.countedAt)}

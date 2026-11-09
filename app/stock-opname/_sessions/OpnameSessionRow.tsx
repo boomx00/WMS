@@ -6,6 +6,11 @@ import { formatDateTime } from "@/lib/formatDateTime";
 import SkuOpnameDetail, { type SkuDetailResponse } from "../SkuOpnameDetail";
 import type { Session, ReportResponse } from "./types";
 import { STATUS_STYLES, CurrentSystemCell, DifferenceBadge } from "./badges";
+
+// A quantity with " pk" when it's loose packs (a packs-location line).
+const qty = (n: number, packs: boolean) => `${n.toLocaleString()}${packs ? " pk" : ""}`;
+// A location's live stock is loose packs when every entry is.
+const livePacks = (entries: { unit?: string }[]) => entries.length > 0 && entries.every((e) => e.unit === "PACKS");
 import { ConfirmModal } from "./ConfirmModal";
 
 export function OpnameSessionRow({ session, labels }: { session: Session; labels: Record<string, string> }) {
@@ -99,7 +104,7 @@ export function OpnameSessionRow({ session, labels }: { session: Session; labels
                 Stock opname qty:{" "}
                 <span className="font-mono text-zinc-300">{session.skuCountedQty.toLocaleString()}</span>
               </span>
-              <DifferenceBadge difference={session.skuCountedQty - session.skuLockedQty} />
+              <DifferenceBadge difference={Math.round((session.skuCountedQty - session.skuLockedQty) * 1000) / 1000} />
             </span>
           ) : (
             <span className="text-xs text-zinc-500">
@@ -225,7 +230,7 @@ export function OpnameSessionRow({ session, labels }: { session: Session; labels
                         <CurrentSystemCell entries={loc.currentSystemStock} />
                       </td>
                       <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
-                        {loc.currentSystemQty.toLocaleString()}
+                        {qty(loc.currentSystemQty, livePacks(loc.currentSystemStock))}
                       </td>
                      <td colSpan={3} className="py-1.5 px-3 text-zinc-700">
                         Not counted yet
@@ -254,13 +259,13 @@ export function OpnameSessionRow({ session, labels }: { session: Session; labels
                           )}
                         </td>
                         <td className="py-1.5 px-3 text-right font-mono">
-                          {item.countedQty.toLocaleString()}
+                          {qty(item.countedQty, item.unit === "PACKS")}
                         </td>
                         <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
-                          {item.systemQty.toLocaleString()}
+                          {qty(item.systemQty, item.unit === "PACKS")}
                         </td>
                         <td className="py-1.5 px-3 text-right">
-                          <DifferenceBadge difference={item.difference} />
+                          <DifferenceBadge difference={item.difference} packs={item.unit === "PACKS"} />
                         </td>
                         <td className="py-1.5 px-3">
                           {item.itemId !== null ? (
@@ -278,8 +283,8 @@ export function OpnameSessionRow({ session, labels }: { session: Session; labels
                         </td>
                         <td className="py-1.5 px-3 text-right font-mono text-zinc-400">
                           {item.itemId !== null
-                            ? (item.currentItemQty ?? 0).toLocaleString()
-                            : loc.currentSystemQty.toLocaleString()}
+                            ? qty(item.currentItemQty ?? 0, item.unit === "PACKS")
+                            : qty(loc.currentSystemQty, livePacks(loc.currentSystemStock))}
                         </td>
                         <td className="py-1.5 px-3 text-zinc-500">{item.countedByUsername ?? "—"}</td>
                         <td className="py-1.5 px-3 text-zinc-500">

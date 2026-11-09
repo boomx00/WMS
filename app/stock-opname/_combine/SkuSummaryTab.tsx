@@ -154,15 +154,17 @@ export function SkuSummaryTab({
                   {columns.map((c) => {
                     const system = row.system[c.key] ?? 0;
                     const so = row.so[c.key] ?? 0;
+                    // A packs column shows loose packs.
+                    const unit = c.packs ? " pk" : "";
                     return (
                       <Fragment key={c.key}>
-                        <td className={`${num} text-zinc-400 border-l border-zinc-800/60`}>{system.toLocaleString()}</td>
-                        <td className={`${num} ${so === system ? "text-zinc-200" : "text-amber-400"}`}>{so.toLocaleString()}</td>
+                        <td className={`${num} text-zinc-400 border-l border-zinc-800/60`}>{system.toLocaleString()}{unit}</td>
+                        <td className={`${num} ${so === system ? "text-zinc-200" : "text-amber-400"}`}>{so.toLocaleString()}{unit}</td>
                       </Fragment>
                     );
                   })}
-                  <td className={`${num} text-zinc-400 border-l border-zinc-800/60`}>{row.totalSystem.toLocaleString()}</td>
-                  <td className={`${num} text-zinc-200`}>{row.totalSo.toLocaleString()}</td>
+                  <td className={`${num} text-zinc-400 border-l border-zinc-800/60`}>{fmtQty(row.totalSystem)}</td>
+                  <td className={`${num} text-zinc-200`}>{fmtQty(row.totalSo)}</td>
                   <td className={num}>
                     <SignedQty value={row.difference} />
                   </td>

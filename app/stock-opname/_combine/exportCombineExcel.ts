@@ -10,8 +10,10 @@ export function exportCombineExcel(
   skuRows: SkuSummaryRow[],
   excludedColumns: string[]
 ) {
+  // A packs location's quantities are loose packs: marked "(pk)".
+  const packsColumns = new Set(result.columns.filter((c) => c.packs).map((c) => c.key));
   const locationSheet = rows.map((row) => ({
-    Location: row.locationCode,
+    Location: packsColumns.has(row.column) ? `${row.locationCode} (pk)` : row.locationCode,
     "System SKU": row.system?.sku ?? "",
     "Product Name": row.system?.name ?? "",
     "System Qty": row.system?.qty ?? "",
@@ -29,8 +31,9 @@ export function exportCombineExcel(
   const skuSheet = skuRows.map((row) => {
     const out: Record<string, string | number> = { SKU: row.sku, Product: row.name };
     for (const c of columns) {
-      out[`${c.label} System`] = row.system[c.key] ?? 0;
-      out[`${c.label} SO`] = row.so[c.key] ?? 0;
+      const unit = c.packs ? " (pk)" : "";
+      out[`${c.label} System${unit}`] = row.system[c.key] ?? 0;
+      out[`${c.label} SO${unit}`] = row.so[c.key] ?? 0;
     }
     out["Total System"] = row.totalSystem;
     out["Total SO"] = row.totalSo;

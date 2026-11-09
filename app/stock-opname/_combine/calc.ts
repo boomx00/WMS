@@ -223,7 +223,16 @@ const round3 = (n: number) => Math.round(n * 1000) / 1000;
 // differences.
 export function summarizeSkus(result: CombineResponse, rows: ReportRow[], excludedColumns: string[]): SkuSummaryRow[] {
   const shownKeys = result.columns.map((c) => c.key).filter((k) => !excludedColumns.includes(k));
-  const sumShown = (figures: Record<string, number>) => shownKeys.reduce((sum, k) => sum + (figures[k] ?? 0), 0);
+  const packsKeys = new Set(result.columns.filter((c) => c.packs).map((c) => c.key));
+  // A packs column counts in the totals as cartons: packs ÷ packs per carton.
+  const sumShown = (figures: Record<string, number>, packsPerCarton: number) =>
+    round3(
+      shownKeys.reduce((sum, k) => {
+        const value = figures[k] ?? 0;
+        if (!packsKeys.has(k)) return sum + value;
+        return sum + (packsPerCarton > 0 ? value / packsPerCarton : 0);
+      }, 0)
+    );
 
   const soByItem = new Map<number, Record<string, number>>();
   const underReview = new Set<number>();
@@ -238,9 +247,9 @@ export function summarizeSkus(result: CombineResponse, rows: ReportRow[], exclud
   return result.items
     .map((item): SkuSummaryRow => {
       const so = soByItem.get(item.itemId) ?? {};
-      const totalSystem = sumShown(item.system);
-      const totalSo = sumShown(so);
-      const difference = totalSo - totalSystem;
+      const totalSystem = sumShown(item.system, item.packsPerCarton ?? 0);
+      const totalSo = sumShown(so, item.packsPerCarton ?? 0);
+      const difference = round3(totalSo - totalSystem);
       const k3 = result.k3 ? (item.k3Qty ?? 0) : null;
       return {
         itemId: item.itemId,

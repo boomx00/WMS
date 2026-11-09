@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { locationStock, locations, locationTypes, items } from "@/db/schema";
-import { eq, and, gt, ne } from "drizzle-orm";
+import { eq, and, gt, ne, or } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 
 function sanitize(input: string): string {
@@ -39,6 +39,9 @@ function compareRackCodes(a: string, b: string): number {
 // Every location holding the SKU, pickable or not (DEFECT, EXPOR, Outbound
 // WH...), with any non-zero quantity — the same rows the per-SKU stock
 // opname sums when it locks a SKU's system qty, so the list adds up to it.
+// Packs locations (loose packs) are listed too, with quantity 0 and their
+// packs in loosePacks; packsPerCarton is the item's packs per carton.
+// inTotalStock: whether the location counts toward Total Stock.
 export async function GET(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -54,7 +57,7 @@ export async function GET(req: NextRequest) {
   const includeAll = allParam === "1" || allParam === "true";
 
   const where = includeAll
-    ? and(eq(items.sku, sku), ne(locationStock.quantity, 0))
+    ? and(eq(items.sku, sku), or(ne(locationStock.quantity, 0), ne(locationStock.loosePacks, 0)))
     : and(
         eq(items.sku, sku),
         gt(locationStock.quantity, 0),
@@ -66,6 +69,8 @@ export async function GET(req: NextRequest) {
       locationCode: locations.code,
       locationType: locations.type,
       quantity: locationStock.quantity,
+      loosePacks: locationStock.loosePacks,
+      inTotalStock: locations.countsInTotalStock,
       hasPosition: locationTypes.hasPosition,
     })
     .from(locationStock)
@@ -79,15 +84,29 @@ export async function GET(req: NextRequest) {
 
   // Aggregate in case a location has more than one location_stock row
   // for the same item (same guard as the heatmap fix).
-  const byCode = new Map<string, { locationCode: string; locationType: string; quantity: number; hasPosition: boolean }>();
+  const byCode = new Map<
+    string,
+    {
+      locationCode: string;
+      locationType: string;
+      quantity: number;
+      loosePacks: number;
+      inTotalStock: boolean;
+      hasPosition: boolean;
+    }
+  >();
   for (const r of rows) {
     const existing = byCode.get(r.locationCode);
-    if (existing) existing.quantity += r.quantity;
-    else byCode.set(r.locationCode, { ...r, hasPosition: r.hasPosition ?? false });
+    if (existing) {
+      existing.quantity += r.quantity;
+      existing.loosePacks += r.loosePacks;
+    } else {
+      byCode.set(r.locationCode, { ...r, hasPosition: r.hasPosition ?? false });
+    }
   }
 
   // Rows that net to zero after aggregation aren't really "there".
-  const all = Array.from(byCode.values()).filter((r) => r.quantity !== 0);
+  const all = Array.from(byCode.values()).filter((r) => r.quantity !== 0 || r.loosePacks !== 0);
   const racks = all
     .filter((r) => r.hasPosition)
     .sort((a, b) => compareRackCodes(a.locationCode, b.locationCode));
@@ -96,5 +115,10 @@ export async function GET(req: NextRequest) {
     .sort((a, b) => a.locationCode.localeCompare(b.locationCode));
 
   const strip = ({ hasPosition, ...row }: (typeof all)[number]) => row;
-  return NextResponse.json({ sku, locations: [...racks, ...floors].map(strip) });
+  const [item] = await db.select({ packsPerCarton: items.cartonBagQty }).from(items).where(eq(items.sku, sku));
+  return NextResponse.json({
+    sku,
+    packsPerCarton: item?.packsPerCarton ?? null,
+    locations: [...racks, ...floors].map(strip),
+  });
 }
