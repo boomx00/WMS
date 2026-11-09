@@ -40,7 +40,8 @@ export function CurrentSystemCell({ entries }: { entries: { sku: string; name: s
   );
 }
 
-export function DifferenceBadge({ difference }: { difference: number }) {
+// packs: the line is counted in loose packs (a packs location).
+export function DifferenceBadge({ difference, packs = false }: { difference: number; packs?: boolean }) {
   if (difference === 0) {
     return <span className="text-emerald-400 font-mono">Match</span>;
   }
@@ -49,6 +50,7 @@ export function DifferenceBadge({ difference }: { difference: number }) {
     <span className={`font-mono ${difference > 0 ? "text-amber-400" : "text-red-400"}`}>
       {sign}
       {difference.toLocaleString()}
+      {packs && " pk"}
     </span>
   );
 }
