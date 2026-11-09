@@ -10,6 +10,14 @@
 // minus every stock movement logged since (the same backwards-from-live
 // rule the ledgers use). Counted quantity per column: the counted lines,
 // by the column of the location they were counted in.
+//
+// Lines use the SAME moment as the header: each line's systemQty is the
+// location's stock at lock time (rebuilt from the ledger), so the lines'
+// system and Δ add up to the column figures. The per-row snapshot stored
+// when the location was counted is kept as systemAtCount — those snapshots
+// are taken at different moments, so a move between two locations counted
+// at different times drops out of (or doubles up in) their sum.
+// movedSinceLock shows the net ledger movement at the location since lock.
 
 import {
   items,
@@ -36,7 +44,10 @@ export type BucketFigures = { system: number; counted: number };
 export type SummaryLine = {
   locationCode: string;
   bucket: string; // bucket key, or "outside" for another warehouse
-  systemQty: number; // at the moment the location was counted
+  systemQty: number; // at the moment the SKU was locked (same basis as the header)
+  systemAtCount: number; // snapshot stored when this location was counted
+  liveQty: number; // the location's stock now
+  movedSinceLock: number; // liveQty − systemQty: net ledger movement since lock
   countedQty: number;
   countedAt: string | null; // display time, Asia/Jakarta
   countedBy: string | null;
@@ -276,20 +287,31 @@ export async function getSkuOpnameEntries(
       buckets[key][field] += qty;
     };
 
+    // One moment for the header AND the lines: the lock.
+    const atLock = balancesAt(row.itemId, row.addedAt);
+    const live = liveByItem.get(row.itemId) ?? new Map<number, number>();
+
     let rebuiltTotal = 0;
-    for (const [locationId, qty] of balancesAt(row.itemId, row.addedAt)) {
+    for (const [locationId, qty] of atLock) {
       rebuiltTotal += qty;
       add(bucketOf(locationId), "system", qty);
     }
 
-    const lines = (linesByKey.get(`${row.opnameNumber}|${row.itemId}`) ?? []).map((l) => ({
-      locationCode: locationById.get(l.locationId)?.code ?? `#${l.locationId}`,
-      bucket: bucketOf(l.locationId),
-      systemQty: l.systemQty,
-      countedQty: l.countedQty ?? 0,
-      countedAt: l.countedAt,
-      countedBy: l.countedBy,
-    }));
+    const lines = (linesByKey.get(`${row.opnameNumber}|${row.itemId}`) ?? []).map((l) => {
+      const systemAtLock = atLock.get(l.locationId) ?? 0;
+      const liveQty = live.get(l.locationId) ?? 0;
+      return {
+        locationCode: locationById.get(l.locationId)?.code ?? `#${l.locationId}`,
+        bucket: bucketOf(l.locationId),
+        systemQty: systemAtLock,
+        systemAtCount: l.systemQty ?? 0,
+        liveQty,
+        movedSinceLock: liveQty - systemAtLock,
+        countedQty: l.countedQty ?? 0,
+        countedAt: l.countedAt,
+        countedBy: l.countedBy,
+      };
+    });
     let totalCounted = 0;
     for (const l of lines) {
       totalCounted += l.countedQty;
