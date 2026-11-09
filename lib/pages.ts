@@ -49,6 +49,7 @@ export type ActionKey =
   | "scan.inbound"
   | "scan.adjustLocation"
   | "scan.adjustBulk"
+  | "scan.adjustPacks"
   | "scan.correctQty"
   | "locations.edit"
   | "settings.edit";
@@ -84,6 +85,7 @@ export const APP_ACTIONS: AppAction[] = [
   { key: "scan.inbound", page: "/scan", label: "Inbound tab" },
   { key: "scan.adjustLocation", page: "/scan", label: "Adjust tab" },
   { key: "scan.adjustBulk", page: "/scan", label: "Bulk Adjust tab" },
+  { key: "scan.adjustPacks", page: "/scan", label: "Adjust Packs tab", hint: "Set loose packs at a packs location" },
   { key: "scan.correctQty", page: "/scan", label: "Correct Qty tab" },
   {
     key: "locations.edit",

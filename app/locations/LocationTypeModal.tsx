@@ -39,6 +39,9 @@ export default function LocationTypeModal({
   const [hasPosition, setHasPosition] = useState(type?.hasPosition ?? false);
   const [pickable, setPickable] = useState(type?.pickable ?? false);
   const [maxPallets, setMaxPallets] = useState(type?.maxPallets != null ? String(type.maxPallets) : "");
+  // Loose packs: such a location can't be pickable, have a rack position or
+  // a pallet limit, so those are switched off and greyed out while ticked.
+  const [countsInPacks, setCountsInPacks] = useState(type?.countsInPacks ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,9 +65,10 @@ export default function LocationTypeModal({
       body: JSON.stringify({
         name: name.trim(),
         allowsMultipleSku,
-        hasPosition,
-        pickable,
-        maxPallets: maxPallets.trim() === "" ? null : Number(maxPallets),
+        pickable: countsInPacks ? false : pickable,
+        hasPosition: countsInPacks ? false : hasPosition,
+        countsInPacks,
+        maxPallets: countsInPacks || maxPallets.trim() === "" ? null : Number(maxPallets),
       }),
     });
     setSaving(false);
@@ -133,11 +137,14 @@ export default function LocationTypeModal({
       <div>
         <p className="text-xs text-zinc-500 mb-2">{labels.field_other_rules}</p>
         <div className="space-y-2">
-          <Checkbox checked={hasPosition} onChange={setHasPosition} disabled={readOnly}>
+          <Checkbox checked={hasPosition && !countsInPacks} onChange={setHasPosition} disabled={readOnly || countsInPacks}>
             {labels.opt_has_position}
           </Checkbox>
-          <Checkbox checked={pickable} onChange={setPickable} disabled={readOnly}>
+          <Checkbox checked={pickable && !countsInPacks} onChange={setPickable} disabled={readOnly || countsInPacks}>
             {labels.opt_pickable}
+          </Checkbox>
+          <Checkbox checked={countsInPacks} onChange={setCountsInPacks} disabled={readOnly}>
+            {labels.opt_counts_in_packs}
           </Checkbox>
         </div>
         {turningOnPosition && positionMissing > 0 && (
@@ -153,10 +160,10 @@ export default function LocationTypeModal({
             type="number"
             min={1}
             step={1}
-            value={maxPallets}
+            value={countsInPacks ? "" : maxPallets}
             onChange={(e) => setMaxPallets(e.target.value)}
             placeholder={labels.max_pallets_placeholder}
-            disabled={readOnly}
+            disabled={readOnly || countsInPacks}
             className={inputClass}
           />
         </div>

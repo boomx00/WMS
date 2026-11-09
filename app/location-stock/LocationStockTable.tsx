@@ -21,6 +21,9 @@ type Row = {
   itemSku: string;
   itemName: string;
   quantity: number;
+  // Loose packs — only at "Counted in packs" locations, where quantity is 0.
+  loosePacks: number;
+  countsInPacks: boolean;
   palletQuantity: number;
   updatedAt: string | Date;
 };
@@ -257,6 +260,13 @@ function GroupSection({
   labels: Record <string, string>
 }) {
   const totalQuantity = group.rows.reduce((sum, r) => sum + r.quantity, 0);
+  const totalPacks = group.rows.reduce((sum, r) => sum + (r.loosePacks ?? 0), 0);
+  // A packs group shows its packs; a carton group its cartons (plus packs
+  // if a group ever mixes both).
+  const groupTotal =
+    totalPacks !== 0 && totalQuantity === 0
+      ? `${totalPacks.toLocaleString()} pk`
+      : `${totalQuantity.toLocaleString()} carton${totalPacks !== 0 ? ` + ${totalPacks.toLocaleString()} pk` : ""}`;
 
   return (
     <div className="border border-zinc-800 rounded-lg overflow-hidden">
@@ -278,7 +288,7 @@ function GroupSection({
             {group.locationCount.toLocaleString()} location(s) · {group.rows.length.toLocaleString()} SKU record(s)
           </span>
         </div>
-        <span className="text-xs font-mono text-zinc-500">{totalQuantity.toLocaleString()} carton</span>
+        <span className="text-xs font-mono text-zinc-500">{groupTotal}</span>
       </button>
 
       {open && (
@@ -357,7 +367,13 @@ function OutboundRow({ row }: { row: Row }) {
         </td>
         <td className="px-4 py-3 font-mono text-zinc-300">{row.itemSku}</td>
         <td className="px-4 py-3 text-zinc-500">{row.itemName}</td>
-        <td className="px-4 py-3 text-right font-mono">{row.quantity.toLocaleString()}</td>
+        <td className="px-4 py-3 text-right font-mono">
+          {row.countsInPacks ? (
+            <span className="text-sky-300">{(row.loosePacks ?? 0).toLocaleString()} pk</span>
+          ) : (
+            row.quantity.toLocaleString()
+          )}
+        </td>
         <td className="px-4 py-3 text-right text-zinc-500 text-xs">
           {new Date(row.updatedAt).toLocaleString()}
         </td>

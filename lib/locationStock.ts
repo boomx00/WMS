@@ -9,9 +9,12 @@ import { getLocationById, isSingleSku, maxPalletsFor } from "@/lib/locationRules
 //      (today: RACK).
 //   2. Max pallets: no more than that many pallets' worth of stock,
 //      computed as quantity / item.palletCartonQty (today: RACK, 14).
+//   3. "Counted in packs" types hold loose packs, never cartons — every
+//      carton flow (inbound, move, pick, ship, corrections) is refused
+//      there. Packs change only through adjustLoosePacks below.
 // `allowNegative` lets the resulting quantity go below zero instead of
 // throwing on removal — used for Move In v2 when the relevant setting
-// permits it. It has no bearing on the two rules above.
+// permits it. It has no bearing on the rules above.
 export async function adjustLocationStock(
   tx: any,
   locationId: number,
@@ -21,6 +24,9 @@ export async function adjustLocationStock(
 ): Promise<void> {
   const location = await getLocationById(tx, locationId);
   if (!location) throw new Error("Location not found");
+  if (location.rules.countsInPacks && delta !== 0) {
+    throw new Error(`${location.code} holds loose packs, not cartons — use Other Transactions → Packs`);
+  }
 
   const [existing] = await tx
     .select()
@@ -66,7 +72,7 @@ export async function adjustLocationStock(
       throw new Error(`Insufficient stock: tried to remove ${-delta}, only ${existing.quantity} available`);
     }
 
-    if (newQty === 0) {
+    if (newQty === 0 && (existing.loosePacks ?? 0) === 0) {
       // Delete rather than leave a lingering zero row — otherwise a
       // different SKU added to this same location later creates a second
       // row instead of cleanly replacing this one.
@@ -95,4 +101,46 @@ export async function moveLocationStock(
 ): Promise<void> {
   await adjustLocationStock(tx, sourceLocationId, itemId, -quantity, allowNegativeSource);
   await adjustLocationStock(tx, destinationLocationId, itemId, quantity);
+}
+
+// Adjusts the loose packs of (locationId, itemId) by `deltaPacks`. Only for
+// locations whose type is "Counted in packs"; never goes below zero. The
+// row is removed once it holds nothing. Used by Unpack / Repack
+// (app/api/other-transactions/packs) — the caller writes the ledger rows.
+export async function adjustLoosePacks(
+  tx: any,
+  locationId: number,
+  itemId: number,
+  deltaPacks: number
+): Promise<number> {
+  const location = await getLocationById(tx, locationId);
+  if (!location) throw new Error("Location not found");
+  if (!location.rules.countsInPacks) {
+    throw new Error(`${location.code} holds cartons, not loose packs`);
+  }
+
+  const [existing] = await tx
+    .select()
+    .from(locationStock)
+    .where(and(eq(locationStock.locationId, locationId), eq(locationStock.itemId, itemId)));
+
+  const current = existing?.loosePacks ?? 0;
+  const next = current + deltaPacks;
+  if (next < 0) {
+    throw new Error(`Not enough loose packs at ${location.code}: tried to take ${-deltaPacks}, only ${current} there`);
+  }
+
+  if (existing) {
+    if (next === 0 && existing.quantity === 0) {
+      await tx.delete(locationStock).where(eq(locationStock.id, existing.id));
+    } else {
+      await tx
+        .update(locationStock)
+        .set({ loosePacks: next, updatedAt: new Date() })
+        .where(eq(locationStock.id, existing.id));
+    }
+  } else if (next !== 0) {
+    await tx.insert(locationStock).values({ locationId, itemId, quantity: 0, loosePacks: next });
+  }
+  return next;
 }

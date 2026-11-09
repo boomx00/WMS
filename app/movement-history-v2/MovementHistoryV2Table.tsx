@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import RefreshButton from "@/components/RefreshButton";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 
-// Shown when "unpick" isn't in lib/pageLabels.ts yet.
-const UNPICK_LABELS = { unpick: "Un-pick" };
+// Shown when these aren't in lib/pageLabels.ts yet.
+const UNPICK_LABELS = { unpick: "Un-pick", unpack: "Unpack", repack: "Repack" };
 type Row = {
   id: number;
   type: string;
@@ -20,6 +20,9 @@ type Row = {
   workOrderNumber: string | null; // MO number, on inbound events
   supplierName?: string | null; // its own supplier (production inbound), else the product's
   quantity: number;
+  // Unpack / Repack packs-side rows: loose packs moved (quantity is 0 there).
+  loosePacks?: number;
+  packCode?: string | null; // PACK-<id>
   username: string;
   createdAt: string | Date;
   finalStock: number | null;
@@ -38,11 +41,16 @@ const TYPE_STYLES: Record<string, string> = {
   OTHER_INBOUND: "bg-sky-950 text-sky-300",
   OTHER_OUTBOUND: "bg-rose-950 text-rose-300",
   DELETE_SO: "bg-red-900 text-red-100",
+  UNPACK: "bg-yellow-950 text-yellow-300",
+  REPACK: "bg-emerald-950 text-emerald-300",
 };
 
 // The document an event belongs to: its SO (or Tambahan), or for an inbound
 // its MO number.
-const docNumber = (row: Row) => row.soNumber ?? row.tambahanNumber ?? row.workOrderNumber ?? null;
+const docNumber = (row: Row) => row.soNumber ?? row.tambahanNumber ?? row.workOrderNumber ?? row.packCode ?? null;
+
+// A row that moved loose packs rather than cartons.
+const isPacksRow = (row: Row) => (row.loosePacks ?? 0) !== 0;
 
 
 
@@ -103,6 +111,8 @@ export default function MovementHistoryV2Table({
   OTHER_INBOUND: labels.other_inbound,
   OTHER_OUTBOUND: labels.other_outbound,
   DELETE_SO: labels.delete_so,
+  UNPACK: labels.unpack,
+  REPACK: labels.repack,
 };
   // Quick search stays debounced-as-you-type, only active in simple mode.
   useEffect(() => {
@@ -340,6 +350,8 @@ export default function MovementHistoryV2Table({
                 <option className="text-sm" value="OTHER_INBOUND">{labels.other_inbound}</option>
                 <option className="text-sm" value="OTHER_OUTBOUND">{labels.other_outbound}</option>
                 <option className="text-sm" value="DELETE_SO">{labels.delete_so}</option>
+                <option className="text-sm" value="UNPACK">{labels.unpack}</option>
+                <option className="text-sm" value="REPACK">{labels.repack}</option>
               </select>
             </div>
             <div>
@@ -485,9 +497,15 @@ export default function MovementHistoryV2Table({
                       <div className="font-sans text-[11px] text-zinc-500">{row.supplierName}</div>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right font-mono">{row.quantity.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right font-mono">
+                    {isPacksRow(row) ? (
+                      <span className="text-sky-300">{row.loosePacks!.toLocaleString()} pk</span>
+                    ) : (
+                      row.quantity.toLocaleString()
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right font-mono text-zinc-400">
-                    {row.finalStock === null ? "—" : row.finalStock.toLocaleString()}
+                    {row.finalStock === null || isPacksRow(row) ? "—" : row.finalStock.toLocaleString()}
                   </td>
                   <td className="px-4 py-3 text-zinc-400">{row.username}</td>
                   <td className="px-4 py-3 text-right text-zinc-500 text-xs">

@@ -12,17 +12,22 @@ import { AdjustForm } from "./_forms/AdjustForm";
 import { CheckSoForm } from "./_forms/CheckSoForm";
 import { CorrectQtyForm } from "./_forms/CorrectQtyForm";
 import { AdjustBulkForm } from "./_forms/AdjustBulkForm";
+import { AdjustPacksForm } from "./_forms/AdjustPacksForm";
 
-type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST_LOCATION" | "ADJUST_BULK" | "ADJUST_PALLET_QTY" | "CHECK_SO";
+type Tab = "INBOUND" | "SHIP" | "INITIAL_STOCK" | "CONFIRM" | "ADJUST_LOCATION" | "ADJUST_BULK" | "ADJUST_PACKS" | "ADJUST_PALLET_QTY" | "CHECK_SO";
+
+// Shown until th_adjust_packs is added to the "scan" section of lib/pageLabels.ts.
+const FALLBACK_LABELS = { th_adjust_packs: "Adjust Packs" };
 
 export default function ScanForms() {
-  const labels = usePageLabels("scan")
+  const labels = usePageLabels("scan", FALLBACK_LABELS)
   const can = useCan();
   // Each tab is its own permission on /permissions (see lib/pages.ts).
   const allTabs: { key: Tab; label: string; action: ActionKey }[] = [
     { key: "INBOUND", label: labels.th_inbound, action: "scan.inbound" },
     { key: "ADJUST_LOCATION", label: labels.th_adjust, action: "scan.adjustLocation" },
     { key: "ADJUST_BULK", label: labels.th_adjust_bulk, action: "scan.adjustBulk" },
+    { key: "ADJUST_PACKS", label: labels.th_adjust_packs, action: "scan.adjustPacks" },
     { key: "ADJUST_PALLET_QTY", label: labels.th_correct, action: "scan.correctQty" },
     // { key: "CHECK_SO", label: labels.th_check_so },
   ];
@@ -70,6 +75,7 @@ export default function ScanForms() {
 {tab === "CHECK_SO" && <CheckSoForm />}
 {tab === "ADJUST_PALLET_QTY" && <CorrectQtyForm />}
 {tab === "ADJUST_BULK" && <AdjustBulkForm />}
+{tab === "ADJUST_PACKS" && <AdjustPacksForm />}
     </div>
   );
 }

@@ -132,6 +132,7 @@ export type LocationTypeInput = {
   hasPosition: boolean;
   pickable: boolean;
   maxPallets: number | null;
+  countsInPacks: boolean;
 };
 
 // Every field is required — the popup always sends the whole type.
@@ -143,6 +144,19 @@ export function parseLocationTypeInput(body: any): LocationTypeInput | AdminErro
     if (typeof body?.[key] !== "boolean") {
       return { error: `${key} must be true or false`, status: 400 };
     }
+  }
+
+  // Missing = false, so a page loaded before this rule existed still saves.
+  const countsInPacks = body?.countsInPacks ?? false;
+  if (typeof countsInPacks !== "boolean") {
+    return { error: "countsInPacks must be true or false", status: 400 };
+  }
+  // Packs only move by Unpack / Repack, never by picking or rack put-away.
+  if (countsInPacks && (body.pickable || body.hasPosition)) {
+    return {
+      error: "A type counted in packs can't be pickable or have a rack position — packs only move by Unpack / Repack",
+      status: 400,
+    };
   }
 
   let maxPallets: number | null = null;
@@ -159,7 +173,9 @@ export function parseLocationTypeInput(body: any): LocationTypeInput | AdminErro
     allowsMultipleSku: body.allowsMultipleSku,
     hasPosition: body.hasPosition,
     pickable: body.pickable,
-    maxPallets,
+    // Pallets don't apply to loose packs.
+    maxPallets: countsInPacks ? null : maxPallets,
+    countsInPacks,
   };
 }
 
@@ -194,6 +210,21 @@ export async function checkTypeRuleChange(
   existing: LocationTypeRules,
   input: LocationTypeInput
 ): Promise<AdminError | null> {
+  // Carton stock and loose packs never share a location: switching the
+  // unit needs the type's locations empty of the old one.
+  if (existing.countsInPacks !== input.countsInPacks) {
+    const held = await heldStock(db, eq(locations.type, existing.code));
+    const blocking = input.countsInPacks ? held.cartons : held.packs;
+    if (blocking.length > 0) {
+      return {
+        error: input.countsInPacks
+          ? `Can't count this type in packs: ${listCodes(blocking)} still ${blocking.length === 1 ? "holds" : "hold"} cartons. Move them out first.`
+          : `Can't switch this type back to cartons: ${listCodes(blocking)} still ${blocking.length === 1 ? "holds" : "hold"} loose packs. Repack them first.`,
+        status: 409,
+      };
+    }
+  }
+
   if (existing.allowsMultipleSku && !input.allowsMultipleSku) {
     const rows: { id: number }[] = await db
       .select({ id: locations.id })
@@ -208,6 +239,24 @@ export async function checkTypeRuleChange(
     }
   }
   return null;
+}
+
+// Codes of the locations matching `where` that hold cartons / loose packs.
+async function heldStock(db: any, where: SQL): Promise<{ cartons: string[]; packs: string[] }> {
+  const rows: { code: string; cartons: number; packs: number }[] = await db
+    .select({
+      code: locations.code,
+      cartons: sql<number>`coalesce(sum(abs(${locationStock.quantity})), 0)::int`,
+      packs: sql<number>`coalesce(sum(abs(${locationStock.loosePacks})), 0)::int`,
+    })
+    .from(locations)
+    .innerJoin(locationStock, eq(locationStock.locationId, locations.id))
+    .where(where)
+    .groupBy(locations.code);
+  return {
+    cartons: rows.filter((r) => r.cartons !== 0).map((r) => r.code),
+    packs: rows.filter((r) => r.packs !== 0).map((r) => r.code),
+  };
 }
 
 export async function nextTypeSortOrder(db: any): Promise<number> {
@@ -398,6 +447,29 @@ export async function validateLocation(
   // locations hold picked stock that can't be picked again — one or the other.
   if (input.isReceiving && input.isStaging) {
     return { error: "A location can be Receiving or Staging, not both", status: 400 };
+  }
+
+  // Loose packs only arrive by Unpack — never by inbound or picking.
+  if (rules.countsInPacks && (input.isReceiving || input.isStaging)) {
+    return { error: `${rules.name} locations hold loose packs, so they can't be Receiving or Staging`, status: 400 };
+  }
+
+  // Changing the type between cartons and packs needs the location empty
+  // of the old unit.
+  if (existing && existing.type !== input.type) {
+    const [oldRules]: LocationTypeRules[] = await db
+      .select()
+      .from(locationTypes)
+      .where(eq(locationTypes.code, existing.type));
+    if (oldRules && oldRules.countsInPacks !== rules.countsInPacks) {
+      const held = await heldStock(db, eq(locations.id, existing.id));
+      if (rules.countsInPacks && held.cartons.length > 0) {
+        return { error: `${existing.code} still holds cartons — move them out before making it a ${rules.name} location.`, status: 409 };
+      }
+      if (!rules.countsInPacks && held.packs.length > 0) {
+        return { error: `${existing.code} still holds loose packs — repack them before changing its type.`, status: 409 };
+      }
+    }
   }
 
   // Stock in a staging location is picked stock (marked or ecer). Ticking

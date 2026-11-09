@@ -11,5 +11,6 @@ export * from "./stockOpname";
 export * from "./k3";
 export * from "./tambahan";
 export * from "./otherTransactions";
+export * from "./packTransactions";
 export * from "./bulkAdjustments";
 export * from "./settings";

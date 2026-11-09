@@ -61,6 +61,7 @@ export async function GET(req: NextRequest) {
       sku: items.sku,
       name: items.name,
       palletCartonQty: items.palletCartonQty,
+      cartonBagQty: items.cartonBagQty, // packs per carton (Other Transactions → Packs)
     })
     .from(items)
     .where(or(ilike(items.sku, skuPattern), sql`LOWER(${normalizedName}) LIKE ${namePattern}`))

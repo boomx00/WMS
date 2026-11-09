@@ -78,6 +78,11 @@ export const locationTypes = pgTable(
     pickable: boolean("pickable").notNull().default(false),
     // Max pallets' worth of stock per location; null = no limit.
     maxPallets: integer("max_pallets"),
+    // Holds loose packs instead of cartons (today: the PACKS location).
+    // Stock there lives in location_stock.loose_packs — its carton quantity
+    // is always 0, so carton sums never pick packs up by accident. Packs
+    // only get in by Unpack and leave by Repack (Other Transactions → Packs).
+    countsInPacks: boolean("counts_in_packs").notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
 
     createdAt: timestamp("created_at").defaultNow().notNull(),

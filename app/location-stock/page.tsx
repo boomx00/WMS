@@ -25,6 +25,9 @@ async function getLocationStock() {
       itemSku: items.sku,
       itemName: items.name,
       quantity: locationStock.quantity,
+      // Loose packs ("Counted in packs" locations only; quantity is 0 there).
+      loosePacks: locationStock.loosePacks,
+      countsInPacks: locationTypes.countsInPacks,
 
       // Calculate pallet quantity
       palletQuantity: sql<number>`
@@ -42,7 +45,8 @@ async function getLocationStock() {
     .where(
       or(
         and(eq(locationTypes.pickable, true), eq(locationTypes.hasPosition, false)),
-        ne(locationStock.quantity, 0)
+        ne(locationStock.quantity, 0),
+        ne(locationStock.loosePacks, 0)
       )
     )
     .orderBy(locations.code);

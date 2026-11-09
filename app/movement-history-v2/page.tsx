@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { locationStockEvents, items, locations, users, salesOrders, suppliers } from "@/db/schema";
+import { locationStockEvents, items, locations, users, salesOrders, suppliers, packTransactions } from "@/db/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { finalStockAtDestinationSql } from "@/lib/finalStock";
@@ -56,6 +56,10 @@ async function getEventsForPage(page: number) {
       // The movement's supplier: its own (production inbound), else the product's.
       supplierName: suppliers.name,
       quantity: locationStockEvents.quantity,
+      // Unpack / Repack: loose packs moved (packs-side rows, quantity 0) and
+      // the PACK-<id> code (shown in the No Doc column).
+      loosePacks: locationStockEvents.loosePacks,
+      packCode: packTransactions.transactionCode,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
       // Resulting location_stock balance at the "To" location immediately
@@ -69,6 +73,7 @@ async function getEventsForPage(page: number) {
     .leftJoin(destLoc, eq(locationStockEvents.destinationLocationId, destLoc.id))
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
     .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
+    .leftJoin(packTransactions, eq(locationStockEvents.packTransactionId, packTransactions.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
     .leftJoin(suppliers, sql`${suppliers.id} = coalesce(${locationStockEvents.supplierId}, ${items.supplierId})`)
     // Same tiebreak as pageIds — several events can share the exact same

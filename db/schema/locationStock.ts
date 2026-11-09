@@ -16,6 +16,7 @@ import { salesOrders } from "./salesOrders";
 import { tambahanOrders } from "./tambahan";
 import { otherTransactions } from "./otherTransactions";
 import { bulkAdjustments } from "./bulkAdjustments";
+import { packTransactions } from "./packTransactions";
 
 // v2 stock: location_stock (source of truth) and location_stock_events (the ledger).
 
@@ -30,6 +31,9 @@ export const locationStock = pgTable(
       .notNull()
       .references(() => items.id),
     quantity: integer("quantity").notNull().default(0),
+    // Loose packs, only at locations whose type is "Counted in packs"
+    // (quantity stays 0 there). Always 0 everywhere else.
+    loosePacks: integer("loose_packs").notNull().default(0),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("location_stock_location_item_idx").on(table.locationId, table.itemId)]
@@ -52,6 +56,13 @@ export const locationStockEventTypeEnum = pgEnum("location_stock_event_type", [
   // location it was marked in, or (for what had already shipped) from
   // nowhere. Its SO number is kept in deleted_so_number.
   "DELETE_SO",
+  // Loose packs (Other Transactions → Packs). Each is logged as two rows:
+  // the carton side (quantity) and the packs side (loose_packs, quantity 0),
+  // so carton ledgers never see packs. UNPACK: cartons leave a location,
+  // their good packs enter a packs location. REPACK: packs leave the packs
+  // location, whole cartons enter a location.
+  "UNPACK",
+  "REPACK",
 ]);
 
 export const locationStockEvents = pgTable(
@@ -82,6 +93,10 @@ export const locationStockEvents = pgTable(
     // Who the stock came from: production inbound (INBOUND / DEFAULT_INBOUND
     // from the PDA) is set to the Production supplier automatically.
     supplierId: integer("supplier_id").references(() => suppliers.id),
+    // Loose packs moved by this row (UNPACK / REPACK packs side): packs into
+    // the destination or out of the source. 0 on every carton row.
+    loosePacks: integer("loose_packs").notNull().default(0),
+    packTransactionId: integer("pack_transaction_id").references(() => packTransactions.id),
   },
   (table) => [
     index("location_stock_events_item_created_idx").on(table.itemId, table.createdAt),

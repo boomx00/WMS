@@ -207,7 +207,10 @@ function TypesTab({
                   className="border-t border-zinc-800 hover:bg-zinc-900/50 cursor-pointer"
                 >
                   <td className={td}>
-                    <div className="text-zinc-200">{t.name}</div>
+                    <div className="flex items-center gap-2 text-zinc-200">
+                      {t.name}
+                      {t.countsInPacks && <Badge>{labels.badge_packs}</Badge>}
+                    </div>
                     <div className="font-mono text-xs text-zinc-600">{t.code}</div>
                   </td>
                   <td className={td}>

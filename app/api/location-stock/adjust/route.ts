@@ -57,6 +57,13 @@ export async function PATCH(req: NextRequest) {
   if (!location) {
     return NextResponse.json({ error: "Unknown location code" }, { status: 404 });
   }
+  // Loose packs only change by Unpack / Repack (Other Transactions → Packs).
+  if (location.rules.countsInPacks) {
+    return NextResponse.json(
+      { error: `${location.code} holds loose packs — use System Control → Adjust Packs instead` },
+      { status: 400 }
+    );
+  }
 
   const [item] = await db.select().from(items).where(eq(items.sku, itemSku));
   if (!item) {

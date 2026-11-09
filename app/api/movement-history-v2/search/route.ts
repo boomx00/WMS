@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStockEvents, items, locations, users, salesOrders, suppliers } from "@/db/schema";
+import { locationStockEvents, items, locations, users, salesOrders, suppliers, packTransactions } from "@/db/schema";
 import { eq, desc, or, and, ilike, gte, lt, inArray, sql } from "drizzle-orm";
 import { asPhysicalMove, UNPICK_TYPE } from "@/lib/unpick";
 import { alias } from "drizzle-orm/pg-core";
@@ -31,6 +31,8 @@ const VALID_EVENT_TYPES = [
   "OTHER_INBOUND",
   "OTHER_OUTBOUND",
   "DELETE_SO",
+  "UNPACK",
+  "REPACK",
 ] as const;
 type EventType = (typeof VALID_EVENT_TYPES)[number];
 
@@ -100,7 +102,8 @@ export async function GET(req: NextRequest) {
                 ilike(locationStockEvents.deletedSoNumber, `%${so}%`),
                 ilike(tambahanOrders.tambahanNumber, `%${so}%`),
                 ilike(tambahanOrders.convertedSoNumber, `%${so}%`),
-                ilike(locationStockEvents.workOrderNumber, `%${so}%`)
+                ilike(locationStockEvents.workOrderNumber, `%${so}%`),
+                ilike(packTransactions.transactionCode, `%${so}%`)
               )
             : undefined,
           typeCondition,
@@ -124,6 +127,7 @@ export async function GET(req: NextRequest) {
           ilike(salesOrders.soNumber, pattern),
           ilike(locationStockEvents.deletedSoNumber, pattern),
           ilike(locationStockEvents.workOrderNumber, pattern),
+          ilike(packTransactions.transactionCode, pattern),
           ilike(tambahanOrders.tambahanNumber, pattern),
           ilike(tambahanOrders.convertedSoNumber, pattern),
           ilike(users.username, pattern),
@@ -147,6 +151,10 @@ export async function GET(req: NextRequest) {
       workOrderNumber: locationStockEvents.workOrderNumber,
       supplierName: suppliers.name,
       quantity: locationStockEvents.quantity,
+      // Unpack / Repack: loose packs moved (packs-side rows, quantity 0) and
+      // the PACK-<id> code.
+      loosePacks: locationStockEvents.loosePacks,
+      packCode: packTransactions.transactionCode,
       username: users.username,
       createdAt: locationStockEvents.createdAt,
       finalStock: finalStockAtDestinationSql,
@@ -157,6 +165,7 @@ export async function GET(req: NextRequest) {
     .leftJoin(destLoc, eq(locationStockEvents.destinationLocationId, destLoc.id))
     .leftJoin(salesOrders, eq(locationStockEvents.salesOrderId, salesOrders.id))
         .leftJoin(tambahanOrders, eq(locationStockEvents.tambahanOrderId, tambahanOrders.id))
+    .leftJoin(packTransactions, eq(locationStockEvents.packTransactionId, packTransactions.id))
     .innerJoin(users, eq(locationStockEvents.userId, users.id))
     .leftJoin(suppliers, sql`${suppliers.id} = ${eventSupplierId}`)
     .where(whereClause)

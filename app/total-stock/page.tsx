@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { locationStock, locations, locationTypes, items } from "@/db/schema";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import { getStockColumns } from "@/lib/stockColumns";
 import { getWarehouses, pickDefaultWarehouse } from "@/lib/warehouses";
 import TotalStockTable, { type SkuStock } from "./TotalStockTable";
@@ -18,12 +18,15 @@ async function getTotalStock(warehouseId: number): Promise<SkuStock[]> {
       itemSku: items.sku,
       itemName: items.name,
       palletCartonQty: items.palletCartonQty,
+      packsPerCarton: items.cartonBagQty,
       locationCode: locations.code,
       locationType: locations.type,
       locationArea: locations.area,
       stockColumnId: locations.stockColumnId,
       typeOrder: locationTypes.sortOrder,
       quantity: locationStock.quantity,
+      // Loose packs ("Counted in packs" locations; their quantity is 0).
+      loosePacks: locationStock.loosePacks,
       // Formatted in SQL (24-hour, UTC) so the browser can't shift the timezone
       updatedAt: sql<string>`to_char(${locationStock.updatedAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI')`,    })
     .from(locationStock)
@@ -32,7 +35,7 @@ async function getTotalStock(warehouseId: number): Promise<SkuStock[]> {
     .innerJoin(items, eq(locationStock.itemId, items.id))
     .where(
       and(
-        ne(locationStock.quantity, 0),
+        or(ne(locationStock.quantity, 0), ne(locationStock.loosePacks, 0)),
         eq(locations.countsInTotalStock, true),
         eq(locations.warehouseId, warehouseId)
       )
@@ -50,7 +53,9 @@ async function getTotalStock(warehouseId: number): Promise<SkuStock[]> {
         sku: row.itemSku,
         name: row.itemName,
         palletCartonQty: Number(row.palletCartonQty) || 0,
+        packsPerCarton: Number(row.packsPerCarton) || 0,
         totalQuantity: 0,
+        totalPacks: 0,
         locations: [],
       };
       byItem.set(row.itemId, entry);
@@ -58,12 +63,14 @@ async function getTotalStock(warehouseId: number): Promise<SkuStock[]> {
 
     typeOrderByCode.set(row.locationCode, row.typeOrder);
     entry.totalQuantity += row.quantity;
+    entry.totalPacks += row.loosePacks;
     entry.locations.push({
       locationCode: row.locationCode,
       locationType: row.locationType,
       locationArea: row.locationArea,
       stockColumnId: row.stockColumnId,
       quantity: row.quantity,
+      loosePacks: row.loosePacks,
       updatedAt: row.updatedAt,
     });
   }

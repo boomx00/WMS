@@ -18,6 +18,8 @@ export type SkuLocation = {
   locationArea: string | null;
   stockColumnId: number | null; // Total Stock column; null = total only
   quantity: number;
+  // Loose packs — only at "Counted in packs" locations, where quantity is 0.
+  loosePacks: number;
   updatedAt: string;
 };
 
@@ -30,7 +32,9 @@ export type SkuStock = {
   sku: string;
   name: string;
   palletCartonQty: number;
-  totalQuantity: number;
+  packsPerCarton: number; // Items page "carton bag qty"
+  totalQuantity: number; // cartons
+  totalPacks: number; // loose packs, on top of the cartons
   locations: SkuLocation[];
 };
 
@@ -62,9 +66,43 @@ function columnTotals(sku: SkuStock): Map<number, number> {
   return totals;
 }
 
-function exportRow(sku: SkuStock, columns: StockColumn[]): (string | number)[] {
+// Loose packs per Total Stock column for one SKU (packs locations only).
+function columnPacks(sku: SkuStock): Map<number, number> {
+  const totals = new Map<number, number>();
+  for (const l of sku.locations) {
+    if (l.stockColumnId === null || !l.loosePacks) continue;
+    totals.set(l.stockColumnId, (totals.get(l.stockColumnId) ?? 0) + l.loosePacks);
+  }
+  return totals;
+}
+
+// Cartons plus loose packs as a fraction of a carton (packs ÷ packs per
+// carton), to 3 decimals — the same basis as K3's decimal stock.
+function withPacks(cartons: number, packs: number, packsPerCarton: number): number {
+  if (!packs || packsPerCarton <= 0) return cartons;
+  return Math.round((cartons + packs / packsPerCarton) * 1000) / 1000;
+}
+
+// "120", "4 pk" (packs only), or "120 + 4 pk".
+function formatCartonsPacks(cartons: number, packs: number): string {
+  if (!packs) return cartons.toLocaleString();
+  if (!cartons) return `${packs.toLocaleString()} pk`;
+  return `${cartons.toLocaleString()} + ${packs.toLocaleString()} pk`;
+}
+
+// A SKU's total in cartons, loose packs included as a decimal (30.5).
+const skuTotal = (sku: SkuStock) => withPacks(sku.totalQuantity, sku.totalPacks, sku.packsPerCarton);
+
+// Up to 3 decimals, trailing zeros dropped: 30, 30.5, 30.667.
+const formatTotal = (value: number) => value.toLocaleString(undefined, { maximumFractionDigits: 3 });
+
+// Columns hold cartons (a packs column: 0); TOTAL includes loose packs as a
+// decimal. With loose packs in the warehouse, one more column: LOOSE PACKS.
+function exportRow(sku: SkuStock, columns: StockColumn[], withPackColumns: boolean): (string | number)[] {
   const totals = columnTotals(sku);
-  return [sku.sku, sku.name, ...columns.map((c) => totals.get(c.id) ?? 0), sku.totalQuantity];
+  const row: (string | number)[] = [sku.sku, sku.name, ...columns.map((c) => totals.get(c.id) ?? 0), skuTotal(sku)];
+  if (withPackColumns) row.push(sku.totalPacks);
+  return row;
 }
 
 function SortableTh({
@@ -157,7 +195,7 @@ export default function TotalStockTable({
         case "locations":
           return dirMul * (a.locations.length - b.locations.length);
         case "total":
-          return dirMul * (a.totalQuantity - b.totalQuantity);
+          return dirMul * (skuTotal(a) - skuTotal(b));
         case "pallets": {
           const pa = palletValue(a.totalQuantity, a.palletCartonQty);
           const pb = palletValue(b.totalQuantity, b.palletCartonQty);
@@ -168,14 +206,16 @@ export default function TotalStockTable({
         }
         default: {
           const columnId = Number(sortKey.slice(4));
-          return dirMul * ((columnTotals(a).get(columnId) ?? 0) - (columnTotals(b).get(columnId) ?? 0));
+          const value = (s: SkuStock) =>
+            withPacks(columnTotals(s).get(columnId) ?? 0, columnPacks(s).get(columnId) ?? 0, s.packsPerCarton);
+          return dirMul * (value(a) - value(b));
         }
       }
     });
   }, [skus, search, sortKey, sortDir]);
 
   const grandTotal = useMemo(
-    () => visible.reduce((sum, s) => sum + s.totalQuantity, 0),
+    () => Math.round(visible.reduce((sum, s) => sum + skuTotal(s), 0) * 1000) / 1000,
     [visible]
   );
 
@@ -197,14 +237,21 @@ export default function TotalStockTable({
   const activeWarehouse = warehouses.find((w) => w.id === activeWarehouseId) ?? null;
 
   function exportAll() {
-    const rows = skus.map((sku) => exportRow(sku, columns));
+    const withPackColumns = skus.some((s) => s.totalPacks !== 0);
+    const rows = skus.map((sku) => exportRow(sku, columns, withPackColumns));
     const tabPart =
       warehouses.length > 1 && activeWarehouse
         ? `-${activeWarehouse.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`
         : "";
     downloadXlsx(
       `total-stock${tabPart}-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      ["SKU CODE", "SKU NAME", ...columns.map((c) => columnNameFor(c, language).toUpperCase()), "TOTAL"],
+      [
+        "SKU CODE",
+        "SKU NAME",
+        ...columns.map((c) => columnNameFor(c, language).toUpperCase()),
+        "TOTAL",
+        ...(withPackColumns ? ["LOOSE PACKS"] : []),
+      ],
       rows
     );
   }
@@ -251,7 +298,7 @@ export default function TotalStockTable({
         </div>
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
           <p className="text-xs text-zinc-500 mb-1">{labels.total_stock_card}</p>
-          <p className="text-lg font-semibold">{grandTotal.toLocaleString()}</p>
+          <p className="text-lg font-semibold">{formatTotal(grandTotal)}</p>
         </div>
       </div>
 
@@ -307,6 +354,7 @@ export default function TotalStockTable({
               visible.map((sku) => {
                 const open = expanded.has(sku.itemId);
                 const totals = columnTotals(sku);
+                const packs = columnPacks(sku);
 
                 return (
                   <Fragment key={sku.itemId}>
@@ -338,12 +386,20 @@ export default function TotalStockTable({
                         {sku.locations.length.toLocaleString()}
                       </td>
                       {columns.map((c) => (
-                        <td key={c.id} className="px-4 py-3 text-right font-mono text-zinc-400">
-                          {(totals.get(c.id) ?? 0).toLocaleString()}
+                        <td key={c.id} className="px-4 py-3 text-right font-mono text-zinc-400 whitespace-nowrap">
+                          {formatCartonsPacks(totals.get(c.id) ?? 0, packs.get(c.id) ?? 0)}
                         </td>
                       ))}
-                      <td className="px-4 py-3 text-right font-mono">
-                        {sku.totalQuantity.toLocaleString()}
+                      <td className="px-4 py-3 text-right font-mono whitespace-nowrap">
+                        {sku.totalPacks !== 0 ? (
+                          <span
+                            title={`${sku.totalQuantity.toLocaleString()} ctn + ${sku.totalPacks.toLocaleString()} pk (${sku.packsPerCarton} pk / ctn)`}
+                          >
+                            {formatTotal(skuTotal(sku))}
+                          </span>
+                        ) : (
+                          sku.totalQuantity.toLocaleString()
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-zinc-400">
                         {formatPallets(sku.totalQuantity, sku.palletCartonQty)}
@@ -381,10 +437,14 @@ export default function TotalStockTable({
                                     {loc.locationCode}
                                   </td>
                                   <td className="py-2 pr-4 text-right font-mono">
-                                    {loc.quantity.toLocaleString()}
+                                    {loc.loosePacks ? (
+                                      <span className="text-sky-300">{formatCartonsPacks(loc.quantity, loc.loosePacks)}</span>
+                                    ) : (
+                                      loc.quantity.toLocaleString()
+                                    )}
                                   </td>
                                   <td className="py-2 pr-4 text-right font-mono text-zinc-400">
-                                    {formatPallets(loc.quantity, sku.palletCartonQty)}
+                                    {loc.loosePacks && !loc.quantity ? "—" : formatPallets(loc.quantity, sku.palletCartonQty)}
                                   </td>
                                   <td className="py-2 pr-4 text-right font-mono text-xs text-zinc-500">
                                     {loc.updatedAt}

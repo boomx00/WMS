@@ -36,6 +36,9 @@ export async function GET(req: NextRequest) {
       itemSku: items.sku,
       itemName: items.name,
       quantity: locationStock.quantity,
+      // Loose packs ("Counted in packs" locations only; quantity is 0 there).
+      loosePacks: locationStock.loosePacks,
+      countsInPacks: locationTypes.countsInPacks,
       palletQuantity: sql<number>`
         ROUND(${locationStock.quantity}::numeric / NULLIF(${items.palletCartonQty}, 0), 2)
       `,
@@ -50,7 +53,8 @@ export async function GET(req: NextRequest) {
         or(ilike(locations.code, pattern), ilike(items.sku, pattern), ilike(items.name, pattern)),
         or(
           and(eq(locationTypes.pickable, true), eq(locationTypes.hasPosition, false)),
-          ne(locationStock.quantity, 0)
+          ne(locationStock.quantity, 0),
+        ne(locationStock.loosePacks, 0)
         ),
         warehouseId === null ? undefined : eq(locations.warehouseId, warehouseId)
       )

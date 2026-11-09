@@ -1,8 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import PacksPanel from "./PacksPanel";
 
-type Tab = "INBOUND" | "OUTBOUND";
+// INBOUND / OUTBOUND: manual corrections in cartons (LinesTab below).
+// PACKS: Unpack / Repack of loose packs (PacksPanel).
+type Tab = "INBOUND" | "OUTBOUND" | "PACKS";
+type LineTab = Exclude<Tab, "PACKS">;
+
+const TAB_LABELS: Record<Tab, string> = {
+  INBOUND: "Other Inbound",
+  OUTBOUND: "Other Outbound",
+  PACKS: "Packs",
+};
 
 type TransactionRow = {
   id: number;
@@ -22,6 +32,31 @@ const EMPTY_ROW: FormRow = { locationCode: "", itemSku: "", quantity: "" };
 
 export default function OtherTransactionsClient() {
   const [tab, setTab] = useState<Tab>("INBOUND");
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-6 border-b border-zinc-800">
+        {(["INBOUND", "OUTBOUND", "PACKS"] as Tab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              tab === t
+                ? "border-amber-500 text-amber-400"
+                : "border-transparent text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            {TAB_LABELS[t]}
+          </button>
+        ))}
+      </div>
+
+      {tab === "PACKS" ? <PacksPanel /> : <LinesTab tab={tab} />}
+    </div>
+  );
+}
+
+function LinesTab({ tab }: { tab: LineTab }) {
   const [formRows, setFormRows] = useState<FormRow[]>([{ ...EMPTY_ROW }]);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -31,7 +66,7 @@ export default function OtherTransactionsClient() {
   const [rows, setRows] = useState<TransactionRow[]>([]);
   const [loadingRows, setLoadingRows] = useState(true);
 
-  async function refresh(t: Tab) {
+  async function refresh(t: LineTab) {
     setLoadingRows(true);
     const res = await fetch(`/api/other-transactions?type=${t}`);
     if (res.ok) {
@@ -124,22 +159,6 @@ export default function OtherTransactionsClient() {
 
   return (
     <div>
-      <div className="flex gap-2 mb-6 border-b border-zinc-800">
-        {(["INBOUND", "OUTBOUND"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === t
-                ? "border-amber-500 text-amber-400"
-                : "border-transparent text-zinc-500 hover:text-zinc-300"
-            }`}
-          >
-            {t === "INBOUND" ? "Other Inbound" : "Other Outbound"}
-          </button>
-        ))}
-      </div>
-
       <form
         onSubmit={handleSubmit}
         className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4 mb-8"
