@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { cleanTags } from "@/lib/itemTags";
 import type { Item, Options } from "./types";
-import { TYPE_LIST, BRAND_LIST } from "./shared";
+import { TYPE_LIST, BRAND_LIST, categoryUnits } from "./shared";
 import { TagEditor } from "./TagEditor";
 
 export function ItemRow({
@@ -33,9 +33,11 @@ export function ItemRow({
     setValue(currentValue?.toString() ?? "");
   }
 
+  const cu = categoryUnits(options, item.categoryId);
+
   async function save(field: string, newValue: unknown = value) {
     setSaving(true);
-    await fetch(`/api/items/${item.id}`, {
+    const res = await fetch(`/api/items/${item.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -43,6 +45,11 @@ export function ItemRow({
       }),
     });
     setSaving(false);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      window.alert(data.error ?? "Failed to save");
+      return;
+    }
     setEditingField(null);
     router.refresh();
   }
@@ -198,11 +205,59 @@ export function ItemRow({
           (options.suppliers.find((s) => s.id === item.supplierId)?.name ?? <span className="text-zinc-600">—</span>)
         )}
       </td>
-      <td className="px-4 py-3 text-right font-mono text-zinc-400">
-        <EditableCell field="cartonBagQty" displayValue={item.cartonBagQty.toString()} numeric />
+      <td className="px-4 py-3 text-zinc-300 whitespace-nowrap">
+        {isAdmin ? (
+          <select
+            value={item.categoryId ?? ""}
+            disabled={saving}
+            onChange={(e) => e.target.value && save("categoryId", Number(e.target.value))}
+            aria-label={`Category of ${item.sku}`}
+            className={`max-w-[11rem] bg-transparent border-0 p-0 text-sm cursor-pointer hover:text-amber-500 focus:outline-none ${
+              item.categoryId === null ? "text-red-400" : ""
+            }`}
+          >
+            {item.categoryId === null && (
+              <option value="" className="bg-zinc-900">
+                — set —
+              </option>
+            )}
+            {options.categories.map((c) => (
+              <option key={c.id} value={c.id} className="bg-zinc-900">
+                {c.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          (cu?.category.name ?? <span className="text-zinc-600">—</span>)
+        )}
       </td>
-      <td className="px-4 py-3 text-right font-mono text-zinc-400">
-        <EditableCell field="palletCartonQty" displayValue={item.palletCartonQty.toString()} numeric />
+      <td className="px-4 py-3 text-right font-mono text-zinc-400 whitespace-nowrap">
+        {cu && !cu.secondary ? (
+          <span className="text-zinc-600">—</span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 justify-end">
+            <EditableCell field="cartonBagQty" displayValue={item.cartonBagQty.toString()} numeric />
+            {cu?.secondary && cu.primary && (
+              <span className="text-[11px] text-zinc-600">
+                {cu.secondary.code}/{cu.primary.code}
+              </span>
+            )}
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right font-mono text-zinc-400 whitespace-nowrap">
+        {cu && !cu.storage ? (
+          <span className="text-zinc-600">—</span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 justify-end">
+            <EditableCell field="palletCartonQty" displayValue={item.palletCartonQty.toString()} numeric />
+            {cu?.storage && cu.primary && (
+              <span className="text-[11px] text-zinc-600">
+                {cu.primary.code}/{cu.storage.code}
+              </span>
+            )}
+          </span>
+        )}
       </td>
     </tr>
   );

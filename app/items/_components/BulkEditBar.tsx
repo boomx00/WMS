@@ -6,7 +6,8 @@ import type { Options } from "./types";
 import { TYPE_LIST, BRAND_LIST, inputClass } from "./shared";
 import { TagEditor } from "./TagEditor";
 
-// Manager: change Type / Brand / tags of every ticked product at once.
+// Manager: change Type / Brand / Supplier / Category / tags of every ticked
+// product at once.
 export function BulkEditBar({
   ids,
   options,
@@ -20,6 +21,7 @@ export function BulkEditBar({
   const [productType, setProductType] = useState("");
   const [brand, setBrand] = useState("");
   const [supplierId, setSupplierId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [addTags, setAddTags] = useState<string[]>([]);
   const [removeTags, setRemoveTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -113,7 +115,32 @@ export function BulkEditBar({
             </button>
           </div>
         </div>
-        <div className="hidden lg:block" />
+        <div>
+          <label className="block text-[11px] text-zinc-500 mb-1">Set category</label>
+          <div className="flex gap-2">
+            <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)} className={inputClass}>
+              <option value="">Choose…</option>
+              {options.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={busy || !categoryId}
+              className={btn}
+              onClick={() =>
+                apply(
+                  { categoryId: Number(categoryId) },
+                  `Category set to "${options.categories.find((c) => String(c.id) === categoryId)?.name ?? "—"}"`
+                )
+              }
+            >
+              Set category
+            </button>
+          </div>
+        </div>
         <div>
           <label className="block text-[11px] text-zinc-500 mb-1">Add tags (keeps their other tags)</label>
           <div className="flex gap-2 items-start">

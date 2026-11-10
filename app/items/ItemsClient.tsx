@@ -7,6 +7,8 @@ import { ItemRow } from "./_components/ItemRow";
 import { BulkEditBar } from "./_components/BulkEditBar";
 import { CreateItemForm } from "./_components/CreateItemForm";
 import { SuppliersPanel } from "./_components/SuppliersPanel";
+import { UnitsPanel } from "./_components/UnitsPanel";
+import { CategoriesPanel } from "./_components/CategoriesPanel";
 
 export default function ItemsClient({
   items,
@@ -22,13 +24,15 @@ export default function ItemsClient({
   const [brandFilter, setBrandFilter] = useState(ALL);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [supplierFilter, setSupplierFilter] = useState(ALL);
+  const [categoryFilter, setCategoryFilter] = useState(ALL);
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const supplierName = useMemo(() => new Map(options.suppliers.map((s) => [s.id, s.name])), [options.suppliers]);
+  const categoryName = useMemo(() => new Map(options.categories.map((c) => [c.id, c.name])), [options.categories]);
 
-  // Search matches SKU, legacy SKU, barcode, name, type, brand, tags and
-  // supplier; Type / Brand / Supplier pick one value; every ticked tag must
-  // be on the product.
+  // Search matches SKU, legacy SKU, barcode, name, type, brand, tags,
+  // supplier and category; Type / Brand / Supplier / Category pick one
+  // value; every ticked tag must be on the product.
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     const words = q.split(/\s+/).filter(Boolean);
@@ -43,20 +47,32 @@ export default function ItemsClient({
           : supplierFilter !== ALL && String(item.supplierId) !== supplierFilter
       )
         return false;
+      if (
+        categoryFilter === NONE
+          ? item.categoryId !== null
+          : categoryFilter !== ALL && String(item.categoryId) !== categoryFilter
+      )
+        return false;
       const itemTags = item.tags.map(lower);
       if (!tagFilter.every((t) => itemTags.includes(t.toLowerCase()))) return false;
       if (words.length === 0) return true;
       const supplier = item.supplierId === null ? null : supplierName.get(item.supplierId);
-      const haystack = [item.sku, item.legacySku, item.cartonBarcode, item.name, item.productType, item.brand, supplier, ...item.tags]
+      const category = item.categoryId === null ? null : categoryName.get(item.categoryId);
+      const haystack = [item.sku, item.legacySku, item.cartonBarcode, item.name, item.productType, item.brand, supplier, category, ...item.tags]
         .map(lower)
         .join(" ");
       // Every word somewhere ("makuku xl" finds MAKUKU products tagged XL).
       return words.every((w) => haystack.includes(w));
     });
-  }, [items, search, typeFilter, brandFilter, tagFilter, supplierFilter, supplierName]);
+  }, [items, search, typeFilter, brandFilter, tagFilter, supplierFilter, categoryFilter, supplierName, categoryName]);
 
   const filtering =
-    search.trim() !== "" || typeFilter !== ALL || brandFilter !== ALL || supplierFilter !== ALL || tagFilter.length > 0;
+    search.trim() !== "" ||
+    typeFilter !== ALL ||
+    brandFilter !== ALL ||
+    supplierFilter !== ALL ||
+    categoryFilter !== ALL ||
+    tagFilter.length > 0;
   const shownSelected = shown.filter((i) => selected.has(i.id));
   const allShownSelected = shown.length > 0 && shownSelected.length === shown.length;
 
@@ -88,7 +104,7 @@ export default function ItemsClient({
     );
   }
 
-  const colCount = isAdmin ? 11 : 10;
+  const colCount = isAdmin ? 12 : 11;
 
   return (
     <div>
@@ -106,12 +122,14 @@ export default function ItemsClient({
       {isAdmin && (
         <div className="mb-8 space-y-4">
           <CreateItemForm options={options} />
+          <CategoriesPanel categories={options.categories} units={options.units} />
+          <UnitsPanel units={options.units} />
           <SuppliersPanel suppliers={options.suppliers} />
         </div>
       )}
 
       <div className="border border-zinc-800 rounded-lg bg-zinc-900/30 p-4 mb-4 space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr] gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_1fr] gap-3">
           <div>
             <label className="block text-[11px] text-zinc-500 mb-1">Search</label>
             <input
@@ -158,6 +176,18 @@ export default function ItemsClient({
               <option value={NONE}>(no supplier)</option>
             </select>
           </div>
+          <div>
+            <label className="block text-[11px] text-zinc-500 mb-1">Category</label>
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className={inputClass}>
+              <option value={ALL}>All categories</option>
+              {options.categories.map((c) => (
+                <option key={c.id} value={String(c.id)}>
+                  {c.name}
+                </option>
+              ))}
+              <option value={NONE}>(no category)</option>
+            </select>
+          </div>
         </div>
         {options.tags.length > 0 && (
           <div>
@@ -197,6 +227,7 @@ export default function ItemsClient({
                 setTypeFilter(ALL);
                 setBrandFilter(ALL);
                 setSupplierFilter(ALL);
+                setCategoryFilter(ALL);
                 setTagFilter([]);
               }}
               className="text-amber-500 hover:underline"
@@ -238,8 +269,13 @@ export default function ItemsClient({
               <th className="px-4 py-3 font-medium">Brand</th>
               <th className="px-4 py-3 font-medium">Tags</th>
               <th className="px-4 py-3 font-medium">Supplier</th>
-              <th className="px-4 py-3 font-medium text-right">Bags / Carton</th>
-              <th className="px-4 py-3 font-medium text-right">Cartons / Pallet</th>
+              <th className="px-4 py-3 font-medium">Category</th>
+              <th className="px-4 py-3 font-medium text-right" title="Secondary units per primary unit, e.g. packs per carton">
+                Ratio
+              </th>
+              <th className="px-4 py-3 font-medium text-right" title="Primary units per storage unit, e.g. cartons per pallet">
+                Per storage unit
+              </th>
             </tr>
           </thead>
           <tbody>

@@ -3,6 +3,7 @@ import { items } from "@/db/schema";
 import { sessionIsSuper } from "@/lib/auth";
 import ItemsClient from "./ItemsClient";
 import { getItemAttributeOptions } from "@/lib/itemAttributes";
+import { getCategories, getUnits } from "@/lib/units";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,14 @@ async function getItems() {
 
 
 export default async function ItemsPage() {
-  const [itemRows, isAdmin, options] = await Promise.all([getItems(), sessionIsSuper(), getItemAttributeOptions(db)]);
+  const [itemRows, isAdmin, attributeOptions, units, categories] = await Promise.all([
+    getItems(),
+    sessionIsSuper(),
+    getItemAttributeOptions(db),
+    getUnits(db),
+    getCategories(db),
+  ]);
+  const options = { ...attributeOptions, units, categories };
 
   return (
     <div className="p-8 max-w-7xl">

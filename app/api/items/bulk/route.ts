@@ -4,12 +4,14 @@ import { items } from "@/db/schema";
 import { inArray } from "drizzle-orm";
 import { getSession, isSuperUser } from "@/lib/auth";
 import { cleanAttribute, cleanSupplierId, cleanTags } from "@/lib/itemAttributes";
+import { checkCategoryMove } from "@/lib/units";
+import { cleanId } from "@/lib/uom";
 
 const MAX_ITEMS = 5000;
 
 // PATCH /api/items/bulk — Manager only.
-// body: { ids: number[], productType?, brand?, supplierId?, addTags?, removeTags? }
-// Sets Type / Brand / Supplier on many products at once ("" clears; leave a field out
+// body: { ids: number[], productType?, brand?, supplierId?, categoryId?, addTags?, removeTags? }
+// Sets Type / Brand / Supplier / Category on many products at once ("" clears; leave a field out
 // to keep each product's own value), and adds / removes tags without
 // touching their other tags. Returns { updated }.
 export async function PATCH(req: NextRequest) {
@@ -35,18 +37,29 @@ export async function PATCH(req: NextRequest) {
   const setType = body.productType !== undefined;
   const setBrand = body.brand !== undefined;
   const setSupplier = body.supplierId !== undefined;
+  const setCategory = body.categoryId !== undefined;
+  const categoryId = setCategory ? cleanId(body.categoryId) : null;
+  if (setCategory && !categoryId) {
+    return NextResponse.json({ error: "Choose a category" }, { status: 400 });
+  }
   const addTags = cleanTags(body.addTags);
   const removeTags = new Set(cleanTags(body.removeTags).map((t) => t.toLowerCase()));
-  if (!setType && !setBrand && !setSupplier && addTags.length === 0 && removeTags.size === 0) {
+  if (!setType && !setBrand && !setSupplier && !setCategory && addTags.length === 0 && removeTags.size === 0) {
     return NextResponse.json({ error: "Nothing to change" }, { status: 400 });
   }
+  // Products holding stock can't move to a category with other units.
+  if (setCategory) {
+    const moveError = await checkCategoryMove(db, ids, categoryId!);
+    if (moveError) return NextResponse.json({ error: moveError }, { status: 409 });
+  }
 
-  // Only Type / Brand: one update for all of them.
+  // Only Type / Brand / Supplier / Category: one update for all of them.
   if (addTags.length === 0 && removeTags.size === 0) {
     const updates: Record<string, unknown> = {};
     if (setType) updates.productType = cleanAttribute(body.productType);
     if (setBrand) updates.brand = cleanAttribute(body.brand);
     if (setSupplier) updates.supplierId = cleanSupplierId(body.supplierId);
+    if (setCategory) updates.categoryId = categoryId;
     const updated = await db.update(items).set(updates).where(inArray(items.id, ids)).returning({ id: items.id });
     return NextResponse.json({ updated: updated.length });
   }
@@ -59,6 +72,7 @@ export async function PATCH(req: NextRequest) {
       if (setType) updates.productType = cleanAttribute(body.productType);
       if (setBrand) updates.brand = cleanAttribute(body.brand);
       if (setSupplier) updates.supplierId = cleanSupplierId(body.supplierId);
+      if (setCategory) updates.categoryId = categoryId;
       if (addTags.length > 0 || removeTags.size > 0) {
         updates.tags = cleanTags([...row.tags, ...addTags]).filter((t) => !removeTags.has(t.toLowerCase()));
       }

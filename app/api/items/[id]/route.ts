@@ -4,8 +4,12 @@ import { items } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getSession, isSuperUser } from "@/lib/auth";
 import { cleanAttribute, cleanSupplierId, cleanTags } from "@/lib/itemAttributes";
+import { checkCategoryMove } from "@/lib/units";
+import { cleanId } from "@/lib/uom";
 
 // PATCH /api/items/:id — Manager only. Any subset of fields can be updated.
+// categoryId: moving to a category with different primary / secondary units
+// is refused while the product holds stock (lib/units.ts checkCategoryMove).
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -39,6 +43,17 @@ export async function PATCH(
   if (brand !== undefined) updates.brand = cleanAttribute(brand);
   if (tags !== undefined) updates.tags = cleanTags(tags);
   if (supplierId !== undefined) updates.supplierId = cleanSupplierId(supplierId);
+  if (body.categoryId !== undefined) {
+    const categoryId = cleanId(body.categoryId);
+    if (!categoryId) {
+      return NextResponse.json({ error: "Choose a category" }, { status: 400 });
+    }
+    const moveError = await checkCategoryMove(db, [itemId], categoryId);
+    if (moveError) {
+      return NextResponse.json({ error: moveError }, { status: 409 });
+    }
+    updates.categoryId = categoryId;
+  }
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields provided to update" }, { status: 400 });

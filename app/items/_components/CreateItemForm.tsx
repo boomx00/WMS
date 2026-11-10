@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Options } from "./types";
-import { KIND_LABEL, TYPE_LIST, BRAND_LIST, inputClass } from "./shared";
+import { KIND_LABEL, TYPE_LIST, BRAND_LIST, inputClass, categoryUnits, ratioCaption, storageCaption } from "./shared";
 import { TagEditor } from "./TagEditor";
 
 export function CreateItemForm({ options }: { options: Options }) {
@@ -12,8 +12,13 @@ export function CreateItemForm({ options }: { options: Options }) {
   const [legacySku, setLegacySku] = useState("");
   const [cartonBarcode, setCartonBarcode] = useState("");
   const [name, setName] = useState("");
-  const [cartonBagQty, setCartonBagQty] = useState("");
-  const [palletCartonQty, setPalletCartonQty] = useState("");
+  const [categoryId, setCategoryId] = useState(options.categories.length === 1 ? String(options.categories[0].id) : "");
+  const [cartonBagQty, setCartonBagQty] = useState(
+    options.categories.length === 1 ? String(options.categories[0].defaultRatio ?? "") : ""
+  );
+  const [palletCartonQty, setPalletCartonQty] = useState(
+    options.categories.length === 1 ? String(options.categories[0].defaultStorageQty ?? "") : ""
+  );
   const [productType, setProductType] = useState("");
   const [brand, setBrand] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -21,6 +26,19 @@ export function CreateItemForm({ options }: { options: Options }) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const cu = categoryUnits(options, categoryId ? Number(categoryId) : null);
+  const needsRatio = !!cu?.secondary;
+  const needsStorage = !!cu?.storage;
+  const primaryName = cu?.primary?.name ?? "primary unit";
+
+  // Picking a category fills in its default ratio / storage qty.
+  function chooseCategory(id: string) {
+    setCategoryId(id);
+    const next = categoryUnits(options, id ? Number(id) : null);
+    setCartonBagQty(next?.category.defaultRatio ? String(next.category.defaultRatio) : "");
+    setPalletCartonQty(next?.category.defaultStorageQty ? String(next.category.defaultStorageQty) : "");
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -34,8 +52,9 @@ export function CreateItemForm({ options }: { options: Options }) {
       body: JSON.stringify({
         sku,
         name,
-        cartonBagQty: Number(cartonBagQty),
-        palletCartonQty: Number(palletCartonQty),
+        categoryId: Number(categoryId),
+        cartonBagQty: needsRatio ? Number(cartonBagQty) : undefined,
+        palletCartonQty: needsStorage ? Number(palletCartonQty) : undefined,
         legacySku: legacySku.trim() || undefined,
         cartonBarcode: cartonBarcode.trim() || undefined,
         productType,
@@ -57,14 +76,15 @@ export function CreateItemForm({ options }: { options: Options }) {
     setLegacySku("");
     setCartonBarcode("");
     setName("");
-    setCartonBagQty("");
-    setPalletCartonQty("");
-    // Type, brand and supplier stay filled in: the next product is usually the same.
+    // Category (and its quantities), type, brand and supplier stay filled
+    // in: the next product is usually the same.
     setTags([]);
     router.refresh();
   }
 
   const input = `${inputClass} font-mono`;
+  const ready =
+    !!sku && !!name && !!categoryId && (!needsRatio || !!cartonBagQty) && (!needsStorage || !!palletCartonQty);
 
   return (
     <form onSubmit={handleSubmit} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4">
@@ -78,7 +98,7 @@ export function CreateItemForm({ options }: { options: Options }) {
           <input type="text" value={legacySku} onChange={(e) => setLegacySku(e.target.value)} className={input} />
         </div>
         <div className="flex-1 min-w-[140px]">
-          <label className="block text-xs text-zinc-500 mb-1">Carton Barcode (optional)</label>
+          <label className="block text-xs text-zinc-500 mb-1">{primaryName} Barcode (optional)</label>
           <input type="text" value={cartonBarcode} onChange={(e) => setCartonBarcode(e.target.value)} className={input} />
         </div>
       </div>
@@ -128,34 +148,52 @@ export function CreateItemForm({ options }: { options: Options }) {
         </div>
       </div>
 
-      <div className="flex gap-3">
-        <div className="flex-1">
-          <label className="block text-xs text-zinc-500 mb-1">Bags / Carton</label>
-          <input
-            type="number"
-            min={1}
-            value={cartonBagQty}
-            onChange={(e) => setCartonBagQty(e.target.value)}
-            className={input}
-            required
-          />
+      <div className="flex gap-3 flex-wrap">
+        <div className="flex-1 min-w-[180px]">
+          <label className="block text-xs text-zinc-500 mb-1">Category</label>
+          <select value={categoryId} onChange={(e) => chooseCategory(e.target.value)} className={inputClass} required>
+            <option value="">Choose…</option>
+            {options.categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          {options.categories.length === 0 && (
+            <p className="mt-1 text-[11px] text-zinc-500">Add a product category first (Product categories, above).</p>
+          )}
         </div>
-        <div className="flex-1">
-          <label className="block text-xs text-zinc-500 mb-1">Cartons / Pallet</label>
-          <input
-            type="number"
-            min={1}
-            value={palletCartonQty}
-            onChange={(e) => setPalletCartonQty(e.target.value)}
-            className={input}
-            required
-          />
-        </div>
+        {needsRatio && (
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-xs text-zinc-500 mb-1">{ratioCaption(cu)}</label>
+            <input
+              type="number"
+              min={1}
+              value={cartonBagQty}
+              onChange={(e) => setCartonBagQty(e.target.value)}
+              className={input}
+              required
+            />
+          </div>
+        )}
+        {needsStorage && (
+          <div className="flex-1 min-w-[140px]">
+            <label className="block text-xs text-zinc-500 mb-1">{storageCaption(cu)}</label>
+            <input
+              type="number"
+              min={1}
+              value={palletCartonQty}
+              onChange={(e) => setPalletCartonQty(e.target.value)}
+              className={input}
+              required
+            />
+          </div>
+        )}
       </div>
 
       <button
         type="submit"
-        disabled={loading || !sku || !name || !cartonBagQty || !palletCartonQty}
+        disabled={loading || !ready}
         className="px-4 py-2 rounded-md bg-amber-500 text-zinc-950 text-sm font-medium hover:bg-amber-400 disabled:opacity-50 transition-colors"
       >
         {loading ? "Creating..." : "Create Item"}

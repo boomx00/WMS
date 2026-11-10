@@ -5,11 +5,13 @@ import {
   integer,
   timestamp,
   uniqueIndex,
+  index,
   pgEnum,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { users } from "./users";
 import { pallets } from "./pallets";
+import { productCategories } from "./units";
 
 // Products (items), suppliers, and per-item ledger anchors.
 
@@ -38,6 +40,14 @@ export const items = pgTable(
     cartonBarcode: text("carton_barcode"), // physical carton barcode — not unique, variants can share one
     name: text("name").notNull(),
     defaultCode: text("default_code").notNull(),
+    // The product's category decides its units (db/schema/units.ts). The
+    // two quantities below are the per-product ratios between them:
+    //   cartonBagQty    = secondary units per 1 primary (packs per carton);
+    //                     1 when the category has no secondary unit
+    //   palletCartonQty = primary units per 1 storage unit (cartons per
+    //                     pallet); 1 when the category has no storage unit
+    // The column names are kept from before units were configurable.
+    categoryId: integer("category_id").references(() => productCategories.id, { onDelete: "restrict" }),
     cartonBagQty: integer("carton_bag_qty").notNull(),
     palletCartonQty: integer("pallet_carton_qty").notNull(),
     // Product classification, for searching (Items page, Movement History):
@@ -52,11 +62,13 @@ export const items = pgTable(
   (table) => [
     uniqueIndex("items_sku_idx").on(table.sku),
     uniqueIndex("items_legacy_sku_idx").on(table.legacySku),
+    index("items_category_idx").on(table.categoryId),
   ]
 );
 
-export const itemsRelations = relations(items, ({ many }) => ({
+export const itemsRelations = relations(items, ({ one, many }) => ({
   pallets: many(pallets),
+  category: one(productCategories, { fields: [items.categoryId], references: [productCategories.id] }),
 }));
 
 export const itemLedgerAnchors = pgTable(

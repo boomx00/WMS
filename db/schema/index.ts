@@ -3,6 +3,7 @@
 
 export * from "./locations";
 export * from "./users";
+export * from "./units";
 export * from "./items";
 export * from "./pallets";
 export * from "./salesOrders";
