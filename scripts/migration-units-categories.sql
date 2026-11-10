@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS units (
   decimals integer NOT NULL DEFAULT 0,
   sort_order integer NOT NULL DEFAULT 0,
   created_at timestamp NOT NULL DEFAULT now(),
-  CONSTRAINT units_decimals_range CHECK (decimals BETWEEN 0 AND 6)
+  CONSTRAINT units_decimals_range CHECK (decimals BETWEEN 0 AND 3)
 );
 
 -- "CTN" and "ctn" are the same unit.

@@ -13,6 +13,7 @@ import { locations } from "./locations";
 import { users } from "./users";
 import { items } from "./items";
 import { pallets } from "./pallets";
+import { qty } from "./qty";
 
 // Stock opname (inventory count) sessions, their SKUs, items, locations and count events.
 
@@ -49,7 +50,7 @@ export const stockOpnameSkus = pgTable(
     id: serial("id").primaryKey(),
     opnameNumber: varchar("opname_number", { length: 50 }).notNull().references(() => stockOpname.opnameNumber),
     itemId: integer("item_id").notNull().references(() => items.id),
-    systemQty: integer("system_qty").notNull(),
+    systemQty: qty("system_qty").notNull(),
     // Loose packs locked with systemQty (packs locations — "Counted in loose
     // packs" types). The summary's total = systemQty + systemPacks ÷ packs
     // per carton. 0 on opnames from before packs existed.
@@ -62,8 +63,8 @@ export const stockOpnameSkus = pgTable(
     // Reconciliation typed in the Stock Opname Summary's report: quantity
     // added to (+) and taken off (−) the counted Total SO, giving the
     // Final SO (Total SO + plus − minus).
-    reconcilePlus: integer("reconcile_plus").notNull().default(0),
-    reconcileMinus: integer("reconcile_minus").notNull().default(0),
+    reconcilePlus: qty("reconcile_plus").notNull().default(0),
+    reconcileMinus: qty("reconcile_minus").notNull().default(0),
     reconciledAt: timestamp("reconciled_at"),
     reconciledBy: integer("reconciled_by").references(() => users.id),
     // Where the locked system stock was, location by location, with each
@@ -90,9 +91,9 @@ export const stockOpnameItems = pgTable("stock_opname_items", {
   itemId: integer("item_id").references(() => items.id),
   palletId: integer("pallet_id").references(() => pallets.id),
   systemSku: text("system_sku"), // nullable — snapshot of system SKU(s) at count time
-  systemQty: integer("system_qty").notNull(),
-  countedQty: integer("counted_qty"),
-  difference: integer("difference"),
+  systemQty: qty("system_qty").notNull(),
+  countedQty: qty("counted_qty"),
+  difference: qty("difference"),
   // A line at a packs location ("Counted in loose packs" type) counts loose
   // packs: countsInPacks is set, the packs go in the *_packs columns and
   // systemQty / countedQty / difference stay 0 — so every carton sum over
@@ -135,7 +136,7 @@ export const stockOpnameCountEvents = pgTable("stock_opname_count_events", {
     .notNull()
     .references(() => locations.id),
   itemId: integer("item_id").references(() => items.id), // null = a confirmed-empty commit
-  delta: integer("delta").notNull(),
+  delta: qty("delta").notNull(),
   resultingTotal: integer("resulting_total").notNull(),
   // Packs-location counts: delta / resultingTotal are in loose packs.
   countsInPacks: boolean("counts_in_packs").notNull().default(false),

@@ -23,15 +23,14 @@ export const units = pgTable(
     nameId: text("name_id"), // Indonesian name (null = use name)
     nameZh: text("name_zh"), // Chinese name (null = use name)
     // Decimal places a quantity in this unit can have: 0 for Carton / Pack,
-    // e.g. 3 for Kilogram (stock is kept as whole numbers of the smallest
-    // step, so 12.5 kg is stored as 12500).
+    // up to 3 (e.g. Kilogram) — stock columns hold 3 decimals (./qty.ts).
     decimals: integer("decimals").notNull().default(0),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("units_code_idx").on(sql`lower(${table.code})`),
-    check("units_decimals_range", sql`${table.decimals} BETWEEN 0 AND 6`),
+    check("units_decimals_range", sql`${table.decimals} BETWEEN 0 AND 3`),
   ]
 );
 

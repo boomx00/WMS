@@ -6,8 +6,18 @@ import RefreshButton from "@/components/RefreshButton";
 import { useCan } from "@/lib/AccessContext";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { LOCATION_STOCK_WAREHOUSE_LABELS } from "@/lib/warehouseLabels";
+import { useLanguage } from "@/lib/LanguageContext";
+import {
+  formatQty,
+  groupTotalLabel,
+  totalsByUnit,
+  totalUnitName,
+  type RowUnits,
+  type TotalUnit,
+} from "@/lib/locationStockUnits";
+import type { ResolvedLocationStockCard } from "@/lib/locationStockCards";
 
-type Row = {
+type Row = RowUnits & {
   id: number;
   locationCode: string;
   locationType: string;
@@ -42,23 +52,24 @@ function groupKeyFor(row: Row): string {
   return row.hasPosition ? `${row.locationType}:${row.locationArea ?? "?"}` : row.locationType;
 }
 
-// Open pick areas (pickable, no rack position — today the FLOOR type).
-function isOpenPickArea(row: Row): boolean {
-  return row.pickable && !row.hasPosition;
-}
 
 export default function LocationStockTable({
   rows,
   warehouses,
+  cards,
+  allUnits,
 }: {
   rows: Row[];
   warehouses: { id: number; name: string; isActive: boolean }[];
+  cards: ResolvedLocationStockCard[]; // Settings → Location Stock Cards
+  allUnits: TotalUnit[];
 }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   // null = every warehouse. The filter only shows with more than one.
   const [warehouseId, setWarehouseId] = useState<number | null>(null);
     const labels = usePageLabels("location_stock", LOCATION_STOCK_WAREHOUSE_LABELS);
+  const { language } = useLanguage();
   const [searchResults, setSearchResults] = useState<Row[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -107,18 +118,26 @@ export default function LocationStockTable({
     return warehouseId === null ? all : all.filter((r) => r.warehouseId === warehouseId);
   }, [searchResults, rows, warehouseId]);
 
-  // Floor + Rack totals — recalculated from whatever's currently showing
-  // (search results if a search is active, otherwise the full dataset),
-  // so the numbers track the SKU/location filter above the table.
-  const stockTotals = useMemo(() => {
-    let floor = 0;
-    let rack = 0;
-    for (const row of baseRows) {
-      if (isOpenPickArea(row)) floor += row.quantity;
-      else if (row.hasPosition) rack += row.quantity;
-    }
-    return { floor, rack, total: floor + rack };
-  }, [baseRows]);
+  // The cards from Settings → Location Stock Cards — recalculated from
+  // whatever's currently showing (search results if a search is active,
+  // otherwise the full dataset, within the chosen warehouse), so they track
+  // the filters above the table. Each adds up its location types, one line
+  // per unit (automatic: each product's primary unit); loose packs count.
+  const cardTotals = useMemo(
+    () =>
+      cards.map((card) => {
+        const types = new Set(card.locationTypes);
+        return {
+          card,
+          totals: totalsByUnit(
+            baseRows.filter((r) => types.has(r.locationType)),
+            card.units,
+            allUnits
+          ),
+        };
+      }),
+    [baseRows, cards, allUnits]
+  );
 
   const groups = useMemo(() => {
     const byKey = new Map<string, Row[]>();
@@ -175,20 +194,13 @@ export default function LocationStockTable({
           {labels.header_description}
         </p>
       </header>
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">{labels.total_stock_card}</p>
-          <p className="text-lg font-semibold">{stockTotals.total.toLocaleString()}</p>
-        </div>
-        <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">{labels.total_floor_card}</p>
-          <p className="text-lg font-semibold">{stockTotals.floor.toLocaleString()}</p>
-        </div>
-        <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">{labels.total_rack}</p>
-          <p className="text-lg font-semibold">{stockTotals.rack.toLocaleString()}</p>
-        </div>
+      {cardTotals.length > 0 && (
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+        {cardTotals.map(({ card, totals }) => (
+          <TotalCard key={card.id} label={cardName(card, language)} totals={totals} language={language} />
+        ))}
       </div>
+      )}
 
       <div className="flex items-center gap-2 mb-4">
         <input
@@ -246,6 +258,40 @@ export default function LocationStockTable({
   );
 }
 
+// A card's name in the chosen language (falls back to the English name).
+function cardName(card: ResolvedLocationStockCard, language: ReturnType<typeof useLanguage>["language"]): string {
+  if (language === "id") return card.nameId || card.name;
+  if (language === "zh") return card.nameZh || card.name;
+  return card.name;
+}
+
+// One summary card: a line per unit, e.g. "1,234 Carton" / "9,872 Pack".
+function TotalCard({
+  label,
+  totals,
+  language,
+}: {
+  label: string;
+  totals: { unit: TotalUnit; total: number }[];
+  language: ReturnType<typeof useLanguage>["language"];
+}) {
+  return (
+    <div className="border border-zinc-800 rounded-lg px-4 py-3">
+      <p className="text-xs text-zinc-500 mb-1">{label}</p>
+      {totals.length === 0 ? (
+        <p className="text-lg font-semibold">0</p>
+      ) : (
+        totals.map((t) => (
+          <p key={t.unit.id} className="text-lg font-semibold leading-snug">
+            {formatQty(t.total)}{" "}
+            <span className="text-xs font-normal text-zinc-500">{totalUnitName(t.unit, language)}</span>
+          </p>
+        ))
+      )}
+    </div>
+  );
+}
+
 function GroupSection({
   group,
   open,
@@ -259,14 +305,8 @@ function GroupSection({
   searchable: boolean;
   labels: Record <string, string>
 }) {
-  const totalQuantity = group.rows.reduce((sum, r) => sum + r.quantity, 0);
-  const totalPacks = group.rows.reduce((sum, r) => sum + (r.loosePacks ?? 0), 0);
-  // A packs group shows its packs; a carton group its cartons (plus packs
-  // if a group ever mixes both).
-  const groupTotal =
-    totalPacks !== 0 && totalQuantity === 0
-      ? `${totalPacks.toLocaleString()} pk`
-      : `${totalQuantity.toLocaleString()} carton${totalPacks !== 0 ? ` + ${totalPacks.toLocaleString()} pk` : ""}`;
+  // Per unit code: "1,200 CTN + 40 PK · 12.5 KG".
+  const groupTotal = groupTotalLabel(group.rows);
 
   return (
     <div className="border border-zinc-800 rounded-lg overflow-hidden">
@@ -369,9 +409,14 @@ function OutboundRow({ row }: { row: Row }) {
         <td className="px-4 py-3 text-zinc-500">{row.itemName}</td>
         <td className="px-4 py-3 text-right font-mono">
           {row.countsInPacks ? (
-            <span className="text-sky-300">{(row.loosePacks ?? 0).toLocaleString()} pk</span>
+            <span className="text-sky-300">
+              {formatQty(row.loosePacks ?? 0)} {row.secondaryCode ?? "pk"}
+            </span>
           ) : (
-            row.quantity.toLocaleString()
+            <>
+              {formatQty(row.quantity)}
+              {row.primaryCode && <span className="ml-1 text-[11px] text-zinc-600">{row.primaryCode}</span>}
+            </>
           )}
         </td>
         <td className="px-4 py-3 text-right text-zinc-500 text-xs">

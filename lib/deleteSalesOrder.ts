@@ -88,7 +88,7 @@ export async function planSalesOrderDeletion(db: any, soNumber: string): Promise
     db
       .select({
         itemId: locationStockEvents.itemId,
-        quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+        quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
       })
       .from(locationStockEvents)
       .where(and(eq(locationStockEvents.salesOrderId, salesOrder.id), eq(locationStockEvents.type, "SHIP")))

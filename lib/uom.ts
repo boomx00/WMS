@@ -44,6 +44,9 @@ export type ItemUom = {
 
 export type UomLevel = "primary" | "secondary";
 
+// Most decimals a unit can have — stock columns hold 3 (db/schema/qty.ts).
+export const MAX_UNIT_DECIMALS = 3;
+
 // The unit's name in the given language (falls back to the English name).
 export function unitName(unit: Pick<UnitInfo, "name" | "nameId" | "nameZh">, lang: Language = "en"): string {
   if (lang === "id") return unit.nameId || unit.name;
@@ -74,7 +77,7 @@ export function resolveItemUom(
   };
 }
 
-const pow10 = (n: number) => 10 ** Math.max(0, Math.min(6, n));
+const pow10 = (n: number) => 10 ** Math.max(0, Math.min(MAX_UNIT_DECIMALS, n));
 
 // Base steps in 1 of the given unit level.
 export function baseFactor(uom: ItemUom, level: UomLevel): number {
@@ -156,6 +159,25 @@ export function ratioLabel(uom: ItemUom): string | null {
 // "14 CTN / PLT" — the product's storage qty as shown on the Items page.
 export function storageLabel(uom: ItemUom): string | null {
   return uom.storage ? `${uom.storageQty} ${uom.primary.code} / ${uom.storage.code}` : null;
+}
+
+// Stock quantities hold up to 3 decimals: round away float noise
+// (12.3 - 12.1 = 0.20000000000000107 → 0.2).
+export function roundQty(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}
+
+// Whether a quantity has no more decimals than the unit allows (2.5 for a
+// 0-decimal Pack → false; 12.5 for a 3-decimal Kilogram → true).
+export function fitsDecimals(qty: number, decimals: number): boolean {
+  if (!Number.isFinite(qty)) return false;
+  const scaled = qty * pow10(decimals);
+  return Math.abs(scaled - Math.round(scaled)) < 1e-6;
+}
+
+// The `step` for a quantity <input>: "1", "0.1", "0.001".
+export function stepFor(decimals: number): string {
+  return decimals <= 0 ? "1" : (1 / pow10(decimals)).toFixed(Math.min(decimals, MAX_UNIT_DECIMALS));
 }
 
 // Cleaners for request bodies (shared by the units / categories routes).

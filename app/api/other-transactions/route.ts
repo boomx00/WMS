@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getItemQtyUnits, qtyDecimalsError } from "@/lib/units";
 import { db } from "@/lib/db";
 import { otherTransactions, locations, items, locationStockEvents, users } from "@/db/schema";
 import { eq, desc, asc, sql, inArray } from "drizzle-orm";
@@ -114,10 +115,10 @@ export async function POST(req: NextRequest) {
 
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (!l.locationCode || !l.itemSku || !Number.isInteger(l.quantity) || l.quantity <= 0) {
+    if (!l.locationCode || !l.itemSku || !Number.isFinite(l.quantity) || l.quantity <= 0) {
       return NextResponse.json(
         {
-          error: `Row ${i + 1}: locationCode, itemSku, and a positive whole-number quantity are required`,
+          error: `Row ${i + 1}: locationCode, itemSku, and a positive quantity are required`,
         },
         { status: 400 }
       );
@@ -154,6 +155,15 @@ export async function POST(req: NextRequest) {
       );
     }
     resolved.push({ line, location, item });
+  }
+
+  // Decimals only where the product's unit allows them (Kilogram 12.5 yes,
+  // Carton 2.5 no).
+  const qtyUnits = await getItemQtyUnits(db, resolved.map((r) => r.item.id));
+  for (let i = 0; i < resolved.length; i++) {
+    const { line, item } = resolved[i];
+    const err = qtyDecimalsError(line.quantity, qtyUnits.get(item.id), item.sku, `Row ${i + 1}: `);
+    if (err) return NextResponse.json({ error: err }, { status: 400 });
   }
 
   try {

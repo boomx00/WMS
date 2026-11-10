@@ -4,7 +4,7 @@ import { units } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import { getSession, isSuperUser } from "@/lib/auth";
 import { getUnits } from "@/lib/units";
-import { cleanName, cleanUnitCode } from "@/lib/uom";
+import { cleanName, cleanUnitCode, MAX_UNIT_DECIMALS } from "@/lib/uom";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,7 @@ export async function GET() {
 }
 
 // POST /api/units — Manager only.
-// body: { code, name, nameId?, nameZh?, decimals? (0–6) }
+// body: { code, name, nameId?, nameZh?, decimals? (0–3) }
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -36,8 +36,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Code and name are required" }, { status: 400 });
   }
   const decimals = body.decimals === undefined || body.decimals === "" ? 0 : Number(body.decimals);
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 6) {
-    return NextResponse.json({ error: "Decimals must be a whole number from 0 to 6" }, { status: 400 });
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_UNIT_DECIMALS) {
+    return NextResponse.json({ error: `Decimals must be a whole number from 0 to ${MAX_UNIT_DECIMALS}` }, { status: 400 });
   }
 
   const [{ next }] = await db

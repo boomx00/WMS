@@ -23,7 +23,7 @@ export async function getShippedQuantity(
     );
 
   const [revisedAwayRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${shipmentRevisions.quantity}), 0)::int` })
+    .select({ total: sql<number>`coalesce(sum(${shipmentRevisions.quantity}), 0)::float8` })
     .from(shipmentRevisions)
     .where(
       and(
@@ -33,7 +33,7 @@ export async function getShippedQuantity(
     );
 
   const [revisedInRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${shipmentRevisions.quantity}), 0)::int` })
+    .select({ total: sql<number>`coalesce(sum(${shipmentRevisions.quantity}), 0)::float8` })
     .from(shipmentRevisions)
     .where(
       and(

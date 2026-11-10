@@ -4,7 +4,7 @@ import { units } from "@/db/schema";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { getSession, isSuperUser } from "@/lib/auth";
 import { countCategoriesUsingUnit } from "@/lib/units";
-import { cleanName, cleanUnitCode } from "@/lib/uom";
+import { cleanName, cleanUnitCode, MAX_UNIT_DECIMALS } from "@/lib/uom";
 
 async function managerOnly() {
   const session = await getSession();
@@ -49,8 +49,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.nameZh !== undefined) updates.nameZh = cleanName(body.nameZh);
   if (body.decimals !== undefined) {
     const decimals = Number(body.decimals);
-    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 6) {
-      return NextResponse.json({ error: "Decimals must be a whole number from 0 to 6" }, { status: 400 });
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > MAX_UNIT_DECIMALS) {
+      return NextResponse.json({ error: `Decimals must be a whole number from 0 to ${MAX_UNIT_DECIMALS}` }, { status: 400 });
     }
     if (decimals !== unit.decimals && (await countCategoriesUsingUnit(db, id)) > 0) {
       return NextResponse.json(

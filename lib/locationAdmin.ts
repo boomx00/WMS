@@ -246,7 +246,7 @@ async function heldStock(db: any, where: SQL): Promise<{ cartons: string[]; pack
   const rows: { code: string; cartons: number; packs: number }[] = await db
     .select({
       code: locations.code,
-      cartons: sql<number>`coalesce(sum(abs(${locationStock.quantity})), 0)::int`,
+      cartons: sql<number>`coalesce(sum(abs(${locationStock.quantity})), 0)::float8`,
       packs: sql<number>`coalesce(sum(abs(${locationStock.loosePacks})), 0)::int`,
     })
     .from(locations)
@@ -478,7 +478,7 @@ export async function validateLocation(
   // shipping draws from — so it has to be empty first.
   if (existing && existing.isStaging !== input.isStaging) {
     const [held] = await db
-      .select({ total: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::int` })
+      .select({ total: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::float8` })
       .from(locationStock)
       .where(and(eq(locationStock.locationId, existing.id), ne(locationStock.quantity, 0)));
     if ((held?.total ?? 0) !== 0) {

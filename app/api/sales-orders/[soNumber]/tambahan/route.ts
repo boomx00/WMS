@@ -39,7 +39,7 @@ export async function GET(
   const pickedRows = await db
     .select({
       itemId: locationStockEvents.itemId,
-      picked: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+      picked: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
     })
     .from(locationStockEvents)
     .where(
@@ -53,7 +53,7 @@ export async function GET(
   const shippedRows = await db
     .select({
       itemId: locationStockEvents.itemId,
-      shipped: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+      shipped: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
     })
     .from(locationStockEvents)
     .where(and(eq(locationStockEvents.tambahanOrderId, tambahan.id), eq(locationStockEvents.type, "SHIP")))

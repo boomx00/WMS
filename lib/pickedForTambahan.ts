@@ -14,7 +14,7 @@ export async function getPickedForTambahanQuantity(
   itemId: number
 ): Promise<number> {
   const [addRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int` })
+    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8` })
     .from(locationStockEvents)
     .where(
       and(
@@ -25,7 +25,7 @@ export async function getPickedForTambahanQuantity(
     );
 
   const [shipRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int` })
+    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8` })
     .from(locationStockEvents)
     .where(
       and(

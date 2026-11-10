@@ -17,6 +17,7 @@ import { tambahanOrders } from "./tambahan";
 import { otherTransactions } from "./otherTransactions";
 import { bulkAdjustments } from "./bulkAdjustments";
 import { packTransactions } from "./packTransactions";
+import { qty } from "./qty";
 
 // v2 stock: location_stock (source of truth) and location_stock_events (the ledger).
 
@@ -30,7 +31,7 @@ export const locationStock = pgTable(
     itemId: integer("item_id")
       .notNull()
       .references(() => items.id),
-    quantity: integer("quantity").notNull().default(0),
+    quantity: qty("quantity").notNull().default(0),
     // Loose packs, only at locations whose type is "Counted in packs"
     // (quantity stays 0 there). Always 0 everywhere else.
     loosePacks: integer("loose_packs").notNull().default(0),
@@ -76,7 +77,7 @@ export const locationStockEvents = pgTable(
     sourceLocationId: integer("source_location_id").references(() => locations.id),
     destinationLocationId: integer("destination_location_id").references(() => locations.id), // nullable now — SHIP events have no destination location
     salesOrderId: integer("sales_order_id").references(() => salesOrders.id), // nullable — only set for SHIP events
-    quantity: integer("quantity").notNull(),
+    quantity: qty("quantity").notNull(),
     userId: integer("user_id")
       .notNull()
       .references(() => users.id),

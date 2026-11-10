@@ -3,6 +3,7 @@ import { relations } from "drizzle-orm";
 import { locations } from "./locations";
 import { users } from "./users";
 import { items } from "./items";
+import { qty } from "./qty";
 
 // Other Transactions: manual inbound / outbound corrections.
 
@@ -20,7 +21,7 @@ export const otherTransactions = pgTable(
     locationId: integer("location_id")
       .notNull()
       .references(() => locations.id),
-    quantity: integer("quantity").notNull(),
+    quantity: qty("quantity").notNull(),
     notes: text("notes"),
     userId: integer("user_id")
       .notNull()

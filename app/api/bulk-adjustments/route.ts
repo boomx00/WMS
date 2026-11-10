@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getItemQtyUnits, qtyDecimalsError } from "@/lib/units";
+import { roundQty } from "@/lib/uom";
 import { db } from "@/lib/db";
 import {
   items,
@@ -121,6 +123,16 @@ export async function POST(req: NextRequest) {
     if (!item) {
       return NextResponse.json({ error: `Row ${i + 1}: unknown SKU "${itemSku}"` }, { status: 404 });
     }
+    // Decimals only where the product's unit allows them.
+    const decimalsError = qtyDecimalsError(
+      newQuantity,
+      (await getItemQtyUnits(db, [item.id])).get(item.id),
+      item.sku,
+      `Row ${i + 1}: `
+    );
+    if (decimalsError) {
+      return NextResponse.json({ error: decimalsError }, { status: 400 });
+    }
 
     if (isSingleSku(location.rules)) {
       const [conflict] = await db
@@ -185,7 +197,7 @@ export async function POST(req: NextRequest) {
         .where(and(eq(locationStock.locationId, line.locationId), eq(locationStock.itemId, line.itemId)));
 
       const previousQuantity = existing?.quantity ?? 0;
-      const delta = line.newQuantity - previousQuantity;
+      const delta = roundQty(line.newQuantity - previousQuantity);
 
       if (delta === 0) {
         skipped++;

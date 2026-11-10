@@ -25,7 +25,7 @@ async function getWarehouseMapData() {
       area: locations.area,
       x: locations.x,
       y: locations.y,
-      totalQuantity: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)`.as("total_quantity"),
+      totalQuantity: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::float8`.as("total_quantity"),
       palletCartonQty: sql<number | null>`MAX(${items.palletCartonQty})`.as("pallet_carton_qty"),
     })
     .from(locations)

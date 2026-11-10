@@ -33,7 +33,7 @@ export async function getSoProgress(orderIds?: number[]): Promise<Map<number, So
       .select({
         salesOrderId: locationStockEvents.salesOrderId,
         itemId: locationStockEvents.itemId,
-        picked: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+        picked: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
       })
       .from(locationStockEvents)
       .where(

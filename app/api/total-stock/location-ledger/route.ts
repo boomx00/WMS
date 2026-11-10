@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   }
 
   const [totalRow] = await db
-    .select({ total: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::int` })
+    .select({ total: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::float8` })
     .from(locationStock)
     .where(
       item

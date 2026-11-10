@@ -2,8 +2,9 @@
 // Categories). Pure conversion helpers are in lib/uom.ts.
 
 import { items, locationStock, productCategories, units } from "@/db/schema";
+import { alias } from "drizzle-orm/pg-core";
 import { asc, eq, inArray, or, sql } from "drizzle-orm";
-import type { CategoryInfo, UnitInfo } from "@/lib/uom";
+import { fitsDecimals, type CategoryInfo, type UnitInfo } from "@/lib/uom";
 
 export type UnitListRow = UnitInfo & { categoryCount: number };
 export type CategoryListRow = CategoryInfo & { itemCount: number };
@@ -110,3 +111,56 @@ export async function checkCategoryUnits(
   if (found.length !== ids.length) return "Unknown unit";
   return null;
 }
+
+// The unit stock quantities are counted in for each product — its
+// category's primary unit — and how many decimals that unit allows.
+// Products with no category count in whole numbers, as before.
+export type ItemQtyUnit = { decimals: number; code: string | null };
+
+export async function getItemQtyUnits(db: any, itemIds: number[]): Promise<Map<number, ItemQtyUnit>> {
+  const result = new Map<number, ItemQtyUnit>();
+  const ids = Array.from(new Set(itemIds));
+  if (ids.length === 0) return result;
+  const rows: { itemId: number; decimals: number | null; code: string | null }[] = await db
+    .select({ itemId: items.id, decimals: units.decimals, code: units.code })
+    .from(items)
+    .leftJoin(productCategories, eq(items.categoryId, productCategories.id))
+    .leftJoin(units, eq(productCategories.primaryUnitId, units.id))
+    .where(inArray(items.id, ids));
+  for (const r of rows) result.set(r.itemId, { decimals: r.decimals ?? 0, code: r.code });
+  for (const id of ids) if (!result.has(id)) result.set(id, { decimals: 0, code: null });
+  return result;
+}
+
+// An error message when the quantity has more decimals than the product's
+// unit allows, else null. `what` names the row, e.g. "Row 2: " or "".
+export function qtyDecimalsError(qty: number, unit: ItemQtyUnit | undefined, sku: string, what = ""): string | null {
+  const decimals = unit?.decimals ?? 0;
+  if (fitsDecimals(qty, decimals)) return null;
+  const unitName = unit?.code ? ` (${unit.code})` : "";
+  return decimals === 0
+    ? `${what}${sku}${unitName} is counted in whole numbers — ${qty} isn't one`
+    : `${what}${sku}${unitName} allows at most ${decimals} decimal place${decimals === 1 ? "" : "s"} — ${qty} has more`;
+}
+
+// Location Stock rows carry their product's units (lib/locationStockUnits.ts).
+// Select `locationStockUnitFields` and add these left joins after joining
+// items:
+//   .leftJoin(productCategories, eq(items.categoryId, productCategories.id))
+//   .leftJoin(lsPrimaryUnit, eq(productCategories.primaryUnitId, lsPrimaryUnit.id))
+//   .leftJoin(lsSecondaryUnit, eq(productCategories.secondaryUnitId, lsSecondaryUnit.id))
+//   .leftJoin(lsStorageUnit, eq(productCategories.storageUnitId, lsStorageUnit.id))
+export const lsPrimaryUnit = alias(units, "ls_primary_unit");
+export const lsSecondaryUnit = alias(units, "ls_secondary_unit");
+export const lsStorageUnit = alias(units, "ls_storage_unit");
+
+export const locationStockUnitFields = {
+  primaryUnitId: productCategories.primaryUnitId,
+  primaryCode: lsPrimaryUnit.code,
+  secondaryUnitId: productCategories.secondaryUnitId,
+  secondaryCode: lsSecondaryUnit.code,
+  storageUnitId: productCategories.storageUnitId,
+  storageCode: lsStorageUnit.code,
+  ratio: items.cartonBagQty,
+  storageQty: items.palletCartonQty,
+};

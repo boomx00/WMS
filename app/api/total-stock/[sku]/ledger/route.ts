@@ -85,7 +85,7 @@ export async function GET(
   const liveRows = await db
     .select({
       columnId: locations.stockColumnId,
-      quantity: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::int`,
+      quantity: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::float8`,
     })
     .from(locationStock)
     .innerJoin(locations, eq(locationStock.locationId, locations.id))

@@ -32,7 +32,7 @@ export async function getGoodStock(
       .select({
         sku: items.sku,
         name: items.name,
-        qty: sql<number>`sum(${locationStock.quantity})::int`,
+        qty: sql<number>`sum(${locationStock.quantity})::float8`,
       })
       .from(locationStock)
       .innerJoin(locations, eq(locationStock.locationId, locations.id))

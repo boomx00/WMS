@@ -76,7 +76,7 @@ export async function GET(req: NextRequest) {
     db
       .select({
         itemId: locationStock.itemId,
-        quantity: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::int`,
+        quantity: sql<number>`coalesce(sum(${locationStock.quantity}), 0)::float8`,
         loosePacks: sql<number>`coalesce(sum(${locationStock.loosePacks}), 0)::int`,
         packsPerCarton: sql<number>`max(${items.cartonBagQty})::int`,
       })

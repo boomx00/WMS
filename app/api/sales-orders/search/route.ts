@@ -79,7 +79,7 @@ const withStatus = await Promise.all(
             locationCode: locations.code,
             type: locationStockEvents.type,
             username: users.username,
-            quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+            quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
           })
           .from(locationStockEvents)
           .innerJoin(locations, eq(locationStockEvents.sourceLocationId, locations.id))

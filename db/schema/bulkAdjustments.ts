@@ -13,6 +13,7 @@ import { locations } from "./locations";
 import { users } from "./users";
 import { items } from "./items";
 import { stockOpname } from "./stockOpname";
+import { qty } from "./qty";
 
 // Bulk Adjustments: multi-row stock overrides and their lines.
 
@@ -46,9 +47,9 @@ export const bulkAdjustmentLines = pgTable("bulk_adjustment_lines", {
   itemId: integer("item_id")
     .notNull()
     .references(() => items.id),
-  previousQuantity: integer("previous_quantity").notNull(),
-  newQuantity: integer("new_quantity").notNull(),
-  delta: integer("delta").notNull(),
+  previousQuantity: qty("previous_quantity").notNull(),
+  newQuantity: qty("new_quantity").notNull(),
+  delta: qty("delta").notNull(),
 });
 
 export const bulkAdjustmentsRelations = relations(bulkAdjustments, ({ one, many }) => ({

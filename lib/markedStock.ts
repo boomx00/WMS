@@ -53,7 +53,7 @@ export async function getMarkedBreakdownForItem(
       db
         .select({
           salesOrderId: locationStockEvents.salesOrderId,
-          total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+          total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
         })
         .from(locationStockEvents)
         .where(

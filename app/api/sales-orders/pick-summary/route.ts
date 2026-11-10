@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
   const pickedRows = await db
     .select({
       itemId: locationStockEvents.itemId,
-      picked: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+      picked: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
     })
     .from(locationStockEvents)
     .where(

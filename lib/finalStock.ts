@@ -64,7 +64,7 @@ export const finalStockAtDestinationSql = sql<number | null>`
         ),
         0
       )
-    )::int
+    )::float8
     WHEN ${locationStockEvents.destinationLocationId} IS NOT NULL AND ${locationStockEvents.type} != 'SHIP' THEN (
       COALESCE(
         (
@@ -95,7 +95,7 @@ export const finalStockAtDestinationSql = sql<number | null>`
         ),
         0
       )
-    )::int
+    )::float8
     ELSE NULL
   END
 `;

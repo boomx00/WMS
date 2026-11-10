@@ -1,11 +1,19 @@
 import { db } from "@/lib/db";
-import { locationStock, locations, locationTypes, items } from "@/db/schema";
+import { locationStock, locations, locationTypes, items, productCategories, units } from "@/db/schema";
 import { and, eq, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getStockColumns } from "@/lib/stockColumns";
 import { getWarehouses, pickDefaultWarehouse } from "@/lib/warehouses";
 import TotalStockTable, { type SkuStock } from "./TotalStockTable";
+import { DEFAULT_SKU_UNITS } from "./skuUnits";
 
 export const dynamic = "force-dynamic";
+
+// The three units a product's category can name (Items page → Product
+// categories): primary (Carton), secondary (Pack), storage (Pallet).
+const primaryUnit = alias(units, "primary_unit");
+const secondaryUnit = alias(units, "secondary_unit");
+const storageUnit = alias(units, "storage_unit");
 
 // One warehouse's Total Stock (its tab). Only its locations ticked "Counts
 // toward Total Stock" on the Locations page are part of it. Within each
@@ -19,6 +27,15 @@ async function getTotalStock(warehouseId: number): Promise<SkuStock[]> {
       itemName: items.name,
       palletCartonQty: items.palletCartonQty,
       packsPerCarton: items.cartonBagQty,
+      primaryCode: primaryUnit.code,
+      primaryName: primaryUnit.name,
+      primaryNameId: primaryUnit.nameId,
+      primaryNameZh: primaryUnit.nameZh,
+      secondaryCode: secondaryUnit.code,
+      storageCode: storageUnit.code,
+      storageName: storageUnit.name,
+      storageNameId: storageUnit.nameId,
+      storageNameZh: storageUnit.nameZh,
       locationCode: locations.code,
       locationType: locations.type,
       locationArea: locations.area,
@@ -33,6 +50,10 @@ async function getTotalStock(warehouseId: number): Promise<SkuStock[]> {
     .innerJoin(locations, eq(locationStock.locationId, locations.id))
     .innerJoin(locationTypes, eq(locations.type, locationTypes.code))
     .innerJoin(items, eq(locationStock.itemId, items.id))
+    .leftJoin(productCategories, eq(items.categoryId, productCategories.id))
+    .leftJoin(primaryUnit, eq(productCategories.primaryUnitId, primaryUnit.id))
+    .leftJoin(secondaryUnit, eq(productCategories.secondaryUnitId, secondaryUnit.id))
+    .leftJoin(storageUnit, eq(productCategories.storageUnitId, storageUnit.id))
     .where(
       and(
         or(ne(locationStock.quantity, 0), ne(locationStock.loosePacks, 0)),
@@ -54,6 +75,16 @@ async function getTotalStock(warehouseId: number): Promise<SkuStock[]> {
         name: row.itemName,
         palletCartonQty: Number(row.palletCartonQty) || 0,
         packsPerCarton: Number(row.packsPerCarton) || 0,
+        // No category yet: shown as Carton / Pack / Pallet, as before.
+        units: row.primaryCode
+          ? {
+              primary: { code: row.primaryCode, name: row.primaryName!, nameId: row.primaryNameId, nameZh: row.primaryNameZh },
+              secondaryCode: row.secondaryCode,
+              storage: row.storageCode
+                ? { code: row.storageCode, name: row.storageName!, nameId: row.storageNameId, nameZh: row.storageNameZh }
+                : null,
+            }
+          : DEFAULT_SKU_UNITS,
         totalQuantity: 0,
         totalPacks: 0,
         locations: [],

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStock, locations, locationTypes, items } from "@/db/schema";
+import { locationStock, locations, locationTypes, items, productCategories } from "@/db/schema";
+import { locationStockUnitFields, lsPrimaryUnit, lsSecondaryUnit, lsStorageUnit } from "@/lib/units";
 import { eq, or, ilike, ne, and, sql } from "drizzle-orm";
 import { parseWarehouseId } from "@/lib/warehouses";
 
@@ -39,6 +40,8 @@ export async function GET(req: NextRequest) {
       // Loose packs ("Counted in packs" locations only; quantity is 0 there).
       loosePacks: locationStock.loosePacks,
       countsInPacks: locationTypes.countsInPacks,
+      // The product's units (its category) — lib/locationStockUnits.ts.
+      ...locationStockUnitFields,
       palletQuantity: sql<number>`
         ROUND(${locationStock.quantity}::numeric / NULLIF(${items.palletCartonQty}, 0), 2)
       `,
@@ -48,6 +51,10 @@ export async function GET(req: NextRequest) {
     .innerJoin(locations, eq(locationStock.locationId, locations.id))
     .innerJoin(locationTypes, eq(locations.type, locationTypes.code))
     .innerJoin(items, eq(locationStock.itemId, items.id))
+    .leftJoin(productCategories, eq(items.categoryId, productCategories.id))
+    .leftJoin(lsPrimaryUnit, eq(productCategories.primaryUnitId, lsPrimaryUnit.id))
+    .leftJoin(lsSecondaryUnit, eq(productCategories.secondaryUnitId, lsSecondaryUnit.id))
+    .leftJoin(lsStorageUnit, eq(productCategories.storageUnitId, lsStorageUnit.id))
     .where(
       and(
         or(ilike(locations.code, pattern), ilike(items.sku, pattern), ilike(items.name, pattern)),

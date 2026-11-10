@@ -12,6 +12,7 @@ import { relations, sql } from "drizzle-orm";
 import { users } from "./users";
 import { pallets } from "./pallets";
 import { productCategories } from "./units";
+import { qty } from "./qty";
 
 // Products (items), suppliers, and per-item ledger anchors.
 
@@ -78,7 +79,7 @@ export const itemLedgerAnchors = pgTable(
     itemId: integer("item_id")
       .notNull()
       .references(() => items.id),
-    openingQuantity: integer("opening_quantity").notNull(),
+    openingQuantity: qty("opening_quantity").notNull(),
     openingAt: timestamp("opening_at").defaultNow().notNull(),
   },
   (table) => [uniqueIndex("item_ledger_anchors_item_idx").on(table.itemId)]

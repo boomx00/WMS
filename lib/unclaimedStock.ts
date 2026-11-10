@@ -10,7 +10,7 @@ export async function getStagingTotal(db: any, itemId: number, locationId?: numb
   if (locationIds.length === 0) return 0;
 
   const [row] = await db
-    .select({ total: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::int` })
+    .select({ total: sql<number>`COALESCE(SUM(${locationStock.quantity}), 0)::float8` })
     .from(locationStock)
     .where(and(inArray(locationStock.locationId, locationIds), eq(locationStock.itemId, itemId)));
   return row?.total ?? 0;

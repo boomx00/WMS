@@ -94,7 +94,7 @@ export async function getMarkRows(db: any, filter: MarkFilter): Promise<MarkRow[
         salesOrderId: locationStockEvents.salesOrderId,
         tambahanOrderId: locationStockEvents.tambahanOrderId,
         locationId: locationStockEvents.destinationLocationId,
-        quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int`,
+        quantity: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8`,
       })
       .from(locationStockEvents)
       .where(destWhere)
@@ -108,7 +108,7 @@ export async function getMarkRows(db: any, filter: MarkFilter): Promise<MarkRow[
         salesOrderId: locationStockEvents.salesOrderId,
         tambahanOrderId: locationStockEvents.tambahanOrderId,
         locationId: locationStockEvents.sourceLocationId,
-        quantity: sql<number>`coalesce(sum(${SOURCE_DELTA}), 0)::int`,
+        quantity: sql<number>`coalesce(sum(${SOURCE_DELTA}), 0)::float8`,
       })
       .from(locationStockEvents)
       .where(sourceWhere)

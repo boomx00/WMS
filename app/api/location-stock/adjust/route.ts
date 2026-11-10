@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getItemQtyUnits, qtyDecimalsError } from "@/lib/units";
+import { roundQty } from "@/lib/uom";
 import { db } from "@/lib/db";
 import { items, locationStock, locationStockEvents } from "@/db/schema";
 import { eq, and, ne, inArray } from "drizzle-orm";
@@ -66,6 +68,13 @@ export async function PATCH(req: NextRequest) {
   }
 
   const [item] = await db.select().from(items).where(eq(items.sku, itemSku));
+  if (item) {
+    // Decimals only where the product's unit allows them.
+    const decimalsError = qtyDecimalsError(Number(newQuantity), (await getItemQtyUnits(db, [item.id])).get(item.id), item.sku);
+    if (decimalsError) {
+      return NextResponse.json({ error: decimalsError }, { status: 400 });
+    }
+  }
   if (!item) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
   }
@@ -105,7 +114,7 @@ export async function PATCH(req: NextRequest) {
 
   if (location.isStaging) {
     const currentUnmarked = await getUnclaimedQuantity(db, item.id, location.id);
-    const ledgerDelta = newQuantity - currentUnmarked;
+    const ledgerDelta = roundQty(newQuantity - currentUnmarked);
 
     if (ledgerDelta === 0) {
       return NextResponse.json(
@@ -118,7 +127,7 @@ export async function PATCH(req: NextRequest) {
     // location — reserved stock, never touched by this action.
     const { totalMarked } = await getMarkedBreakdownForItem(db, item.id, location.id);
 
-    const newTotal = totalMarked + newQuantity;
+    const newTotal = roundQty(totalMarked + newQuantity);
 
     await db.transaction(async (tx) => {
       if (existing) {
@@ -155,7 +164,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Non-Outbound-WH: plain grand-total adjustment, unchanged from before.
-  const delta = newQuantity - previousQuantity;
+  const delta = roundQty(newQuantity - previousQuantity);
   if (delta === 0) {
     return NextResponse.json({ error: "New quantity is the same as the current quantity" }, { status: 400 });
   }

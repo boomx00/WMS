@@ -11,6 +11,7 @@ import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { TOTAL_STOCK_WAREHOUSE_LABELS } from "@/lib/warehouseLabels";
 import { useLanguage } from "@/lib/LanguageContext";
 import { columnNameFor } from "@/lib/columnNames";
+import { fillUnitLabel, sharedUnit, type SkuUnits } from "./skuUnits";
 
 export type SkuLocation = {
   locationCode: string;
@@ -32,9 +33,10 @@ export type SkuStock = {
   sku: string;
   name: string;
   palletCartonQty: number;
-  packsPerCarton: number; // Items page "carton bag qty"
-  totalQuantity: number; // cartons
-  totalPacks: number; // loose packs, on top of the cartons
+  packsPerCarton: number; // Items page ratio: secondary per primary
+  units: SkuUnits; // from the product's category
+  totalQuantity: number; // primary units (cartons)
+  totalPacks: number; // loose secondary units (packs), on top
   locations: SkuLocation[];
 };
 
@@ -42,13 +44,15 @@ export type SkuStock = {
 type SortKey = "sku" | "name" | "locations" | "total" | "pallets" | `col:${number}`;
 type SortDir = "asc" | "desc";
 
-function palletValue(quantity: number, palletCartonQty: number): number | null {
-  if (!palletCartonQty || palletCartonQty <= 0) return null;
+// Storage units (pallets) the quantity fills. null when the product's
+// category has no storage unit.
+function palletValue(quantity: number, palletCartonQty: number, units: SkuUnits): number | null {
+  if (!units.storage || !palletCartonQty || palletCartonQty <= 0) return null;
   return quantity / palletCartonQty;
 }
 
-function formatPallets(quantity: number, palletCartonQty: number): string {
-  const num = palletValue(quantity, palletCartonQty);
+function formatPallets(quantity: number, palletCartonQty: number, units: SkuUnits): string {
+  const num = palletValue(quantity, palletCartonQty, units);
   if (num === null) return "—";
   return Number.isInteger(num) ? num.toString() : num.toFixed(2).replace(/\.?0+$/, "");
 }
@@ -83,11 +87,13 @@ function withPacks(cartons: number, packs: number, packsPerCarton: number): numb
   return Math.round((cartons + packs / packsPerCarton) * 1000) / 1000;
 }
 
-// "120", "4 pk" (packs only), or "120 + 4 pk".
-function formatCartonsPacks(cartons: number, packs: number): string {
+// "120", "4 PK" (packs only), or "120 + 4 PK" — with the product's own
+// secondary unit code.
+function formatCartonsPacks(cartons: number, packs: number, units: SkuUnits): string {
   if (!packs) return cartons.toLocaleString();
-  if (!cartons) return `${packs.toLocaleString()} pk`;
-  return `${cartons.toLocaleString()} + ${packs.toLocaleString()} pk`;
+  const code = units.secondaryCode ?? "";
+  if (!cartons) return `${packs.toLocaleString()} ${code}`.trim();
+  return `${cartons.toLocaleString()} + ${packs.toLocaleString()} ${code}`.trim();
 }
 
 // A SKU's total in cartons, loose packs included as a decimal (30.5).
@@ -98,10 +104,18 @@ const formatTotal = (value: number) => value.toLocaleString(undefined, { maximum
 
 // Columns hold cartons (a packs column: 0); TOTAL includes loose packs as a
 // decimal. With loose packs in the warehouse, one more column: LOOSE PACKS.
-function exportRow(sku: SkuStock, columns: StockColumn[], withPackColumns: boolean): (string | number)[] {
+// With products in different units on the tab, a UNIT column says which
+// unit each row's numbers are in.
+function exportRow(
+  sku: SkuStock,
+  columns: StockColumn[],
+  withPackColumns: boolean,
+  withUnitColumn: boolean
+): (string | number)[] {
   const totals = columnTotals(sku);
   const row: (string | number)[] = [sku.sku, sku.name, ...columns.map((c) => totals.get(c.id) ?? 0), skuTotal(sku)];
   if (withPackColumns) row.push(sku.totalPacks);
+  if (withUnitColumn) row.push(sku.units.primary.code);
   return row;
 }
 
@@ -197,8 +211,8 @@ export default function TotalStockTable({
         case "total":
           return dirMul * (skuTotal(a) - skuTotal(b));
         case "pallets": {
-          const pa = palletValue(a.totalQuantity, a.palletCartonQty);
-          const pb = palletValue(b.totalQuantity, b.palletCartonQty);
+          const pa = palletValue(a.totalQuantity, a.palletCartonQty, a.units);
+          const pb = palletValue(b.totalQuantity, b.palletCartonQty, b.units);
           if (pa === null && pb === null) return 0;
           if (pa === null) return 1;
           if (pb === null) return -1;
@@ -214,10 +228,19 @@ export default function TotalStockTable({
     });
   }, [skus, search, sortKey, sortDir]);
 
-  const grandTotal = useMemo(
-    () => Math.round(visible.reduce((sum, s) => sum + skuTotal(s), 0) * 1000) / 1000,
-    [visible]
-  );
+  // The tab's units: one shared primary / storage unit, or "mixed".
+  const tabPrimary = useMemo(() => sharedUnit(skus.map((s) => s.units.primary)), [skus]);
+  const tabStorage = useMemo(() => sharedUnit(skus.map((s) => s.units.storage)), [skus]);
+  const totalHeader = fillUnitLabel(labels.th_total_carton, "unit", tabPrimary, language, "Total");
+  const storageHeader = fillUnitLabel(labels.th_pallets, "storage", tabStorage, language, "Storage");
+  const totalCardLabel = fillUnitLabel(labels.total_stock_card, "unit", tabPrimary, language, "Total Stock");
+
+  // Grand total per primary unit — cartons and kilograms aren't added up.
+  const grandTotals = useMemo(() => {
+    const byUnit = new Map<string, number>();
+    for (const s of visible) byUnit.set(s.units.primary.code, (byUnit.get(s.units.primary.code) ?? 0) + skuTotal(s));
+    return Array.from(byUnit, ([code, total]) => ({ code, total: Math.round(total * 1000) / 1000 }));
+  }, [visible]);
 
   function toggle(itemId: number) {
     setExpanded((prev) => {
@@ -238,7 +261,10 @@ export default function TotalStockTable({
 
   function exportAll() {
     const withPackColumns = skus.some((s) => s.totalPacks !== 0);
-    const rows = skus.map((sku) => exportRow(sku, columns, withPackColumns));
+    const withUnitColumn = tabPrimary === "mixed";
+    const rows = skus.map((sku) => exportRow(sku, columns, withPackColumns, withUnitColumn));
+    const packCodes = new Set(skus.filter((s) => s.totalPacks !== 0).map((s) => s.units.secondaryCode));
+    const packHeader = packCodes.size === 1 ? `LOOSE ${[...packCodes][0] ?? ""}`.trim() : "LOOSE";
     const tabPart =
       warehouses.length > 1 && activeWarehouse
         ? `-${activeWarehouse.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`
@@ -250,7 +276,8 @@ export default function TotalStockTable({
         "SKU NAME",
         ...columns.map((c) => columnNameFor(c, language).toUpperCase()),
         "TOTAL",
-        ...(withPackColumns ? ["LOOSE PACKS"] : []),
+        ...(withPackColumns ? [packHeader] : []),
+        ...(withUnitColumn ? ["UNIT"] : []),
       ],
       rows
     );
@@ -297,8 +324,14 @@ export default function TotalStockTable({
           <p className="text-lg font-semibold">{visible.length.toLocaleString()}</p>
         </div>
         <div className="border border-zinc-800 rounded-lg px-4 py-3">
-          <p className="text-xs text-zinc-500 mb-1">{labels.total_stock_card}</p>
-          <p className="text-lg font-semibold">{formatTotal(grandTotal)}</p>
+          <p className="text-xs text-zinc-500 mb-1">{totalCardLabel}</p>
+          <p className="text-lg font-semibold">
+            {grandTotals.length === 0
+              ? "0"
+              : grandTotals.length === 1
+                ? formatTotal(grandTotals[0].total)
+                : grandTotals.map((g) => `${formatTotal(g.total)} ${g.code}`).join(" · ")}
+          </p>
         </div>
       </div>
 
@@ -338,8 +371,8 @@ export default function TotalStockTable({
                   align="right"
                 />
               ))}
-              <SortableTh label={labels.th_total_carton} sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
-              <SortableTh label={labels.th_pallets} sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label={totalHeader} sortKey="total" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+              <SortableTh label={storageHeader} sortKey="pallets" activeKey={sortKey} dir={sortDir} onSort={handleSort} align="right" />
               <th className="px-4 py-3 font-medium text-right">{labels.th_ledger}</th>
             </tr>
           </thead>
@@ -387,13 +420,13 @@ export default function TotalStockTable({
                       </td>
                       {columns.map((c) => (
                         <td key={c.id} className="px-4 py-3 text-right font-mono text-zinc-400 whitespace-nowrap">
-                          {formatCartonsPacks(totals.get(c.id) ?? 0, packs.get(c.id) ?? 0)}
+                          {formatCartonsPacks(totals.get(c.id) ?? 0, packs.get(c.id) ?? 0, sku.units)}
                         </td>
                       ))}
                       <td className="px-4 py-3 text-right font-mono whitespace-nowrap">
                         {sku.totalPacks !== 0 ? (
                           <span
-                            title={`${sku.totalQuantity.toLocaleString()} ctn + ${sku.totalPacks.toLocaleString()} pk (${sku.packsPerCarton} pk / ctn)`}
+                            title={`${sku.totalQuantity.toLocaleString()} ${sku.units.primary.code} + ${sku.totalPacks.toLocaleString()} ${sku.units.secondaryCode ?? ""} (${sku.packsPerCarton} ${sku.units.secondaryCode ?? ""} / ${sku.units.primary.code})`}
                           >
                             {formatTotal(skuTotal(sku))}
                           </span>
@@ -402,7 +435,7 @@ export default function TotalStockTable({
                         )}
                       </td>
                       <td className="px-4 py-3 text-right font-mono text-zinc-400">
-                        {formatPallets(sku.totalQuantity, sku.palletCartonQty)}
+                        {formatPallets(sku.totalQuantity, sku.palletCartonQty, sku.units)}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button
@@ -425,7 +458,7 @@ export default function TotalStockTable({
                               <tr className="text-zinc-500 text-left">
                                 <th className="py-2 pr-4 font-medium">{labels.th_location}</th>
                                 <th className="py-2 pr-4 font-medium text-right">{labels.th_quantity}</th>
-                                <th className="py-2 pr-4 font-medium text-right">{labels.th_pallets}</th>
+                                <th className="py-2 pr-4 font-medium text-right">{storageHeader}</th>
                                 <th className="py-2 pr-4 font-medium text-right">{labels.th_updated}</th>
                                 <th className="py-2 font-medium text-right">{labels.th_ledger}</th>
                               </tr>
@@ -438,13 +471,13 @@ export default function TotalStockTable({
                                   </td>
                                   <td className="py-2 pr-4 text-right font-mono">
                                     {loc.loosePacks ? (
-                                      <span className="text-sky-300">{formatCartonsPacks(loc.quantity, loc.loosePacks)}</span>
+                                      <span className="text-sky-300">{formatCartonsPacks(loc.quantity, loc.loosePacks, sku.units)}</span>
                                     ) : (
                                       loc.quantity.toLocaleString()
                                     )}
                                   </td>
                                   <td className="py-2 pr-4 text-right font-mono text-zinc-400">
-                                    {loc.loosePacks && !loc.quantity ? "—" : formatPallets(loc.quantity, sku.palletCartonQty)}
+                                    {loc.loosePacks && !loc.quantity ? "—" : formatPallets(loc.quantity, sku.palletCartonQty, sku.units)}
                                   </td>
                                   <td className="py-2 pr-4 text-right font-mono text-xs text-zinc-500">
                                     {loc.updatedAt}

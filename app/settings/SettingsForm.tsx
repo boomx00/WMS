@@ -3,6 +3,7 @@
 import { useState } from "react";
 import PageLabelsSettings from "./PageLabelsSettings";
 import StockColumnsSettings from "./StockColumnsSettings";
+import LocationStockCardsSettings, { LOCATION_STOCK_CARDS_LABELS } from "./LocationStockCardsSettings";
 import OpnameCycleSetting from "./OpnameCycleSetting";
 import OperationsFreezeSetting from "./OperationsFreezeSetting";
 import DefaultLocationsSetting, { MarkingSetting, type WarehouseDefaults } from "./DefaultLocationsSetting";
@@ -32,7 +33,10 @@ export default function SettingsForm({
   };
   warehouses: WarehouseDefaults[];
 }) {
-  const [activeTab, setActiveTab] = useState<"general" | "locations" | "stockColumns" | "translations">("general");
+  const [activeTab, setActiveTab] = useState<
+    "general" | "locations" | "stockColumns" | "locationStockCards" | "translations"
+  >("general");
+  const cardLabels = usePageLabels("settings_page", LOCATION_STOCK_CARDS_LABELS);
   const canEdit = useCan()("settings.edit");
 
   const [allowDefaultCode, setAllowDefaultCode] = useState(initial.allowDefaultCodeTransactions);
@@ -77,6 +81,11 @@ export default function SettingsForm({
           onClick={() => setActiveTab("stockColumns")}
         />
         <TabButton
+          label={cardLabels.location_stock_cards}
+          active={activeTab === "locationStockCards"}
+          onClick={() => setActiveTab("locationStockCards")}
+        />
+        <TabButton
           label={labels.translations}
           active={activeTab === "translations"}
           onClick={() => setActiveTab("translations")}
@@ -85,6 +94,8 @@ export default function SettingsForm({
 
       {activeTab === "translations" ? (
         <PageLabelsSettings readOnly={!canEdit} />
+      ) : activeTab === "locationStockCards" ? (
+        <LocationStockCardsSettings readOnly={!canEdit} />
       ) : activeTab === "stockColumns" ? (
         <StockColumnsSettings
           readOnly={!canEdit}

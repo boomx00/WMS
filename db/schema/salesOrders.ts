@@ -3,6 +3,7 @@ import { relations, desc, sql } from "drizzle-orm";
 import { locations } from "./locations";
 import { users } from "./users";
 import { items } from "./items";
+import { qty } from "./qty";
 
 // Sales orders, their lines and document types, and shipment revisions.
 
@@ -17,7 +18,7 @@ export const shipmentRevisions = pgTable("shipment_revisions", {
   revisedItemId: integer("revised_item_id")
     .notNull()
     .references(() => items.id),
-  quantity: integer("quantity").notNull(),
+  quantity: qty("quantity").notNull(),
   reason: text("reason"),
   revisedBy: integer("revised_by")
     .notNull()
@@ -82,7 +83,7 @@ export const salesOrderItems = pgTable(
     itemId: integer("item_id")
       .notNull()
       .references(() => items.id),
-    quantity: integer("quantity").notNull(),
+    quantity: qty("quantity").notNull(),
   },
   (table) => [index("sales_order_items_sales_order_idx").on(table.salesOrderId)]
 );

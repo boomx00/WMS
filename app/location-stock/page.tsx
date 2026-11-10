@@ -1,7 +1,10 @@
 import { db } from "@/lib/db";
-import { locationStock, locations, locationTypes, items } from "@/db/schema";
+import { locationStock, locations, locationTypes, items, productCategories } from "@/db/schema";
+import { locationStockUnitFields, lsPrimaryUnit, lsSecondaryUnit, lsStorageUnit } from "@/lib/units";
 import { and, eq, ne, or, sql } from "drizzle-orm";
 import { getWarehouses } from "@/lib/warehouses";
+import { getUnits } from "@/lib/units";
+import { getResolvedLocationStockCards } from "@/lib/locationStockCards";
 import LocationStockTable from "./LocationStockTable";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +31,8 @@ async function getLocationStock() {
       // Loose packs ("Counted in packs" locations only; quantity is 0 there).
       loosePacks: locationStock.loosePacks,
       countsInPacks: locationTypes.countsInPacks,
+      // The product's units (its category) — lib/locationStockUnits.ts.
+      ...locationStockUnitFields,
 
       // Calculate pallet quantity
       palletQuantity: sql<number>`
@@ -42,6 +47,10 @@ async function getLocationStock() {
     .innerJoin(locations, eq(locationStock.locationId, locations.id))
     .innerJoin(locationTypes, eq(locations.type, locationTypes.code))
     .innerJoin(items, eq(locationStock.itemId, items.id))
+    .leftJoin(productCategories, eq(items.categoryId, productCategories.id))
+    .leftJoin(lsPrimaryUnit, eq(productCategories.primaryUnitId, lsPrimaryUnit.id))
+    .leftJoin(lsSecondaryUnit, eq(productCategories.secondaryUnitId, lsSecondaryUnit.id))
+    .leftJoin(lsStorageUnit, eq(productCategories.storageUnitId, lsStorageUnit.id))
     .where(
       or(
         and(eq(locationTypes.pickable, true), eq(locationTypes.hasPosition, false)),
@@ -53,13 +62,24 @@ async function getLocationStock() {
 }
 
 export default async function LocationStockPage() {
-  const [rows, warehouses] = await Promise.all([getLocationStock(), getWarehouses(db)]);
+  const [rows, warehouses, cards, allUnits] = await Promise.all([
+    getLocationStock(),
+    getWarehouses(db),
+    getResolvedLocationStockCards(db),
+    getUnits(db),
+  ]);
 
   return (
     <div className="p-8 max-w-4xl">
 
 
-      <LocationStockTable rows={rows} warehouses={warehouses.map(({ id, name, isActive }) => ({ id, name, isActive }))} />
+      <LocationStockTable
+        rows={rows}
+        warehouses={warehouses.map(({ id, name, isActive }) => ({ id, name, isActive }))}
+        // Settings → Location Stock Cards
+        cards={cards}
+        allUnits={allUnits.map(({ id, code, name, nameId, nameZh, decimals }) => ({ id, code, name, nameId, nameZh, decimals }))}
+      />
     </div>
   );
 }

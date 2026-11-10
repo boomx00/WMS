@@ -15,7 +15,7 @@ export async function getPickedForSoQuantity(
   itemId: number
 ): Promise<number> {
   const [addRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int` })
+    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8` })
     .from(locationStockEvents)
     .where(
       and(
@@ -26,7 +26,7 @@ export async function getPickedForSoQuantity(
     );
 
   const [shipRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::int` })
+    .select({ total: sql<number>`coalesce(sum(${locationStockEvents.quantity}), 0)::float8` })
     .from(locationStockEvents)
     .where(
       and(
@@ -62,7 +62,7 @@ export async function getPickedForSoQuantities(
         - coalesce(sum(${locationStockEvents.quantity}) filter (
           where ${locationStockEvents.type} = 'SHIP'
         ), 0)
-      )::int`,
+      )::float8`,
     })
     .from(locationStockEvents)
     .where(
