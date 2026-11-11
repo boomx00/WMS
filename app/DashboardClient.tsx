@@ -5,7 +5,7 @@ import RefreshButton from "@/components/RefreshButton";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { shiftDate } from "@/lib/officeDay";
 import { formatTruckTime } from "@/app/sales-orders/components/helpers";
-import type { CompletedOrder, DashboardData, DetailLine, MovementRow } from "@/lib/dashboard";
+import type { DashboardData, DashboardOrder, DetailLine, MovementRow, OrderStatus } from "@/lib/dashboard";
 
 // While the current office day is shown, the numbers refresh on their own.
 const AUTO_REFRESH_MS = 60_000;
@@ -13,8 +13,8 @@ const AUTO_REFRESH_MS = 60_000;
 const fmt = (n: number) => n.toLocaleString("en-US");
 const total = <T,>(rows: T[], pick: (r: T) => number) => rows.reduce((t, r) => t + pick(r), 0);
 
-// Last shipping − first picking, e.g. "2h 15m". "—" if there was no
-// picking, or the span is zero/negative.
+// Last shipping − first picking (or the time so far), e.g. "2h 15m". "—" if
+// there was no picking, or the span is zero/negative.
 function formatDuration(ms: number | null): string {
   if (ms == null || ms <= 0) return "—";
   const totalMinutes = Math.round(ms / 60000);
@@ -31,7 +31,7 @@ function formatDuration(ms: number | null): string {
 const lineMatches = (d: DetailLine, q: string) =>
   d.ref.toLowerCase().includes(q) || (d.note ?? "").toLowerCase().includes(q);
 
-function matchesOrder(o: CompletedOrder, q: string) {
+function matchesOrder(o: DashboardOrder, q: string) {
   return o.document.toLowerCase().includes(q) || (o.typeName ?? "").toLowerCase().includes(q);
 }
 
@@ -90,6 +90,7 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [details, setDetails] = useState<{ row: MovementRow; direction: Direction } | null>(null);
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | null>(null); // null = all
   const requestId = useRef(0);
 
   const today = data.today;
@@ -159,10 +160,19 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
     return [pick("in"), pick("out")];
   }, [data.movement, q]);
 
-  const orders = useMemo(
-    () => (q ? data.completedOrders.filter((o) => matchesOrder(o, q)) : data.completedOrders),
-    [data.completedOrders, q]
+  // Search first, then the status chip. The chip counts follow the search,
+  // so they always add up to what the table can show.
+  const searchedOrders = useMemo(
+    () => (q ? data.orders.filter((o) => matchesOrder(o, q)) : data.orders),
+    [data.orders, q]
   );
+  const orders = useMemo(
+    () => (statusFilter ? searchedOrders.filter((o) => o.status === statusFilter) : searchedOrders),
+    [searchedOrders, statusFilter]
+  );
+  const countStatus = (rows: DashboardOrder[], status: OrderStatus) => rows.filter((o) => o.status === status).length;
+  const inProgressCount = countStatus(searchedOrders, "IN_PROGRESS");
+  const finishedCount = countStatus(searchedOrders, "FINISHED");
 
   // Cards always show the whole office day, not the search.
   const all = data.movement;
@@ -256,7 +266,14 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
               sub={labels.card_out_breakdown.replace("{sales}", fmt(salesOut)).replace("{other}", fmt(otherOut))}
             />
             <StatCard label={labels.card_skus_moved} value={all.length} unit="SKU" />
-            <StatCard label={labels.card_completed} value={data.completedOrders.length} unit={labels.orders} />
+            <StatCard
+              label={labels.card_completed}
+              value={countStatus(data.orders, "FINISHED")}
+              unit={labels.orders}
+              sub={labels.card_orders_breakdown
+                .replace("{in_progress}", fmt(countStatus(data.orders, "IN_PROGRESS")))
+                .replace("{total}", fmt(data.orders.length))}
+            />
           </div>
 
           <input
@@ -288,11 +305,40 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
             />
           </div>
 
-          <Panel title={labels.completed_title} info={labels.completed_info} count={orders.length}>
+          <Panel
+            title={labels.orders_title}
+            info={labels.orders_info}
+            count={orders.length}
+            extra={
+              <div className="flex flex-wrap items-center gap-1.5">
+                <SummaryChip
+                  label={labels.summary_total}
+                  value={searchedOrders.length}
+                  active={statusFilter === null}
+                  onClick={() => setStatusFilter(null)}
+                />
+                <SummaryChip
+                  label={labels.status_in_progress}
+                  value={inProgressCount}
+                  tone="progress"
+                  active={statusFilter === "IN_PROGRESS"}
+                  onClick={() => setStatusFilter(statusFilter === "IN_PROGRESS" ? null : "IN_PROGRESS")}
+                />
+                <SummaryChip
+                  label={labels.status_finished}
+                  value={finishedCount}
+                  tone="finished"
+                  active={statusFilter === "FINISHED"}
+                  onClick={() => setStatusFilter(statusFilter === "FINISHED" ? null : "FINISHED")}
+                />
+              </div>
+            }
+          >
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-zinc-900 text-zinc-500 text-left">
                   <th className="px-3 py-2 font-medium">{labels.th_document}</th>
+                  <th className="px-3 py-2 font-medium">{labels.th_status}</th>
                   <th className="px-3 py-2 font-medium">{labels.th_first_pick}</th>
                   <th className="px-3 py-2 font-medium">{labels.th_last_ship}</th>
                   <th className="px-3 py-2 font-medium text-right">{labels.th_time_needed}</th>
@@ -301,23 +347,46 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
               </thead>
               <tbody>
                 {orders.length === 0 ? (
-                  <EmptyRow colSpan={5} text={emptyText} />
+                  <EmptyRow colSpan={6} text={emptyText} />
                 ) : (
-                  orders.map((o) => (
-                    <tr key={o.salesOrderId} className="border-t border-zinc-800/70">
-                      <td className="px-3 py-2 font-mono text-xs text-zinc-200 whitespace-nowrap">{o.document}</td>
-                      <td className="px-3 py-2 font-mono text-xs text-zinc-400 whitespace-nowrap">
-                        {formatTruckTime(o.firstPick)}
-                      </td>
-                      <td className="px-3 py-2 font-mono text-xs text-zinc-400 whitespace-nowrap">
-                        {formatTruckTime(o.lastShip)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono text-amber-500 whitespace-nowrap">
-                        {formatDuration(o.durationMs)}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono">{fmt(o.cartons)}</td>
-                    </tr>
-                  ))
+                  orders.map((o) => {
+                    const inProgress = o.status === "IN_PROGRESS";
+                    return (
+                      <tr key={o.salesOrderId} className="border-t border-zinc-800/70">
+                        <td className="px-3 py-2 font-mono text-xs text-zinc-200 whitespace-nowrap">{o.document}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <StatusBadge
+                            status={o.status}
+                            label={inProgress ? labels.status_in_progress : labels.status_finished}
+                          />
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-zinc-400 whitespace-nowrap">
+                          {formatTruckTime(o.firstPick)}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-zinc-400 whitespace-nowrap">
+                          {o.lastShip ? formatTruckTime(o.lastShip) : "—"}
+                        </td>
+                        <td
+                          className={`px-3 py-2 text-right font-mono whitespace-nowrap ${
+                            inProgress ? "text-sky-400/80 italic" : "text-amber-500"
+                          }`}
+                          title={inProgress ? labels.time_so_far : undefined}
+                        >
+                          {formatDuration(o.durationMs)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono whitespace-nowrap">
+                          {inProgress ? (
+                            <>
+                              {fmt(o.shipped)}
+                              <span className="text-zinc-600"> / {fmt(o.ordered)}</span>
+                            </>
+                          ) : (
+                            fmt(o.shipped)
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -605,6 +674,7 @@ function Panel({
   info,
   count,
   tone,
+  extra,
   className = "",
   children,
 }: {
@@ -612,6 +682,7 @@ function Panel({
   info?: string;
   count: number;
   tone?: "in" | "out";
+  extra?: React.ReactNode; // shown in the header, before the count
   className?: string;
   children: React.ReactNode;
 }) {
@@ -620,13 +691,16 @@ function Panel({
     <section className={`border border-zinc-800 rounded-lg bg-zinc-900/30 flex flex-col min-w-0 ${className}`}>
       {/* Not overflow-hidden on the section, so the info tooltip can spill
           out over the table below. */}
-      <div className="px-4 py-3 border-b border-zinc-800 flex items-center justify-between rounded-t-lg">
+      <div className="px-4 py-3 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-2 rounded-t-lg">
         <h2 className="text-sm font-medium flex items-center gap-2">
           {dot && <span className={`w-2 h-2 rounded-full ${dot}`} aria-hidden />}
           {title}
           {info && <InfoTip text={info} />}
         </h2>
-        <span className="text-xs text-zinc-500 font-mono">{count}</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {extra}
+          <span className="text-xs text-zinc-500 font-mono">{count}</span>
+        </div>
       </div>
       <div className="max-h-[520px] overflow-auto rounded-b-lg">{children}</div>
     </section>
@@ -669,6 +743,50 @@ function StatCard({
       {sub && <div className="text-[11px] text-zinc-500 mt-1 font-mono">{sub}</div>}
     </div>
   );
+}
+
+const STATUS_TONE = {
+  progress: { text: "text-sky-400", activeBorder: "border-sky-500/60 bg-sky-500/10" },
+  finished: { text: "text-emerald-400", activeBorder: "border-emerald-500/60 bg-emerald-500/10" },
+  none: { text: "text-zinc-200", activeBorder: "border-zinc-500 bg-zinc-800/60" },
+} as const;
+
+// A count in the Sales Orders header that also filters the table.
+function SummaryChip({
+  label,
+  value,
+  tone = "none",
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  tone?: keyof typeof STATUS_TONE;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const t = STATUS_TONE[tone];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-xs whitespace-nowrap ${
+        active ? t.activeBorder : "border-zinc-800 hover:border-zinc-600"
+      }`}
+    >
+      <span className="text-zinc-500">{label}</span>
+      <span className={`font-mono ${t.text}`}>{fmt(value)}</span>
+    </button>
+  );
+}
+
+function StatusBadge({ status, label }: { status: OrderStatus; label: string }) {
+  const cls =
+    status === "IN_PROGRESS"
+      ? "border-sky-500/40 bg-sky-500/10 text-sky-400"
+      : "border-emerald-500/40 bg-emerald-500/10 text-emerald-400";
+  return <span className={`inline-block px-2 py-0.5 rounded border text-[11px] ${cls}`}>{label}</span>;
 }
 
 function EmptyRow({ colSpan, text }: { colSpan: number; text: string }) {

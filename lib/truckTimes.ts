@@ -18,7 +18,7 @@
 // new Date(). created_at is stored as UTC, hence the AT TIME ZONE pair.
 
 import { locationStockEvents, tambahanOrders } from "@/db/schema";
-import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 
 const TRUCK_TIME_ZONE = "Asia/Jakarta";
 const TZ = sql.raw(`'${TRUCK_TIME_ZONE}'`);
@@ -96,11 +96,17 @@ function toMap(rows: Row[]): Map<number, TruckTimes> {
 export const NO_TRUCK_TIMES: TruckTimes = { truckEnterTime: null, truckLeaveTime: null, durationMs: null };
 
 // Truck times for the given sales orders, in ONE query. SOs with no picks or
-// ships yet are simply absent (use NO_TRUCK_TIMES).
-export async function getTruckTimes(db: any, salesOrderIds: number[]): Promise<Map<number, TruckTimes>> {
+// ships yet are simply absent (use NO_TRUCK_TIMES). With `before`, only
+// events before that instant count — the times as they stood then (the
+// Dashboard uses it for orders still in progress at the end of a past day).
+export async function getTruckTimes(
+  db: any,
+  salesOrderIds: number[],
+  before?: Date
+): Promise<Map<number, TruckTimes>> {
   if (salesOrderIds.length === 0) return new Map();
   const rows: Row[] = await selectTruckTimes(db)
-    .where(and(ownedBy(salesOrderIds), PICK_OR_SHIP))
+    .where(and(ownedBy(salesOrderIds), PICK_OR_SHIP, before ? lt(e.createdAt, before) : undefined))
     .groupBy(OWNER_SO);
   return toMap(rows);
 }
