@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useCan } from "@/lib/AccessContext";
 
 type TambahanItem = {
@@ -25,8 +26,9 @@ type TambahanData = {
 };
 
 export default function TambahanPanel({ soNumber }: { soNumber: string }) {
-  // Convert / confirm / return are the web Tambahan actions.
+  // Convert / confirm / return / cancel are the web Tambahan actions.
   const canAct = useCan()("so.tambahan");
+  const router = useRouter();
   const [data, setData] = useState<TambahanData | null>(null);
   const [loading, setLoading] = useState(true);
   const [newSoNumber, setNewSoNumber] = useState("");
@@ -34,6 +36,7 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
   const [converting, setConverting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   async function refresh() {
     setLoading(true);
     const res = await fetch(`/api/sales-orders/${encodeURIComponent(soNumber)}/tambahan`);
@@ -83,19 +86,50 @@ export default function TambahanPanel({ soNumber }: { soNumber: string }) {
     await refresh();
   }
 
+  // Only an empty batch (nothing picked or shipped) can be cancelled — e.g.
+  // one started by a mis-tap on the PDA. The server checks again.
+  async function handleCancelTambahan(tambahanNumber: string) {
+    if (!window.confirm(`Cancel ${tambahanNumber}? It's empty, so nothing else changes.`)) return;
+    setError(null);
+    setCancelling(true);
+    const res = await fetch(`/api/sales-orders/${encodeURIComponent(soNumber)}/tambahan/cancel`, {
+      method: "POST",
+    });
+    setCancelling(false);
+    if (!res.ok) {
+      const responseBody = await res.json();
+      setError(responseBody.error ?? "Failed to cancel");
+      return;
+    }
+    await refresh();
+    router.refresh(); // the SO's status may change now there's no open Tambahan
+  }
+
   if (loading) return null;
   if (!data?.tambahan) return null; // no Tambahan started for this SO yet
 
   const { tambahan, items } = data;
   const totalOutstanding = items.reduce((sum, it) => sum + Math.max(0, it.pickedQty - it.shippedQty), 0);
+  const isEmpty = items.length === 0;
   return (
     <div className="pl-10 mt-3 border-l border-zinc-800">
       <div className="pl-4">
-        <span className="text-sm font-medium text-amber-400 underline underline-offset-4">
-          {tambahan.tambahanNumber}
-        </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-amber-400 underline underline-offset-4">
+            {tambahan.tambahanNumber}
+          </span>
+          {canAct && tambahan.status === "ACTIVE" && isEmpty && (
+            <button
+              onClick={() => handleCancelTambahan(tambahan.tambahanNumber)}
+              disabled={cancelling}
+              className="text-xs text-red-400 hover:underline disabled:opacity-50"
+            >
+              {cancelling ? "Cancelling..." : "Cancel Tambahan"}
+            </button>
+          )}
+        </div>
 
-        {items.length === 0 ? (
+        {isEmpty ? (
           <p className="text-xs text-zinc-600 mt-2">Belum ada barang tambahan yang di-pick.</p>
         ) : (
           <table className="w-full text-sm mt-2">
