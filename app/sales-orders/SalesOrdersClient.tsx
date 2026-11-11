@@ -74,7 +74,11 @@ export default function SalesOrdersClient({
       const res = await fetch(`/api/sales-orders/search?q=${encodeURIComponent(search.trim())}${typeParam}`);
       setSearching(false);
       if (res.ok) {
-        setSearchResults(await res.json());
+        const results: Order[] = await res.json();
+        setSearchResults(results);
+        // Found through its Tambahan: open it, so the Tambahan panel shows.
+        const viaTambahan = results.filter((o) => o.matchedVia).map((o) => o.id);
+        if (viaTambahan.length > 0) setExpanded((prev) => new Set([...prev, ...viaTambahan]));
       }
     }, 300);
 
@@ -224,6 +228,11 @@ export default function SalesOrdersClient({
                           </span>
                         )}
                         {order.soNumber}
+                        {order.matchedVia && (
+                          <div className="mt-0.5 text-[10px] font-sans text-zinc-500">
+                            via Tambahan <span className="font-mono text-zinc-400">{order.matchedVia}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-zinc-400">
                         {new Date(order.orderDate).toLocaleDateString()}

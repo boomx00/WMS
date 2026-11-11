@@ -10,13 +10,22 @@ import {
   locations,
   users,
   shipmentRevisions,
+  tambahanOrders,
 } from "@/db/schema";
-import { eq, and, inArray, ilike, desc, sql } from "drizzle-orm";
+import { eq, and, inArray, ilike, desc, sql, or, notInArray } from "drizzle-orm";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 import { getTruckTimes, NO_TRUCK_TIMES } from "@/lib/truckTimes";
 import { parseTypeFilter, typeFilterCondition } from "@/lib/salesOrderTypes";
 // GET /api/sales-orders/search?q=...[&type=<id>|none]
+//
+// Matches the SO number, and also a Tambahan's number (TBH-…) or the real
+// SO number it was converted to (e.g. an HPT number). Conversion only
+// labels the Tambahan — no sales_orders row exists for that number — so
+// those return the PARENT SO, where the Tambahan lives, with matchedVia
+// saying why it's listed. Same matching as /api/sales-orders/search-any
+// (PDA). The type filter applies to direct matches only: a converted
+// number's own type isn't stored, and its parent may be of another type.
 export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
 
@@ -24,7 +33,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json([]);
   }
 
-  const matchedOrders = await db
+  const directMatches = await db
     .select()
     .from(salesOrders)
     .where(
@@ -36,11 +45,56 @@ export async function GET(req: NextRequest) {
     .orderBy(desc(salesOrders.orderDate))
     .limit(50);
 
+  const tambahanMatches = await db
+    .select({
+      parentSalesOrderId: tambahanOrders.parentSalesOrderId,
+      tambahanNumber: tambahanOrders.tambahanNumber,
+      convertedSoNumber: tambahanOrders.convertedSoNumber,
+    })
+    .from(tambahanOrders)
+    .where(
+      and(
+        or(ilike(tambahanOrders.tambahanNumber, `%${q}%`), ilike(tambahanOrders.convertedSoNumber, `%${q}%`)),
+        directMatches.length > 0
+          ? notInArray(
+              tambahanOrders.parentSalesOrderId,
+              directMatches.map((o) => o.id)
+            )
+          : undefined
+      )
+    )
+    .limit(50);
+
+  const matchedVia = new Map<number, string>();
+  for (const t of tambahanMatches) {
+    matchedVia.set(
+      t.parentSalesOrderId,
+      t.convertedSoNumber ? `${t.tambahanNumber} → ${t.convertedSoNumber}` : t.tambahanNumber
+    );
+  }
+
+  const parentMatches = matchedVia.size
+    ? await db
+        .select()
+        .from(salesOrders)
+        .where(inArray(salesOrders.id, [...matchedVia.keys()]))
+        .orderBy(desc(salesOrders.orderDate))
+    : [];
+
+  const matchedOrders = [...directMatches, ...parentMatches];
+
   if (matchedOrders.length === 0) {
     return NextResponse.json([]);
   }
 
   const orderIds = matchedOrders.map((o) => o.id);
+
+  // An ACTIVE Tambahan keeps the SO open, same as the Sales Orders page.
+  const activeTambahanRows = await db
+    .select({ parentSalesOrderId: tambahanOrders.parentSalesOrderId })
+    .from(tambahanOrders)
+    .where(and(inArray(tambahanOrders.parentSalesOrderId, orderIds), eq(tambahanOrders.status, "ACTIVE")));
+  const activeTambahanSet = new Set(activeTambahanRows.map((r) => r.parentSalesOrderId));
 
   // Truck enter = first pick, truck leave = last ship (from the ledger).
   const truckTimes = await getTruckTimes(db, orderIds);
@@ -113,6 +167,7 @@ const withStatus = await Promise.all(
         return {
           ...line,
           shipped,
+          picked,
           status,
           pickedFrom: pickedFromRows,
           shippedBy: shippedByRows,
@@ -121,13 +176,16 @@ const withStatus = await Promise.all(
       })
     );
 
+    // Same rule as the Sales Orders page (app/sales-orders/page.tsx).
     const allComplete = withStatus.length > 0 && withStatus.every((l) => l.status === "SHIPPED");
-    const anyShipped = withStatus.some((l) => l.shipped > 0);
-    const overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED" = allComplete
-      ? "COMPLETE"
-      : anyShipped
-      ? "PARTIAL"
-      : "NOT_STARTED";
+    const anyActivity = withStatus.some((l) => l.shipped > 0 || l.picked > 0);
+    const hasActiveTambahan = activeTambahanSet.has(o.id);
+    const overallStatus: "COMPLETE" | "PARTIAL" | "NOT_STARTED" =
+      allComplete && !hasActiveTambahan
+        ? "COMPLETE"
+        : anyActivity || hasActiveTambahan
+        ? "PARTIAL"
+        : "NOT_STARTED";
 
     const pickedByUsers = Array.from(
       new Set(withStatus.flatMap((l) => l.pickedFrom.map((p: any) => p.username)))
@@ -135,7 +193,15 @@ const withStatus = await Promise.all(
 
     const { truckEnterTime, truckLeaveTime } = truckTimes.get(o.id) ?? NO_TRUCK_TIMES;
 
-    return { ...o, truckEnterTime, truckLeaveTime, items: withStatus, overallStatus, pickedByUsers };
+    return {
+      ...o,
+      truckEnterTime,
+      truckLeaveTime,
+      items: withStatus,
+      overallStatus,
+      pickedByUsers,
+      matchedVia: matchedVia.get(o.id) ?? null,
+    };
   })
 );
 

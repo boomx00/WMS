@@ -39,4 +39,7 @@ export type Order = {
   // as WIB wall-clock strings. Read-only.
   truckEnterTime: string  | null;
   truckLeaveTime: string  | null;
+  // Search only: listed because its Tambahan matched, e.g.
+  // "TBH-HPT202609000106 → HPT202609000128".
+  matchedVia?: string | null;
 };
