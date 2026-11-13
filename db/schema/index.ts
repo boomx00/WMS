@@ -10,6 +10,7 @@ export * from "./pallets";
 export * from "./salesOrders";
 export * from "./locationStock";
 export * from "./stockOpname";
+export * from "./csoSummaries";
 export * from "./k3";
 export * from "./tambahan";
 export * from "./otherTransactions";

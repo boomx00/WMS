@@ -2,11 +2,12 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { TabButton } from "./_sessions/badges";
-import type { CombineResponse, Selections } from "./_combine/types";
+import type { CombineResponse, CsoSummary, Selections } from "./_combine/types";
 import { buildRows, readExcludedColumns, summarizeSkus, writeExcludedColumns } from "./_combine/calc";
 import { LocationCheckTab } from "./_combine/LocationCheckTab";
 import { SkuSummaryTab } from "./_combine/SkuSummaryTab";
 import { exportCombineExcel } from "./_combine/exportCombineExcel";
+import { fmtQty } from "./_summary/format";
 
 type CsoSession = {
   opnameNumber: string;
@@ -16,10 +17,16 @@ type CsoSession = {
   countedLines: number;
 };
 
-export default function CombineCsoPanel() {
+// One CSO Summary's card, opened: pick the CSO sessions to combine and see
+// them compared against the stock the summary locked when it was created.
+export default function CombineCsoPanel({ summary, onBack }: { summary: CsoSummary; onBack: () => void }) {
   const [sessions, setSessions] = useState<CsoSession[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Starts with the sessions last combined in this summary ticked.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(summary.opnameNumbers));
   const [loadingSessions, setLoadingSessions] = useState(true);
+  // The CSO list starts minimized when this summary already has sessions
+  // combined (reopening the card); open when nothing has been picked yet.
+  const [pickerOpen, setPickerOpen] = useState(summary.opnameNumbers.length === 0);
   const [combining, setCombining] = useState(false);
   const [result, setResult] = useState<CombineResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,17 +38,24 @@ export default function CombineCsoPanel() {
   );
 
   useEffect(() => {
-    refreshSessions();
+    openSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function refreshSessions() {
+  // Load the CSO sessions; if this summary was combined before, show that
+  // report straight away (sessions deleted since are left out).
+  async function openSummary() {
     setLoadingSessions(true);
     const res = await fetch("/api/stock-opname/combine");
-    if (res.ok) {
-      const data = await res.json();
-      setSessions(data.sessions);
-    }
+    const list: CsoSession[] = res.ok ? (await res.json()).sessions : [];
+    setSessions(list);
     setLoadingSessions(false);
+
+    const existing = new Set(list.map((s) => s.opnameNumber));
+    const previous = summary.opnameNumbers.filter((n) => existing.has(n));
+    setSelected(new Set(previous));
+    if (previous.length > 0) await runCombine(previous);
+    else setPickerOpen(true); // the saved sessions were all deleted: pick again
   }
 
   function toggle(opnameNumber: string) {
@@ -61,7 +75,7 @@ export default function CombineCsoPanel() {
     const res = await fetch("/api/stock-opname/combine", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ opnameNumbers }),
+      body: JSON.stringify({ opnameNumbers, summaryId: summary.id }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -71,19 +85,23 @@ export default function CombineCsoPanel() {
     return res.json();
   }
 
-  async function handleCombine() {
-    if (selected.size === 0) return;
+  async function runCombine(opnameNumbers: string[]) {
     setCombining(true);
     setError(null);
     setResult(null);
     setSelections({});
 
-    const report = await fetchReport(Array.from(selected));
+    const report = await fetchReport(opnameNumbers);
     setCombining(false);
     if (report) {
       setResult(report);
       setReportTab("locations");
     }
+  }
+
+  async function handleCombine() {
+    if (selected.size === 0) return;
+    await runCombine(Array.from(selected));
   }
 
   // After a K3 import or removal: the same sessions again, keeping the picks.
@@ -113,24 +131,79 @@ export default function CombineCsoPanel() {
 
   return (
     <div>
+      <div className="flex flex-wrap items-start justify-between gap-3 border border-zinc-800 rounded-lg px-4 py-3 mb-4 bg-zinc-900/30">
+        <div>
+          <div className="text-sm font-medium text-zinc-100">{summary.name}</div>
+          <div className="text-xs text-zinc-500 mt-0.5">
+            System stock locked {summary.createdAt}
+            {summary.createdBy ? ` by ${summary.createdBy}` : ""} · {summary.skus.toLocaleString()} SKUs ·{" "}
+            {summary.locations.toLocaleString()} locations · {fmtQty(summary.quantity)} ctn
+            {summary.loosePacks > 0 ? ` + ${summary.loosePacks.toLocaleString()} pk` : ""}
+          </div>
+        </div>
+        <button
+          onClick={onBack}
+          className="px-3 py-1.5 rounded-md border border-zinc-700 text-zinc-300 text-xs hover:bg-zinc-800 transition-colors"
+        >
+          ← All summaries
+        </button>
+      </div>
+
       <p className="text-xs text-zinc-500 mb-4">
         Select the individual CSO stock opname sessions that together cover the warehouse (e.g.{" "}
         <span className="font-mono">CSO-Budi-01</span>, <span className="font-mono">CSO-Siti-02</span>), then
-        combine them. Location Check compares each location&apos;s system SKU and quantity with what was counted
-        there. SKU Summary totals every SKU by location against the system&apos;s current stock, not just what was
-        counted. If two sessions counted the same location and got the same result, it&apos;s counted once, not
-        twice. If their results differ, the location is Under Review until you pick which session to use. Stock
-        is never changed here.
+        combine them. Location Check compares each location&apos;s system SKU and quantity (as locked above) with
+        what was counted there. SKU Summary totals every SKU by location against the locked stock, not just what
+        was counted. If two sessions counted the same location and got the same result, it&apos;s counted once,
+        not twice. If their results differ, the location is Under Review until you pick which session to use.
+        Stock is never changed here.
       </p>
 
       <div className="border border-zinc-800 rounded-lg overflow-hidden mb-4">
-        <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center justify-between">
-          <button onClick={toggleAll} className="text-xs text-amber-500 hover:text-amber-400">
-            {selected.size === sessions.length && sessions.length > 0 ? "Deselect all" : "Select all"}
+        <div
+          className={`px-4 py-2.5 flex items-center justify-between gap-3 ${pickerOpen ? "border-b border-zinc-800" : ""}`}
+        >
+          <button
+            type="button"
+            onClick={() => setPickerOpen((open) => !open)}
+            className="flex items-center gap-2 text-xs text-zinc-300 hover:text-zinc-100"
+            aria-expanded={pickerOpen}
+          >
+            <span className={`inline-block transition-transform ${pickerOpen ? "rotate-90" : ""}`}>▸</span>
+            CSO Sessions
           </button>
-          <span className="text-xs text-zinc-600">{selected.size} selected</span>
+          <div className="flex items-center gap-4">
+            {pickerOpen && (
+              <button onClick={toggleAll} className="text-xs text-amber-500 hover:text-amber-400">
+                {selected.size === sessions.length && sessions.length > 0 ? "Deselect all" : "Select all"}
+              </button>
+            )}
+            <span className="text-xs text-zinc-600">{selected.size} selected</span>
+            {!pickerOpen && (
+              <button
+                type="button"
+                onClick={() => setPickerOpen(true)}
+                className="text-xs text-amber-500 hover:text-amber-400"
+              >
+                Change
+              </button>
+            )}
+          </div>
         </div>
-        {loadingSessions ? (
+        {!pickerOpen ? (
+          // Minimized: just the sessions ticked.
+          selected.size > 0 && (
+            <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+              {Array.from(selected)
+                .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                .map((n) => (
+                  <span key={n} className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-zinc-800 text-amber-500">
+                    {n}
+                  </span>
+                ))}
+            </div>
+          )
+        ) : loadingSessions ? (
           <div className="px-4 py-6 text-center text-zinc-600 text-sm">Loading...</div>
         ) : sessions.length === 0 ? (
           <div className="px-4 py-6 text-center text-zinc-600 text-sm">
@@ -166,7 +239,7 @@ export default function CombineCsoPanel() {
         </button>
         {result && (
           <button
-            onClick={() => exportCombineExcel(result, rows, skuRows, excludedColumns)}
+            onClick={() => exportCombineExcel(result, rows, skuRows, excludedColumns, summary.name)}
             className="px-4 py-2 rounded-md border border-zinc-700 text-zinc-300 text-sm font-medium hover:bg-zinc-800 transition-colors"
           >
             Export to Excel

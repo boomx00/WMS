@@ -8,7 +8,8 @@ export function exportCombineExcel(
   result: CombineResponse,
   rows: ReportRow[],
   skuRows: SkuSummaryRow[],
-  excludedColumns: string[]
+  excludedColumns: string[],
+  summaryName?: string
 ) {
   // A packs location's quantities are loose packs: marked "(pk)".
   const packsColumns = new Set(result.columns.filter((c) => c.packs).map((c) => c.key));
@@ -49,5 +50,10 @@ export function exportCombineExcel(
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(locationSheet), "Location Check");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(skuSheet), "SKU Summary");
-  XLSX.writeFile(wb, `combine-cso-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  // Named after the CSO Summary when there is one (characters Windows doesn't
+  // allow in file names replaced).
+  const prefix = summaryName
+    ? summaryName.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 100) || "combine-cso"
+    : "combine-cso";
+  XLSX.writeFile(wb, `${prefix}-${new Date().toISOString().slice(0, 10)}.xlsx`);
 }

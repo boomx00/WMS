@@ -12,6 +12,8 @@ import {
   k3StockImports,
   k3StockImportSessions,
   k3StockLines,
+  csoSummaries,
+  csoSummaryStock,
 } from "@/db/schema";
 import { eq, inArray, ilike, sql, desc } from "drizzle-orm";
 import { isOpenPickArea } from "@/lib/locationRules";
@@ -104,11 +106,13 @@ const BASE_COLUMNS: ReportColumn[] = [
 const byCode = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
 
 // POST /api/stock-opname/combine
-// body: { opnameNumbers: string[] }
+// body: { opnameNumbers: string[], summaryId?: number }
 //
-// The data behind Combine & Compare's report. Compares against live
-// location_stock, and only K3 imports are stored by the page: stock is never
-// changed.
+// The data behind Combine & Compare's report. With a summaryId (a CSO
+// Summary), the system side is the stock that summary locked when it was
+// created (cso_summary_stock), and the chosen sessions are remembered on the
+// summary; without one it is live location_stock. Only K3 imports and the
+// summary's chosen sessions are stored by the page: stock is never changed.
 //
 //   locations: every rack, and every other location the selected sessions
 //   counted, with what the system has there and each session's count. The page
@@ -123,6 +127,27 @@ export async function POST(req: NextRequest) {
 
   if (opnameNumbers.length === 0) {
     return NextResponse.json({ error: "At least one opnameNumber is required" }, { status: 400 });
+  }
+
+  // The CSO Summary whose locked stock is the system side, if any.
+  let summary: { id: number; name: string; createdAt: string } | null = null;
+  if (body.summaryId !== undefined && body.summaryId !== null) {
+    const summaryId = Number(body.summaryId);
+    if (!Number.isInteger(summaryId) || summaryId <= 0) {
+      return NextResponse.json({ error: "Invalid summaryId" }, { status: 400 });
+    }
+    const [row] = await db
+      .select({
+        id: csoSummaries.id,
+        name: csoSummaries.name,
+        createdAt: sql<string>`to_char(${csoSummaries.createdAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta', 'YYYY-MM-DD HH24:MI')`,
+      })
+      .from(csoSummaries)
+      .where(eq(csoSummaries.id, summaryId));
+    if (!row) {
+      return NextResponse.json({ error: "CSO Summary not found" }, { status: 404 });
+    }
+    summary = row;
   }
 
   const [locationRows, lineRows, stockRows, itemRows, k3Links] = await Promise.all([
@@ -150,14 +175,24 @@ export async function POST(req: NextRequest) {
       .from(stockOpnameItems)
       .leftJoin(users, eq(stockOpnameItems.countedBy, users.id))
       .where(inArray(stockOpnameItems.opnameNumber, opnameNumbers)),
-    db
-      .select({
-        locationId: locationStock.locationId,
-        itemId: locationStock.itemId,
-        quantity: locationStock.quantity,
-        loosePacks: locationStock.loosePacks,
-      })
-      .from(locationStock),
+    summary
+      ? db
+          .select({
+            locationId: csoSummaryStock.locationId,
+            itemId: csoSummaryStock.itemId,
+            quantity: csoSummaryStock.quantity,
+            loosePacks: csoSummaryStock.loosePacks,
+          })
+          .from(csoSummaryStock)
+          .where(eq(csoSummaryStock.summaryId, summary.id))
+      : db
+          .select({
+            locationId: locationStock.locationId,
+            itemId: locationStock.itemId,
+            quantity: locationStock.quantity,
+            loosePacks: locationStock.loosePacks,
+          })
+          .from(locationStock),
     db.select({ id: items.id, sku: items.sku, name: items.name, packsPerCarton: items.cartonBagQty }).from(items),
     db
       .select({
@@ -260,7 +295,13 @@ export async function POST(req: NextRequest) {
   const allItemIds = new Set<number>([...systemByItem.keys(), ...k3ByItem.keys()]);
   for (const line of lineRows) if (line.itemId !== null) allItemIds.add(line.itemId);
 
+  // Opening the summary's card again starts with these sessions ticked.
+  if (summary) {
+    await db.update(csoSummaries).set({ opnameNumbers }).where(eq(csoSummaries.id, summary.id));
+  }
+
   return NextResponse.json({
+    summary,
     opnameNumbers,
     sessionCount: opnameNumbers.length,
     emptyConfirmations: lineRows.filter((l) => l.itemId === null).length,

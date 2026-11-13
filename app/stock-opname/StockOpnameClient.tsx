@@ -97,7 +97,7 @@ export default function StockOpnameClient({
         <StockOpnameSummaryPanel />
       ) : (
         <div>
-          <form onSubmit={handleCreate} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4 mb-8">
+          {/* <form onSubmit={handleCreate} className="border border-zinc-800 rounded-lg p-5 bg-zinc-900/30 space-y-4 mb-8">
         <div>
           <label className="block text-xs text-zinc-500 mb-1">Opname Number</label>
           <input
@@ -160,7 +160,7 @@ export default function StockOpnameClient({
 
         {error && <p className="text-xs text-red-400">{error}</p>}
         {success && <p className="text-xs text-emerald-400">{success}</p>}
-      </form>
+      </form> */}
 
       <div className="space-y-3">
         {sessions.length === 0 ? (

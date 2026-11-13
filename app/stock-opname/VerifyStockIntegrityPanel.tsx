@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import CombineCsoPanel from "./CombineCsoPanel";
+import CsoSummaryPanel from "./CsoSummaryPanel";
 import ExcelVerifyPanel from "./ExcelVerifyPanel";
 
 export default function VerifyStockIntegrityPanel() {
@@ -10,10 +10,10 @@ export default function VerifyStockIntegrityPanel() {
   return (
     <div>
       <div className="flex gap-2 mb-5">
-        <SubTabButton label="Combine CSO" active={subTab === "combine"} onClick={() => setSubTab("combine")} />
+        <SubTabButton label="CSO Summary" active={subTab === "combine"} onClick={() => setSubTab("combine")} />
         <SubTabButton label="Excel Upload" active={subTab === "excel"} onClick={() => setSubTab("excel")} />
       </div>
-      {subTab === "combine" ? <CombineCsoPanel /> : <ExcelVerifyPanel />}
+      {subTab === "combine" ? <CsoSummaryPanel /> : <ExcelVerifyPanel />}
     </div>
   );
 }

@@ -43,7 +43,23 @@ export type K3Info = {
   unmatched: { code: string; name: string | null; quantity: number }[];
 };
 
+// A CSO Summary: a stock opname activity whose system stock was locked when
+// it was created. createdAt is "YYYY-MM-DD HH:MM" (Jakarta time).
+export type CsoSummary = {
+  id: number;
+  name: string;
+  createdAt: string;
+  createdBy: string | null;
+  opnameNumbers: string[]; // the CSO sessions last combined in it
+  skus: number;
+  locations: number;
+  quantity: number; // cartons locked
+  loosePacks: number; // loose packs locked (packs locations)
+};
+
 export type CombineResponse = {
+  // The CSO Summary whose locked stock is the system side (null = live stock).
+  summary: { id: number; name: string; createdAt: string } | null;
   opnameNumbers: string[];
   sessionCount: number;
   emptyConfirmations: number;
