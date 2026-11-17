@@ -6,6 +6,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { getSession } from "@/lib/auth";
 import { getLocationByCode, type LocationWithRules } from "@/lib/locationRules";
 import { adjustLocationStock, adjustLoosePacks } from "@/lib/locationStock";
+import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 
 // Loose packs (Other Transactions → Packs).
 //
@@ -116,6 +117,10 @@ export async function GET(req: NextRequest) {
 //   goodPacks?,           // UNPACK only: packs kept (0 .. cartons × packs per carton)
 //   notes?
 // }
+//
+// The PDA (any session without client "web") may only REPACK — from the
+// Move menu — and only with the "Repack" PDA permission. Unpack stays
+// web-only.
 export async function POST(req: NextRequest) {
   const session = await getSession();
   if (!session) {
@@ -126,6 +131,13 @@ export async function POST(req: NextRequest) {
   const type = body?.type;
   if (type !== "UNPACK" && type !== "REPACK") {
     return NextResponse.json({ error: "type must be UNPACK or REPACK" }, { status: 400 });
+  }
+  if (session.client !== "web") {
+    if (type !== "REPACK") {
+      return NextResponse.json({ error: "Unpack is only available on the web" }, { status: 403 });
+    }
+    const denied = await denyUnlessPdaAllowed(session, "pda.repack");
+    if (denied) return denied;
   }
 
   const itemSku = sanitize(body.itemSku);

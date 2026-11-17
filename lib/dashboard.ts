@@ -10,17 +10,17 @@
 // rows) net out. SHIP rows of a deleted SO (no sales order / Tambahan left)
 // are left out: their stock was put back by DELETE_SO.
 //
-// Sales Orders — two kinds of SO, as they stood at the end of the office day:
+// Sales Orders — two kinds of SO:
 //   FINISHED     last shipping (truck leave, see lib/truckTimes.ts) falls
 //                inside the office day and the SO is COMPLETE the same way the
 //                Sales Orders page decides it: every line shipped in full and
 //                no active Tambahan. Time needed = first picking → last
 //                shipping.
-//   IN_PROGRESS  first picking was before the end of the office day, and the
-//                SO wasn't finished by then: it still isn't complete, or it
-//                shipped again (its own or a Tambahan's) after the day ended.
-//                Times and cartons are as at the end of the day (or now, for
-//                the running day); time needed = first picking → then.
+//   IN_PROGRESS  NOT tied to the office day: every SO that has started
+//                picking (its own PICKING) and isn't COMPLETE right now, so
+//                the same list shows on whichever day is open. Times and
+//                cartons are as they stand now; time needed = first picking
+//                → now.
 
 import { db } from "@/lib/db";
 import {
@@ -76,10 +76,10 @@ export type DashboardOrder = {
   status: OrderStatus;
   firstPick: string | null; // WIB "YYYY-MM-DD HH:MM:SS"
   lastShip: string | null; // WIB "YYYY-MM-DD HH:MM:SS"; null = nothing shipped yet
-  // FINISHED: last ship − first pick. IN_PROGRESS: first pick → end of the
-  // office day (or now, while it's running) — the time so far.
+  // FINISHED: last ship − first pick. IN_PROGRESS: first pick → now — the
+  // time so far.
   durationMs: number | null;
-  shipped: number; // cartons shipped against the SO's lines, as at the end of the day
+  shipped: number; // cartons shipped against the SO's lines
   ordered: number; // cartons on the SO's lines
 };
 
@@ -92,7 +92,9 @@ export type DashboardData = {
   isCurrent: boolean; // window still running → data is until now
   generatedAt: string; // WIB, when this was read
   movement: MovementRow[];
-  orders: DashboardOrder[]; // in progress (longest-running first), then finished (latest first)
+  // Every SO in progress now (longest-running first), whatever the day,
+  // then the day's finished ones (latest first).
+  orders: DashboardOrder[];
 };
 
 export async function getOfficeDayStartMinutes(): Promise<number> {
@@ -271,22 +273,11 @@ async function getMovement(inWindow: ReturnType<typeof and>): Promise<MovementRo
   ]);
 }
 
-// The office day's sales orders: FINISHED ones and IN_PROGRESS ones (see the
-// top of this file). from / to: the office day as UTC instants; startWall /
-// endWall: the same as WIB "YYYY-MM-DD HH:MM:SS". Start inclusive, end
-// exclusive.
-async function getOrders(
-  from: Date,
-  to: Date,
-  startWall: string,
-  endWall: string,
-  now: Date
-): Promise<DashboardOrder[]> {
+// The office day's FINISHED sales orders plus every IN_PROGRESS one (see
+// the top of this file). startWall / endWall: the office day as WIB
+// "YYYY-MM-DD HH:MM:SS", start inclusive, end exclusive.
+async function getOrders(startWall: string, endWall: string, now: Date): Promise<DashboardOrder[]> {
   const t = tambahanOrders;
-
-  // SOs that shipped (their own SHIP or a Tambahan's) after the day ended —
-  // so weren't finished at its end. Empty for the running day.
-  const shippedAfterDay = sql`(select distinct coalesce(${e.salesOrderId}, ${t.parentSalesOrderId}) from ${e} left join ${t} on ${e.tambahanOrderId} = ${t.id} where ${e.type} = 'SHIP' and ${e.quantity} > 0 and ${gte(e.createdAt, to)})`;
 
   // A line still short of its ordered quantity (shipped = OUTBOUND pallet
   // events, same as the Sales Orders page).
@@ -294,8 +285,8 @@ async function getOrders(
 
   const hasActiveTambahan = sql`exists (select 1 from ${t} where ${t.parentSalesOrderId} = ${salesOrders.id} and ${t.status} = 'ACTIVE')`;
 
-  // Picked (its own PICKING, not a Tambahan's) before the day ended.
-  const pickedBeforeEnd = sql`exists (select 1 from ${e} where ${e.salesOrderId} = ${salesOrders.id} and ${e.type} in ('PICKING', 'DEFAULT_PICKING') and ${e.quantity} > 0 and ${lt(e.createdAt, to)})`;
+  // Has started picking (its own PICKING, not a Tambahan's).
+  const hasStartedPicking = sql`exists (select 1 from ${e} where ${e.salesOrderId} = ${salesOrders.id} and ${e.type} in ('PICKING', 'DEFAULT_PICKING') and ${e.quantity} > 0)`;
 
   const [windowTimes, openRows] = await Promise.all([
     // SOs whose first pick or last ship is in the day (bounds inclusive);
@@ -306,7 +297,7 @@ async function getOrders(
       .select({ id: salesOrders.id })
       .from(salesOrders)
       .where(
-        sql`${pickedBeforeEnd} and (${hasUnshippedLine} or ${hasActiveTambahan} or ${salesOrders.id} in ${shippedAfterDay})`
+        sql`${hasStartedPicking} and (${hasUnshippedLine} or ${hasActiveTambahan})`
       ),
   ]);
 
@@ -316,7 +307,7 @@ async function getOrders(
   const ids = Array.from(new Set([...finishCandidates.map(([id]) => id), ...openRows.map((r) => r.id)]));
   if (ids.length === 0) return [];
 
-  const [orders, lines, shippedRows, activeTambahan, timesAtDayEnd] = await Promise.all([
+  const [orders, lines, shippedRows, activeTambahan, currentTimes] = await Promise.all([
     db
       .select({
         id: salesOrders.id,
@@ -337,14 +328,12 @@ async function getOrders(
       .from(salesOrderItems)
       .where(inArray(salesOrderItems.salesOrderId, ids)),
 
-    // Shipped per (SO, item): everything (decides COMPLETE, like the Sales
-    // Orders page) and what had shipped by the end of the day (shown).
+    // Shipped per (SO, item), same as the Sales Orders page.
     db
       .select({
         salesOrderId: palletEvents.salesOrderId,
         itemId: pallets.itemId,
         quantity: sql<number>`coalesce(sum(${palletEvents.quantity}), 0)`.mapWith(Number),
-        byDayEnd: sql<number>`coalesce(sum(${palletEvents.quantity}) filter (where ${lt(palletEvents.createdAt, to)}), 0)`.mapWith(Number),
       })
       .from(palletEvents)
       .innerJoin(pallets, eq(palletEvents.palletId, pallets.id))
@@ -356,12 +345,12 @@ async function getOrders(
       .from(t)
       .where(and(inArray(t.parentSalesOrderId, ids), eq(t.status, "ACTIVE"))),
 
-    // First pick / last ship as they stood at the end of the day.
-    getTruckTimes(db, ids, to),
+    // First pick / last ship as they stand now (for orders in progress).
+    getTruckTimes(db, ids),
   ]);
 
-  const shipped = new Map<string, { all: number; byDayEnd: number }>();
-  for (const r of shippedRows) shipped.set(`${r.salesOrderId}-${r.itemId}`, { all: r.quantity, byDayEnd: r.byDayEnd });
+  const shipped = new Map<string, number>();
+  for (const r of shippedRows) shipped.set(`${r.salesOrderId}-${r.itemId}`, r.quantity);
 
   const linesByOrder = new Map<number, typeof lines>();
   for (const l of lines) {
@@ -374,8 +363,6 @@ async function getOrders(
   const candidateTimes = new Map(finishCandidates);
   const openIds = new Set(openRows.map((r) => r.id));
 
-  // Time so far for an order in progress: up to now while the day runs.
-  const dayEndMs = Math.min(now.getTime(), to.getTime());
   const wibToMs = (wall: string) => Date.parse(`${wall.replace(" ", "T")}+07:00`);
 
   const result: DashboardOrder[] = [];
@@ -383,12 +370,12 @@ async function getOrders(
     const order = orderById.get(id);
     if (!order) continue;
     const orderLines = linesByOrder.get(id) ?? [];
-    const shippedOf = (itemId: number) => shipped.get(`${id}-${itemId}`) ?? { all: 0, byDayEnd: 0 };
+    const shippedOf = (itemId: number) => shipped.get(`${id}-${itemId}`) ?? 0;
 
     const complete =
       orderLines.length > 0 &&
       !openTambahan.has(id) &&
-      orderLines.every((l) => shippedOf(l.itemId).all >= l.quantity);
+      orderLines.every((l) => shippedOf(l.itemId) >= l.quantity);
     const finishedTimes = complete ? candidateTimes.get(id) : undefined;
 
     const type = order.typeName ? { name: order.typeName, numberPrefix: order.typePrefix } : null;
@@ -397,7 +384,7 @@ async function getOrders(
       document: formatSoDisplay(order.soNumber, type),
       typeName: order.typeName,
       ordered: orderLines.reduce((sum, l) => sum + l.quantity, 0),
-      shipped: orderLines.reduce((sum, l) => sum + shippedOf(l.itemId).byDayEnd, 0),
+      shipped: orderLines.reduce((sum, l) => sum + shippedOf(l.itemId), 0),
     };
 
     if (finishedTimes) {
@@ -411,14 +398,14 @@ async function getOrders(
     } else if (openIds.has(id)) {
       // (A window candidate that isn't COMPLETE is in openIds too — it has an
       // unshipped line or an active Tambahan.)
-      const tt = timesAtDayEnd.get(id) ?? NO_TRUCK_TIMES;
+      const tt = currentTimes.get(id) ?? NO_TRUCK_TIMES;
       if (!tt.truckEnterTime) continue; // no picking yet — not started
       result.push({
         ...common,
         status: "IN_PROGRESS",
         firstPick: tt.truckEnterTime,
         lastShip: tt.truckLeaveTime,
-        durationMs: Math.max(0, dayEndMs - wibToMs(tt.truckEnterTime)),
+        durationMs: Math.max(0, now.getTime() - wibToMs(tt.truckEnterTime)),
       });
     }
   }
@@ -455,7 +442,7 @@ export async function getDashboardData(requestedDate?: string | null): Promise<D
   const inWindow = and(gte(e.createdAt, win.from), lt(e.createdAt, win.to));
   const [movement, orders] = await Promise.all([
     getMovement(inWindow),
-    getOrders(win.from, win.to, `${base.windowStart}:00`, `${base.windowEnd}:00`, now),
+    getOrders(`${base.windowStart}:00`, `${base.windowEnd}:00`, now),
   ]);
 
   return { ...base, movement, orders };

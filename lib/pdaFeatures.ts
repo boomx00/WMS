@@ -27,6 +27,7 @@ export type PdaKey =
   | "pda.checkSo"
   | "pda.moveIn"
   | "pda.move"
+  | "pda.repack"
   | "pda.stockOpname";
 
 export type PdaFeature = {
@@ -70,6 +71,12 @@ export const PDA_FEATURES: PdaFeature[] = [
 
   { key: "pda.moveIn", menu: "MOVE", label: "Move Floor → Rack" },
   { key: "pda.move", menu: "MOVE", label: "Perpindahan lokasi", hint: "Any location to any location" },
+  {
+    key: "pda.repack",
+    menu: "MOVE",
+    label: "Repack",
+    hint: "Loose packs back into whole cartons (Other Transactions → Packs → Repack)",
+  },
 
   { key: "pda.stockOpname", menu: "STOCK_OPNAME", label: "Stock Opname counting" },
 ];

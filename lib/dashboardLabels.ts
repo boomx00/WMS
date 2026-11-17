@@ -56,7 +56,7 @@ export const DASHBOARD_LABELS = {
   // Sales Orders (in progress + finished)
   orders_title: "Sales Orders",
   orders_info:
-    "In Progress: picking has started but shipping wasn't finished by the end of this office day (or yet, for today). Finished: fully shipped, with the last shipping in this office day. Time needed runs from the first picking to the last shipping (including Tambahan shipments); for orders in progress it's the time so far.",
+    "In Progress: every sales order that has started picking and isn't completed yet, whichever office day is open. Finished: fully shipped, with the last shipping in this office day. Time needed runs from the first picking to the last shipping (including Tambahan shipments); for orders in progress it's the time so far.",
   summary_total: "Total",
   status_in_progress: "In Progress",
   status_finished: "Finished",
