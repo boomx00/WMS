@@ -7,6 +7,7 @@ import { denyUnlessAllowed } from "@/lib/pagePermissions";
 import { DEFAULT_LEDGER_START_AT } from "@/lib/ledger";
 import { DEFAULT_OFFICE_DAY_START_MINUTES, isValidOfficeDayStart } from "@/lib/officeDay";
 import { DEFAULT_STOCK_OPNAME_CYCLE, isValidStockOpnameCycle } from "@/lib/stockOpnameCycle";
+import { cleanBasis, cleanLookupFields, cleanMaxQty, cleanUnitLevels } from "@/lib/pdaRules";
 
 const BOOLEAN_KEYS = [
   "allowDefaultCodeTransactions",
@@ -18,6 +19,7 @@ const BOOLEAN_KEYS = [
   "allowNegativeRackStock",
   "markingEnabled",
   "operationsFrozen",
+  "pdaStrictMode",
 ] as const;
 
 const DEFAULTS = {
@@ -34,6 +36,7 @@ const DEFAULTS = {
   officeDayStartMinutes: DEFAULT_OFFICE_DAY_START_MINUTES,
   opnameCycleType: DEFAULT_STOCK_OPNAME_CYCLE.type,
   opnameCycleStartDay: DEFAULT_STOCK_OPNAME_CYCLE.startDay,
+  pdaStrictMode: false,
 };
 
 export async function GET() {
@@ -50,6 +53,12 @@ export async function GET() {
 //         office day starts (420 = 07:00)
 //       opnameCycleType: "WEEKLY" | "MONTHLY", opnameCycleStartDay: 1 (Monday) to 7
 //         (Sunday) when weekly, 1 to 31 when monthly
+//       Settings → PDA (lib/pdaRules.ts):
+//         pdaPickUnits / pdaShipUnits: non-empty subset of ["STORAGE", "PRIMARY"]
+//         pdaStrictMode: boolean
+//         pdaMaxPickQty / pdaMaxShipQty: whole number from 1, or null for no maximum
+//         pdaMaxPickBasis / pdaMaxShipBasis: "STORAGE" | "PRIMARY"
+//         itemLookupFields: non-empty subset of ["SKU", "LEGACY_SKU", "BARCODE"]
 export async function PATCH(req: Request) {
   const session = await getSession();
   if (!session) {
@@ -113,6 +122,44 @@ export async function PATCH(req: Request) {
     }
     updates.opnameCycleType = type;
     updates.opnameCycleStartDay = startDay;
+  }
+
+  for (const key of ["pdaPickUnits", "pdaShipUnits"] as const) {
+    if (body[key] !== undefined) {
+      const levels = cleanUnitLevels(body[key]);
+      if (!levels) {
+        return NextResponse.json({ error: "Choose at least one unit for the PDA to offer" }, { status: 400 });
+      }
+      updates[key] = levels;
+    }
+  }
+
+  for (const key of ["pdaMaxPickQty", "pdaMaxShipQty"] as const) {
+    if (body[key] !== undefined) {
+      const qty = cleanMaxQty(body[key]);
+      if (qty === undefined) {
+        return NextResponse.json({ error: "A maximum must be a whole number from 1, or empty for none" }, { status: 400 });
+      }
+      updates[key] = qty;
+    }
+  }
+
+  for (const key of ["pdaMaxPickBasis", "pdaMaxShipBasis"] as const) {
+    if (body[key] !== undefined) {
+      const basis = cleanBasis(body[key]);
+      if (!basis) {
+        return NextResponse.json({ error: `${key} must be STORAGE or PRIMARY` }, { status: 400 });
+      }
+      updates[key] = basis;
+    }
+  }
+
+  if (body.itemLookupFields !== undefined) {
+    const fields = cleanLookupFields(body.itemLookupFields);
+    if (!fields) {
+      return NextResponse.json({ error: "Choose at least one field a product code is matched against" }, { status: 400 });
+    }
+    updates.itemLookupFields = fields;
   }
 
   if (Object.keys(updates).length === 0) {

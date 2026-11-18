@@ -6,6 +6,7 @@ import StockColumnsSettings from "./StockColumnsSettings";
 import LocationStockCardsSettings, { LOCATION_STOCK_CARDS_LABELS } from "./LocationStockCardsSettings";
 import OpnameCycleSetting from "./OpnameCycleSetting";
 import OperationsFreezeSetting from "./OperationsFreezeSetting";
+import PdaRulesSettings, { PDA_RULES_LABELS, type PdaRulesInitial } from "./PdaRulesSettings";
 import DefaultLocationsSetting, { MarkingSetting, type WarehouseDefaults } from "./DefaultLocationsSetting";
 import { useCan } from "@/lib/AccessContext";
 import { usePageLabels } from "@/lib/hooks/usePageLabels";
@@ -30,13 +31,15 @@ export default function SettingsForm({
     operationsFrozen: boolean;
     officeDayStartMinutes: number; // minutes after midnight WIB, 420 = 07:00
     opnameCycle: StockOpnameCycle;
+    pdaRules: PdaRulesInitial;
   };
   warehouses: WarehouseDefaults[];
 }) {
   const [activeTab, setActiveTab] = useState<
-    "general" | "locations" | "stockColumns" | "locationStockCards" | "translations"
+    "general" | "locations" | "pda" | "stockColumns" | "locationStockCards" | "translations"
   >("general");
   const cardLabels = usePageLabels("settings_page", LOCATION_STOCK_CARDS_LABELS);
+  const pdaLabels = usePageLabels("settings_page", PDA_RULES_LABELS);
   const canEdit = useCan()("settings.edit");
 
   const [allowDefaultCode, setAllowDefaultCode] = useState(initial.allowDefaultCodeTransactions);
@@ -75,6 +78,7 @@ export default function SettingsForm({
           active={activeTab === "locations"}
           onClick={() => setActiveTab("locations")}
         />
+        <TabButton label={pdaLabels.pda_rules} active={activeTab === "pda"} onClick={() => setActiveTab("pda")} />
         <TabButton
           label={labels.stock_columns}
           active={activeTab === "stockColumns"}
@@ -94,6 +98,15 @@ export default function SettingsForm({
 
       {activeTab === "translations" ? (
         <PageLabelsSettings readOnly={!canEdit} />
+      ) : activeTab === "pda" ? (
+        <div className="space-y-4">
+          {!canEdit && (
+            <p className="text-xs text-zinc-500 border border-zinc-800 rounded-md px-3 py-2">
+              {labels.access_information}
+            </p>
+          )}
+          <PdaRulesSettings readOnly={!canEdit} initial={initial.pdaRules} />
+        </div>
       ) : activeTab === "locationStockCards" ? (
         <LocationStockCardsSettings readOnly={!canEdit} />
       ) : activeTab === "stockColumns" ? (

@@ -6,6 +6,7 @@ import { usePageLabels } from "@/lib/hooks/usePageLabels";
 import { shiftDate } from "@/lib/officeDay";
 import { formatTruckTime } from "@/app/sales-orders/components/helpers";
 import type { DashboardData, DashboardOrder, DetailLine, MovementRow, OrderStatus } from "@/lib/dashboard";
+import NetGrowthChart from "@/app/_dashboard/NetGrowthChart";
 
 // While the current office day is shown, the numbers refresh on their own.
 const AUTO_REFRESH_MS = 60_000;
@@ -275,6 +276,12 @@ export default function DashboardClient({ initial }: { initial: DashboardData })
                 .replace("{total}", fmt(data.orders.length))}
             />
           </div>
+
+          {/* Whole warehouse, not the search: running total of in − out over
+              the office days ending on the day shown. */}
+          <Panel title={labels.growth_title} info={labels.growth_info} className="mb-6">
+            <NetGrowthChart endDate={data.date} refreshKey={data.generatedAt} labels={labels} />
+          </Panel>
 
           <input
             type="text"
@@ -680,7 +687,7 @@ function Panel({
 }: {
   title: string;
   info?: string;
-  count: number;
+  count?: number; // left out → no count in the header (e.g. the growth chart)
   tone?: "in" | "out";
   extra?: React.ReactNode; // shown in the header, before the count
   className?: string;
@@ -699,7 +706,7 @@ function Panel({
         </h2>
         <div className="flex flex-wrap items-center gap-3">
           {extra}
-          <span className="text-xs text-zinc-500 font-mono">{count}</span>
+          {count !== undefined && <span className="text-xs text-zinc-500 font-mono">{count}</span>}
         </div>
       </div>
       <div className="max-h-[520px] overflow-auto rounded-b-lg">{children}</div>

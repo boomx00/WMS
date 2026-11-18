@@ -39,6 +39,9 @@ export const items = pgTable(
     sku: text("sku").notNull(),
     legacySku: text("legacy_sku"),
     cartonBarcode: text("carton_barcode"), // physical carton barcode — not unique, variants can share one
+    // More carton barcodes for the same SKU (e.g. a new print run with a
+    // different code). Matched exactly like cartonBarcode (lib/itemLookup.ts).
+    extraBarcodes: text("extra_barcodes").array().notNull().default(sql`'{}'::text[]`),
     name: text("name").notNull(),
     defaultCode: text("default_code").notNull(),
     // The product's category decides its units (db/schema/units.ts). The
@@ -64,6 +67,8 @@ export const items = pgTable(
     uniqueIndex("items_sku_idx").on(table.sku),
     uniqueIndex("items_legacy_sku_idx").on(table.legacySku),
     index("items_category_idx").on(table.categoryId),
+    index("items_carton_barcode_idx").on(table.cartonBarcode),
+    index("items_extra_barcodes_idx").using("gin", table.extraBarcodes),
   ]
 );
 

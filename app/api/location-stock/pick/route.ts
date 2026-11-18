@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { adjustLocationStock } from "@/lib/locationStock";
+import { checkPdaLimit } from "@/lib/pdaRules";
 import { getPickedForSoQuantity } from "@/lib/pickedForSo";
 import { allowsDefaultPicking, getLocationByCode, resolvePurposeLocation, isSingleSku } from "@/lib/locationRules";
 
@@ -66,6 +67,12 @@ export async function PATCH(req: NextRequest) {
   const [item] = await db.select().from(items).where(eq(items.sku, itemSku));
   if (!item) {
     return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+  }
+
+  // Strict mode (Settings → PDA): at most the set amount per pick.
+  const overLimit = await checkPdaLimit(db, "pick", item, quantity);
+  if (overLimit) {
+    return NextResponse.json({ error: overLimit }, { status: 409 });
   }
 
   let salesOrderId: number | null = null;

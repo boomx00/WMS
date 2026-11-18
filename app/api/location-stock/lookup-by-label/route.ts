@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { locationStock, items, salesOrders, salesOrderItems } from "@/db/schema";
-import { eq, and, or } from "drizzle-orm";
+import { locationStock, salesOrders, salesOrderItems } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
 import { normalizeLabel } from "@/lib/labelNormalize";
+import { resolveItemCode } from "@/lib/itemLookup";
+import { getOnePdaItemUnits } from "@/lib/pdaRules";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
 import { getMarkedAt, isMarkingEnabled } from "@/lib/stagingMarks";
 import { getUnclaimedQuantity } from "@/lib/unclaimedStock";
@@ -12,16 +14,15 @@ function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
 
-function extractSku(label: string): string | null {
-  const cleaned = label.replace(/^\*+/, "");
-  const parts = cleaned.split("*");
-  return parts[0]?.trim() || null;
-}
+export const dynamic = "force-dynamic";
 
-// GET /api/location-stock/lookup-by-label?label=...&soNumber=...&stagingLocationCode=...
+// GET /api/location-stock/lookup-by-label?label=...&soNumber=...&stagingLocationCode=...&expectedSku=...
 // Stock of the scanned item in one staging location (default: Settings →
 // General): what's unmarked (ecer) there and, with soNumber, how much is
 // marked for that SO there (= what can ship from there).
+// `label` can be a pallet label, a SKU or a carton barcode — which ones are
+// accepted is set in Settings → PDA (lib/itemLookup.ts). expectedSku picks
+// the right product when a shared barcode matches several.
 export async function GET(req: NextRequest) {
   const rawLabel = sanitize(req.nextUrl.searchParams.get("label") ?? "");
   const soNumber = sanitize(req.nextUrl.searchParams.get("soNumber") ?? "");
@@ -31,20 +32,11 @@ export async function GET(req: NextRequest) {
   }
 
   const label = await normalizeLabel(db, rawLabel);
-  const sku = extractSku(label);
-
-  if (!sku) {
-    return NextResponse.json({ error: "Couldn't parse a SKU" }, { status: 400 });
+  const found = await resolveItemCode(db, label, { expectedSku: req.nextUrl.searchParams.get("expectedSku") });
+  if (!found.ok) {
+    return NextResponse.json({ error: found.error }, { status: found.status });
   }
-
-  const [item] = await db
-    .select()
-    .from(items)
-    .where(or(eq(items.sku, sku), eq(items.legacySku, sku)));
-
-  if (!item) {
-    return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
-  }
+  const item = found.item;
 
   // Stock at the staging location chosen on the PDA (default: Settings → Locations & Marking)
   const staging = await resolvePurposeLocation(db, "staging", req.nextUrl.searchParams.get("stagingLocationCode"));
@@ -71,6 +63,7 @@ export async function GET(req: NextRequest) {
     totalInOutboundWh,
     unclaimedInOutboundWh: unclaimed,
     palletCartonQty: item.palletCartonQty,
+    units: await getOnePdaItemUnits(db, item.id),
   };
 
   if (soNumber) {

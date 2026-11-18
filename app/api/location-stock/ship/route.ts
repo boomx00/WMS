@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { locationStock, items, salesOrders, salesOrderItems, palletEvents, pallets, locationStockEvents } from "@/db/schema";
+import { locationStock, salesOrders, salesOrderItems, palletEvents, pallets, locationStockEvents } from "@/db/schema";
 import { db } from "@/lib/db";
-import { eq, and, or, sql } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { getSession } from "@/lib/auth";
 import { resolvePurposeLocation } from "@/lib/locationRules";
 import { denyUnlessPdaAllowed } from "@/lib/pdaPermissions";
 import { normalizeLabel } from "@/lib/labelNormalize";
+import { resolveItemCode } from "@/lib/itemLookup";
+import { checkPdaLimit } from "@/lib/pdaRules";
 import { adjustLocationStock } from "@/lib/locationStock";
 import { getShippedQuantity } from "@/lib/shippedQuantity";
 import { getMarkedAt, isMarkingEnabled } from "@/lib/stagingMarks";
@@ -13,16 +15,14 @@ function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
 }
 
-function extractSku(label: string): string | null {
-  const cleaned = label.replace(/^\*+/, "");
-  const parts = cleaned.split("*");
-  return parts[0]?.trim() || null;
-}
 
 
 
 // PATCH /api/location-stock/ship
-// body: { soNumber, label, quantity, stagingLocationCode? }
+// body: { soNumber, label, quantity, stagingLocationCode?, expectedSku? }
+// label = pallet label, SKU or carton barcode (Settings → PDA decides which);
+// expectedSku picks the right product when a shared barcode matches several.
+// Strict mode (Settings → PDA) caps the quantity of one ship.
 // stagingLocationCode = the staging location the stock ships from;
 // omitted = the default staging location (Settings → Locations & Marking).
 //
@@ -52,14 +52,17 @@ export async function PATCH(req: NextRequest) {
   }
 
   const label = await normalizeLabel(db, rawLabel);
-  const sku = extractSku(label);
-  if (!sku) {
-    return NextResponse.json({ error: "Couldn't parse a SKU" }, { status: 400 });
+  // A pallet label, SKU or carton barcode — whichever Settings → PDA accepts.
+  const found = await resolveItemCode(db, label, { expectedSku: sanitize(body.expectedSku ?? "") || null });
+  if (!found.ok) {
+    return NextResponse.json({ error: found.error }, { status: found.status });
   }
+  const item = found.item;
 
-  const [item] = await db.select().from(items).where(or(eq(items.sku, sku), eq(items.legacySku, sku)));
-  if (!item) {
-    return NextResponse.json({ error: "Unknown SKU" }, { status: 404 });
+  // Strict mode (Settings → PDA): at most the set amount per ship.
+  const overLimit = await checkPdaLimit(db, "ship", item, quantity);
+  if (overLimit) {
+    return NextResponse.json({ error: overLimit }, { status: 409 });
   }
 
 const [salesOrder] = await db.select().from(salesOrders).where(eq(salesOrders.soNumber, soNumber));

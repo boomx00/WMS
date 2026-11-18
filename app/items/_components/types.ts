@@ -5,6 +5,7 @@ export type Item = {
   sku: string;
   legacySku: string | null;
   cartonBarcode: string | null;
+  extraBarcodes: string[]; // more carton barcodes for the same SKU
   name: string;
   categoryId: number | null;
   cartonBagQty: number; // secondary units per primary (e.g. packs per carton)

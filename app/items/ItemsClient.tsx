@@ -58,7 +58,7 @@ export default function ItemsClient({
       if (words.length === 0) return true;
       const supplier = item.supplierId === null ? null : supplierName.get(item.supplierId);
       const category = item.categoryId === null ? null : categoryName.get(item.categoryId);
-      const haystack = [item.sku, item.legacySku, item.cartonBarcode, item.name, item.productType, item.brand, supplier, category, ...item.tags]
+      const haystack = [item.sku, item.legacySku, item.cartonBarcode, ...(item.extraBarcodes ?? []), item.name, item.productType, item.brand, supplier, category, ...item.tags]
         .map(lower)
         .join(" ");
       // Every word somewhere ("makuku xl" finds MAKUKU products tagged XL).

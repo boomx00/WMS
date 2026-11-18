@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { locationStock, items } from "@/db/schema";
 import { eq, and, gt } from "drizzle-orm";
 import { getLocationByCode } from "@/lib/locationRules";
+import { getPdaItemUnits } from "@/lib/pdaRules";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -37,6 +38,8 @@ export async function GET(req: NextRequest) {
     .from(locationStock)
     .innerJoin(items, eq(locationStock.itemId, items.id))
     .where(and(eq(locationStock.locationId, location.id), gt(locationStock.quantity, 0)));
+  // Each product's units for the PDA's quantity fields (Settings → PDA).
+  const unitMap = await getPdaItemUnits(db, rows.map((r) => r.itemId));
 
   return NextResponse.json({
     locationCode: location.code,
@@ -50,6 +53,6 @@ export async function GET(req: NextRequest) {
     countsInPacks: location.rules.countsInPacks,
     isReceiving: location.isReceiving,
     isStaging: location.isStaging,
-    stock: rows,
+    stock: rows.map((r) => ({ ...r, units: unitMap.get(r.itemId) ?? null })),
   });
 }

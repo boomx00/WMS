@@ -5,14 +5,16 @@ import { DEFAULT_OFFICE_DAY_START_MINUTES } from "@/lib/officeDay";
 import { cleanStockOpnameCycle } from "@/lib/stockOpnameCycle";
 import { getPurposeLocations } from "@/lib/locationRules";
 import { getWarehouses } from "@/lib/warehouses";
+import { getPdaRules } from "@/lib/pdaRules";
 import type { WarehouseDefaults } from "./DefaultLocationsSetting";
 import SettingsForm from "./SettingsForm";
 
 export const dynamic = "force-dynamic";
 
 async function getSettings() {
-  const [row] = await db.select().from(settings).limit(1);
+  const [[row], pdaRules] = await Promise.all([db.select().from(settings).limit(1), getPdaRules(db)]);
   return {
+    pdaRules,
     allowDefaultCodeTransactions: row?.allowDefaultCodeTransactions ?? true,
     automaticInbound: row?.automaticInbound ?? false,
     automaticInboundFromRack: row?.automaticInboundFromRack ?? false,

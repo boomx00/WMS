@@ -6,8 +6,11 @@ import { getSession, isSuperUser } from "@/lib/auth";
 import { cleanAttribute, cleanSupplierId, cleanTags } from "@/lib/itemAttributes";
 import { checkCategoryMove } from "@/lib/units";
 import { cleanId } from "@/lib/uom";
+import { cleanBarcodes } from "@/lib/itemLookup";
 
 // PATCH /api/items/:id — Manager only. Any subset of fields can be updated.
+// extraBarcodes: an array, or one string separated by commas / spaces / new
+// lines; replaces them all ("" clears).
 // categoryId: moving to a category with different primary / secondary units
 // is refused while the product holds stock (lib/units.ts checkCategoryMove).
 export async function PATCH(
@@ -38,6 +41,7 @@ export async function PATCH(
   if (legacySku !== undefined) updates.legacySku = legacySku && legacySku.trim() ? legacySku.trim() : null;
   if (cartonBarcode !== undefined)
     updates.cartonBarcode = cartonBarcode && cartonBarcode.trim() ? cartonBarcode.trim() : null;
+  if (body.extraBarcodes !== undefined) updates.extraBarcodes = cleanBarcodes(body.extraBarcodes);
   // Type / Brand: "" clears; tags: an array or "XL, 34+6" (replaces them all).
   if (productType !== undefined) updates.productType = cleanAttribute(productType);
   if (brand !== undefined) updates.brand = cleanAttribute(brand);

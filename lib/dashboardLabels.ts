@@ -53,6 +53,20 @@ export const DASHBOARD_LABELS = {
 
   card_orders_breakdown: "In progress {in_progress} · Total {total}",
 
+  // Net Stock Growth chart
+  growth_title: "Net Stock Growth",
+  growth_info:
+    "Inbound minus outbound for each office day (the same cartons as the Total Inbound and Total Outbound cards), and its running total over the days shown, counted from 0 on the first day. Above zero the warehouse took in more than it sent out; below zero it sent out more.",
+  growth_range: "{n}D",
+  growth_range_hint: "Last {n} office days, ending on the day shown",
+  growth_cumulative: "Cumulative",
+  growth_daily_net: "Daily net",
+  growth_inbound: "Inbound",
+  growth_outbound: "Outbound",
+  growth_net: "Net",
+  growth_empty: "No inbound or outbound in these days.",
+  growth_load_failed: "Failed to load the growth chart",
+
   // Sales Orders (in progress + finished)
   orders_title: "Sales Orders",
   orders_info:

@@ -5,6 +5,7 @@ import { getSession, isSuperUser } from "@/lib/auth";
 import { cleanAttribute, cleanSupplierId, cleanTags } from "@/lib/itemAttributes";
 import { getCategory } from "@/lib/units";
 import { cleanId, cleanPositiveInt } from "@/lib/uom";
+import { cleanBarcodes } from "@/lib/itemLookup";
 
 export async function GET() {
   const rows = await db.select().from(items).orderBy(items.sku);
@@ -13,7 +14,9 @@ export async function GET() {
 
 // POST /api/items — Manager only.
 // body: { sku, name, categoryId, cartonBagQty?, palletCartonQty?, legacySku?,
-//         cartonBarcode?, productType?, brand?, tags?, supplierId? }
+//         cartonBarcode?, extraBarcodes?, productType?, brand?, tags?, supplierId? }
+// extraBarcodes = more carton barcodes for this SKU: an array, or one string
+// separated by commas / spaces / new lines.
 // cartonBagQty    = secondary units per primary (e.g. packs per carton)
 // palletCartonQty = primary units per storage unit (e.g. cartons per pallet)
 // Either can be left out to take the category's default; both are 1 when
@@ -71,6 +74,7 @@ export async function POST(req: NextRequest) {
       defaultCode: `${sku}*default`,
       legacySku: legacySku && legacySku.trim() ? legacySku.trim() : null,
       cartonBarcode: cartonBarcode && cartonBarcode.trim() ? cartonBarcode.trim() : null,
+      extraBarcodes: cleanBarcodes(body.extraBarcodes),
       productType: cleanAttribute(productType),
       brand: cleanAttribute(brand),
       tags: cleanTags(tags),

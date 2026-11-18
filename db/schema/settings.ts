@@ -1,4 +1,5 @@
 import { pgTable, serial, text, integer, timestamp, boolean, unique } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // App-wide settings, the PDA app version, and per-page label overrides.
 
@@ -30,6 +31,25 @@ export const settings = pgTable("settings", {
   // Operations Freeze: while true, every API route that changes stock is
   // refused, for all roles, web and PDA (lib/operationsFreeze.ts).
   operationsFrozen: boolean("operations_frozen").notNull().default(false),
+  // PDA rules (Settings → PDA, lib/pdaRules.ts).
+  // Which units the PDA offers for typing a quantity when picking / shipping:
+  // "STORAGE" (the product's storage unit, e.g. Pallet) and / or "PRIMARY"
+  // (its primary unit, e.g. Carton). Unit names come from each product's
+  // category. A product with no storage unit always gets the primary unit.
+  pdaPickUnits: text("pda_pick_units").array().notNull().default(sql`'{STORAGE,PRIMARY}'::text[]`),
+  pdaShipUnits: text("pda_ship_units").array().notNull().default(sql`'{PRIMARY}'::text[]`),
+  // Strict mode: only while on are the per-activity maximums below enforced.
+  pdaStrictMode: boolean("pda_strict_mode").notNull().default(false),
+  // Most one pick / one ship may move, counted in pdaMax*Basis: "STORAGE"
+  // (e.g. 1 = one pallet = that product's cartons per pallet) or "PRIMARY"
+  // (e.g. 50 = 50 cartons). Null = no maximum.
+  pdaMaxPickQty: integer("pda_max_pick_qty"),
+  pdaMaxPickBasis: text("pda_max_pick_basis").notNull().default("STORAGE"),
+  pdaMaxShipQty: integer("pda_max_ship_qty"),
+  pdaMaxShipBasis: text("pda_max_ship_basis").notNull().default("STORAGE"),
+  // What a scanned / typed product code on the PDA is matched against:
+  // any of "SKU", "LEGACY_SKU", "BARCODE" (carton barcode + extra barcodes).
+  itemLookupFields: text("item_lookup_fields").array().notNull().default(sql`'{SKU,LEGACY_SKU,BARCODE}'::text[]`),
 });
 
 export const appVersion = pgTable("app_version", {

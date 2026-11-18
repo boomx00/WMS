@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { salesOrders, salesOrderItems, items, locationStockEvents } from "@/db/schema";
 import { eq, and, or, sql, inArray } from "drizzle-orm";
 import { getSoDisplayLookup } from "@/lib/salesOrderTypes";
+import { getPdaItemUnits } from "@/lib/pdaRules";
 
 function sanitize(input: string): string {
   return input.replace(/\0/g, "").trim();
@@ -54,6 +55,8 @@ export async function GET(req: NextRequest) {
     .groupBy(locationStockEvents.itemId);
 
   const pickedMap = new Map(pickedRows.map((r) => [r.itemId, r.picked]));
+  // Each product's units for the PDA's quantity fields (Settings → PDA).
+  const unitMap = await getPdaItemUnits(db, lines.map((l) => l.itemId));
 
   const result = lines.map((line) => {
     const picked = pickedMap.get(line.itemId) ?? 0;
@@ -61,6 +64,7 @@ export async function GET(req: NextRequest) {
       ...line,
       pickedQty: picked,
       remaining: line.orderedQty - picked,
+      units: unitMap.get(line.itemId) ?? null,
     };
   });
 

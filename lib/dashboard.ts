@@ -44,6 +44,7 @@ import {
   formatOfficeHour,
   formatWib,
   officeDayWindow,
+  shiftDate,
 } from "@/lib/officeDay";
 
 export type DetailLine = {
@@ -446,4 +447,80 @@ export async function getDashboardData(requestedDate?: string | null): Promise<D
   ]);
 
   return { ...base, movement, orders };
+}
+
+// ------------------------------------------------------------------
+// Net Stock Growth — inbound minus outbound per office day, plus the
+// running total over the days shown. Inbound / outbound are exactly the
+// Product Movement buckets above (Production + Other In, Sales Orders +
+// Other Out), so a day's bar matches that day's Total Inbound − Total
+// Outbound cards.
+// ------------------------------------------------------------------
+
+export const NET_GROWTH_MAX_DAYS = 366;
+
+export type NetGrowthPoint = {
+  date: string; // office day, YYYY-MM-DD
+  inbound: number;
+  outbound: number;
+  net: number; // inbound − outbound
+  cumulative: number; // running sum of net from the first day shown
+};
+
+export type NetGrowthData = {
+  from: string; // first office day shown
+  to: string; // last office day shown (the dashboard's day, never past today)
+  days: number;
+  officeHour: string; // "07:00"
+  points: NetGrowthPoint[]; // one per office day, oldest first, gaps filled with 0
+};
+
+export async function getNetGrowth(endDate: string | null | undefined, days: number): Promise<NetGrowthData> {
+  const startMinutes = await getOfficeDayStartMinutes();
+  const now = new Date();
+  const today = currentOfficeDate(startMinutes, now);
+  const to = endDate && endDate < today ? endDate : today;
+  const span = Math.min(Math.max(Math.trunc(days), 1), NET_GROWTH_MAX_DAYS);
+  const from = shiftDate(to, -(span - 1));
+
+  const rangeStart = officeDayWindow(from, startMinutes, now).from;
+  const rangeEnd = officeDayWindow(to, startMinutes, now).to;
+
+  // The office day an event belongs to: its WIB wall clock moved back by the
+  // office hour, so 04:00 still counts for the previous day. startMinutes is
+  // inlined (a validated integer from settings), not bound — the same
+  // expression is in GROUP BY, and Postgres only matches the two when they're
+  // textually identical (two bound params $1 / $4 would not match).
+  const minutes = sql.raw(String(Math.trunc(startMinutes)));
+  const officeDate = sql<string>`to_char(((${e.createdAt} AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Jakarta') - make_interval(mins => ${minutes}))::date, 'YYYY-MM-DD')`;
+
+  const isIn = sql`${e.type} in ('INBOUND', 'DEFAULT_INBOUND', 'OTHER_INBOUND')`;
+  // SHIP of a deleted SO (no sales order / Tambahan left) is left out, same
+  // as Product Movement: DELETE_SO already put that stock back.
+  const isOut = sql`((${e.type} = 'SHIP' and (${e.salesOrderId} is not null or ${e.tambahanOrderId} is not null)) or ${e.type} = 'OTHER_OUTBOUND')`;
+
+  const rows = await db
+    .select({
+      date: officeDate,
+      inbound: sql<number>`coalesce(sum(${e.quantity}) filter (where ${isIn}), 0)`.mapWith(Number),
+      outbound: sql<number>`coalesce(sum(${e.quantity}) filter (where ${isOut}), 0)`.mapWith(Number),
+    })
+    .from(e)
+    .where(and(gte(e.createdAt, rangeStart), lt(e.createdAt, rangeEnd), or(isIn, isOut)))
+    .groupBy(officeDate);
+
+  const byDate = new Map(rows.map((r) => [r.date, r]));
+  const points: NetGrowthPoint[] = [];
+  let cumulative = 0;
+  for (let i = 0; i < span; i++) {
+    const date = shiftDate(from, i);
+    const r = byDate.get(date);
+    const inbound = r?.inbound ?? 0;
+    const outbound = r?.outbound ?? 0;
+    const net = inbound - outbound;
+    cumulative += net;
+    points.push({ date, inbound, outbound, net, cumulative });
+  }
+
+  return { from, to, days: span, officeHour: formatOfficeHour(startMinutes), points };
 }

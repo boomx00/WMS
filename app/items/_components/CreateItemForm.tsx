@@ -11,6 +11,7 @@ export function CreateItemForm({ options }: { options: Options }) {
   const [sku, setSku] = useState("");
   const [legacySku, setLegacySku] = useState("");
   const [cartonBarcode, setCartonBarcode] = useState("");
+  const [extraBarcodes, setExtraBarcodes] = useState("");
   const [name, setName] = useState("");
   const [categoryId, setCategoryId] = useState(options.categories.length === 1 ? String(options.categories[0].id) : "");
   const [cartonBagQty, setCartonBagQty] = useState(
@@ -57,6 +58,7 @@ export function CreateItemForm({ options }: { options: Options }) {
         palletCartonQty: needsStorage ? Number(palletCartonQty) : undefined,
         legacySku: legacySku.trim() || undefined,
         cartonBarcode: cartonBarcode.trim() || undefined,
+        extraBarcodes,
         productType,
         brand,
         tags,
@@ -75,6 +77,7 @@ export function CreateItemForm({ options }: { options: Options }) {
     setSku("");
     setLegacySku("");
     setCartonBarcode("");
+    setExtraBarcodes("");
     setName("");
     // Category (and its quantities), type, brand and supplier stay filled
     // in: the next product is usually the same.
@@ -101,6 +104,17 @@ export function CreateItemForm({ options }: { options: Options }) {
           <label className="block text-xs text-zinc-500 mb-1">{primaryName} Barcode (optional)</label>
           <input type="text" value={cartonBarcode} onChange={(e) => setCartonBarcode(e.target.value)} className={input} />
         </div>
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-500 mb-1">More {primaryName} Barcodes (optional)</label>
+        <input
+          type="text"
+          value={extraBarcodes}
+          onChange={(e) => setExtraBarcodes(e.target.value)}
+          placeholder="Separated by commas, e.g. 8990052000405, 8990052000412"
+          className={inputClass}
+        />
       </div>
 
       <div>

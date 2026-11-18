@@ -117,6 +117,51 @@ export function ItemRow({
       )}
       <td className="px-4 py-3 font-mono text-zinc-400">
         <EditableCell field="cartonBarcode" displayValue={item.cartonBarcode ?? ""} />
+        {/* More carton barcodes for this SKU — the PDA matches them like the
+            main one (Settings → PDA → Product code accepts). */}
+        {editingField === "extraBarcodes" ? (
+          <div className="mt-1 space-y-1">
+            <textarea
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              autoFocus
+              rows={3}
+              placeholder="One per line, or separated by commas"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setEditingField(null);
+              }}
+              className="w-44 px-2 py-1 rounded bg-zinc-900 border border-amber-700 text-xs font-mono focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => save("extraBarcodes", value)}
+                disabled={saving}
+                className="text-xs text-amber-500 hover:underline"
+              >
+                {saving ? "..." : "Save"}
+              </button>
+              <button onClick={() => setEditingField(null)} className="text-xs text-zinc-500 hover:underline">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+            {(item.extraBarcodes ?? []).map((b) => (
+              <span key={b} className="px-1.5 py-0.5 rounded border border-zinc-800 text-[11px] text-zinc-500">
+                {b}
+              </span>
+            ))}
+            {isAdmin && (
+              <button
+                onClick={() => startEdit("extraBarcodes", (item.extraBarcodes ?? []).join("\n"))}
+                className="text-[11px] text-zinc-600 hover:text-amber-500"
+              >
+                {(item.extraBarcodes ?? []).length === 0 ? "+ barcode" : "edit"}
+              </button>
+            )}
+          </div>
+        )}
       </td>
       <td className="px-4 py-3">
         <EditableCell field="legacySku" displayValue={item.legacySku ?? ""} />
